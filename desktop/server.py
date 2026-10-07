@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Loopback companion server; one session drives the shared native C++ engine."""
+import argparse
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import subprocess
+import threading
+import time
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCK = threading.Lock()
+
+
+class NativeDevice:
+    def __init__(self, executable, runtime):
+        self.process = subprocess.Popen([str(executable), str(runtime)], stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, text=True, bufsize=1)
+
+    def request(self, command):
+        self.process.stdin.write(command + "\n")
+        self.process.stdin.flush()
+        line = self.process.stdout.readline()
+        if not line:
+            raise RuntimeError("Control engine stopped; restart the companion")
+        return json.loads(line)
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            self.process.wait(timeout=3)
+        self.process.stdin.close()
+        self.process.stdout.close()
+
+
+class SerialDevice:
+    """Same browser protocol over USB serial; BLE remains the host pointing path."""
+    def __init__(self, port):
+        import serial
+        self.serial = serial.Serial(port, 115200, timeout=.2, write_timeout=1)
+        self.sequence = 0
+
+    def request(self, command):
+        op = command.split()[0]
+        if op in ("corrupt", "record"):
+            raise ValueError("This action is available only for the native simulator")
+        if op == "step":
+            command = "status"
+        elif op in ("dwell", "scroll"):
+            command = op + (" on" if command.split()[1] == "1" else " off")
+        self.serial.reset_input_buffer()
+        self.sequence += 1
+        self.serial.write((f"@{self.sequence} {command}\n").encode())
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            line = self.serial.readline().decode(errors="replace").strip()
+            if line.startswith('{'):
+                data = json.loads(line)
+                if data.get("protocol") == 1 and data.get("requestId") == self.sequence:
+                    return data
+        raise RuntimeError("No telemetry from ESP32; check firmware, USB port and baud")
+
+    def close(self):
+        self.serial.close()
+
+
+def number(data, key, default, low, high):
+    value = float(data.get(key, default))
+    if not math.isfinite(value) or not low <= value <= high:
+        raise ValueError(f"Invalid {key}")
+    return value
+
+
+def command_for(data):
+    action = data.get("action", "status")
+    if action == "step":
+        count = int(number(data, "count", 5, 1, 50))
+        motion = [number(data, axis, 0, -1000, 1000) for axis in ("yaw", "pitch", "roll")]
+        flags = [int(bool(data.get(k, default))) for k, default in
+                 (("pressed", False), ("connected", True), ("automatic", True))]
+        fault = int(number(data, "fault", 0, 0, 6))
+        return "step " + " ".join(map(str, [count, *motion, *flags, fault]))
+    if action in ("status", "calibrate", "cancel", "resume", "pause", "generic", "load", "corrupt"):
+        return action
+    if action in ("dwell", "scroll"):
+        return f"{action} {int(bool(data.get('enabled')))}"
+    if action == "record":
+        return "record " + ("on" if data.get("enabled") else "off")
+    raise ValueError("Unknown action")
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(ROOT / "ui"), **kwargs)
+
+    def log_message(self, *args):
+        pass
+
+    def reply(self, code, data):
+        payload = json.dumps(data, allow_nan=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self):
+        # Refuse cross-origin mutation of this local control session.
+        origin = self.headers.get("Origin")
+        if origin and origin != f"http://{self.headers.get('Host')}":
+            self.reply(403, {"error": "Cross-origin request refused"})
+            return
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+            if not 0 < size <= 65536:
+                raise ValueError("Invalid request size")
+            data = json.loads(self.rfile.read(size))
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
+            with LOCK:
+                if self.path == "/api/trial":
+                    required = ("trial", "condition", "inputSource", "distance", "width", "movementTimeMs", "hit", "profile")
+                    if not isinstance(data, dict) or any(k not in data for k in required):
+                        raise ValueError("Incomplete trial")
+                    if data["inputSource"] not in ("SIMULATED", "HOST_POINTER"):
+                        raise ValueError("Unknown input source")
+                    for key in ("distance", "width", "movementTimeMs"):
+                        number(data, key, 0, .001, 1e8)
+                    encoded = json.dumps(data["profile"], sort_keys=True, allow_nan=False)
+                    data["profileHash"] = hashlib.sha256(encoded.encode()).hexdigest()
+                    data["softwareVersion"] = "0.1.0"
+                    with (self.server.runtime / "trials.jsonl").open("a") as out:
+                        out.write(json.dumps(data, allow_nan=False) + "\n")
+                    self.reply(200, {"ok": True, "profileHash": data["profileHash"]})
+                elif self.path == "/api/device":
+                    self.reply(200, self.server.device.request(command_for(data)))
+                else:
+                    self.reply(404, {"error": "Unknown endpoint"})
+        except (ValueError, TypeError, KeyError, RuntimeError, OSError) as error:
+            self.reply(400, {"error": str(error)})
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--runtime", type=Path, default=ROOT / "runtime")
+    parser.add_argument("--executable", type=Path, default=ROOT / "build" / "nodx_sim")
+    parser.add_argument("--serial", help="ESP32 USB serial port; needs pyserial==3.5")
+    args = parser.parse_args()
+    if not args.serial and not args.executable.exists():
+        parser.error("Build nodx_sim first; see BUILD_GUIDE.md")
+    args.runtime.mkdir(parents=True, exist_ok=True)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.runtime = args.runtime
+    server.device = SerialDevice(args.serial) if args.serial else NativeDevice(args.executable, args.runtime)
+    print(f"NodX companion: http://127.0.0.1:{args.port} ({'HARDWARE' if args.serial else 'SIMULATED'} device)", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.device.close()
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

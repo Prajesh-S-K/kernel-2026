@@ -1,0 +1,67 @@
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: <project>/build
+[ 12%] Building CXX object CMakeFiles/nodx.dir/core/src/engine.cpp.o
+[ 25%] Linking CXX static library libnodx.a
+[ 50%] Built target nodx
+[ 75%] Linking CXX executable nodx_sim
+[ 75%] Linking CXX executable nodx_tests
+[ 87%] Built target nodx_sim
+[100%] Built target nodx_tests
+Test project <project>/build
+    Start 1: control_invariants
+1/1 Test #1: control_invariants ...............   Passed    0.59 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.59 sec
+test_api_rejects_nonfinite_and_out_of_range (test_protocol.ProtocolTests.test_api_rejects_nonfinite_and_out_of_range) ... ok
+test_baseline_never_overwrites_saved_adaptive (test_protocol.ProtocolTests.test_baseline_never_overwrites_saved_adaptive) ... ok
+test_corrupt_both_slots_rejects_and_recalibration_repairs (test_protocol.ProtocolTests.test_corrupt_both_slots_rejects_and_recalibration_repairs) ... ok
+test_end_to_end_calibration_saved_reloaded_after_restart (test_protocol.ProtocolTests.test_end_to_end_calibration_saved_reloaded_after_restart) ... ok
+test_fault_recovery_needs_resume (test_protocol.ProtocolTests.test_fault_recovery_needs_resume) ... ok
+test_nan_replay_enters_safe_and_stays_ready_after_recovery (test_protocol.ProtocolTests.test_nan_replay_enters_safe_and_stays_ready_after_recovery) ... ok
+test_native_protocol_refuses_unknown_or_oversized_batch (test_protocol.ProtocolTests.test_native_protocol_refuses_unknown_or_oversized_batch) ... ok
+test_recording_can_be_replayed (test_protocol.ProtocolTests.test_recording_can_be_replayed) ... ok
+test_serial_adapter_correlates_ack_not_unsolicited_telemetry (test_protocol.ProtocolTests.test_serial_adapter_correlates_ack_not_unsolicited_telemetry) ... ok
+test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption (test_protocol.ProtocolTests.test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.445s
+
+OK
+TAP version 13
+# Subtest: empty trials never invent metrics
+ok 1 - empty trials never invent metrics
+  ---
+  duration_ms: 0.653542
+  ...
+# Subtest: misses affect accuracy and time but not nominal successful rate
+ok 2 - misses affect accuracy and time but not nominal successful rate
+  ---
+  duration_ms: 0.087667
+  ...
+# Subtest: aborted trials are retained raw but excluded from metrics
+ok 3 - aborted trials are retained raw but excluded from metrics
+  ---
+  duration_ms: 0.112959
+  ...
+# Subtest: aggregate uses summed ID over summed time, not average trial rate
+ok 4 - aggregate uses summed ID over summed time, not average trial rate
+  ---
+  duration_ms: 0.053208
+  ...
+# Subtest: CSV quotes nested profile and multiline text
+ok 5 - CSV quotes nested profile and multiline text
+  ---
+  duration_ms: 0.130875
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 64.850666

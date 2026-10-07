@@ -1,0 +1,37 @@
+PASS profile round trip has stable wire format
+PASS CRC rejects every single byte corruption
+PASS schema mismatch rejected even with correct CRC
+PASS profile rejects NaN thresholds invalid ranges
+PASS transactional save survives torn write
+PASS failed save and invalid candidate preserve profile
+PASS corrupt newest slot falls back to last valid
+PASS bounded generation refuses wrap
+PASS calibration noise raises deadzone
+PASS calibration compensates directional asymmetry
+PASS limited movement rejected without erasing prior profile
+PASS calibration rejects unstable rest and sparse samples
+PASS failed calibration storage preserves last profile
+PASS EMA bias correction and reset
+PASS deadzone suppresses rest but preserves beyond threshold
+PASS directional gain and acceleration are continuous
+PASS roll scroll suppresses pointer and can be disabled
+PASS switch debounce press hold release and bounce
+PASS dwell clicks once and needs meaningful movement
+PASS dwell cancels at 95 percent
+PASS switch and scroll cancel pending dwell
+PASS pause releases drag and requires switch release
+PASS NaN extreme disconnect stale and frozen timestamp fail stationary
+PASS sensor faults during calibration abort candidate
+PASS healthy recovery requires twenty samples then explicit resume
+PASS BLE loss stops output and reconnect never auto activates
+PASS failed HID notifications transition to safe
+PASS profile invalidation gates active output
+PASS safety clamps finite commands and rejects nonfinite
+PASS fractional HID movement accumulates and dwell pulse releases
+PASS axis permutation and sign validated
+PASS MPU register conversion handles signed raw readings
+PASS MPU missing ID never supplies valid motion
+PASS replay respects sample timestamps and EOF is invalid
+PASS clock wrap is safe but stalled/backward ticks are rejected
+PASS long simulation obeys bounds and never produces nonfinite
+36 passed, 0 failed

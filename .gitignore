@@ -1,0 +1,7 @@
+build/
+.pio/
+.venv/
+__pycache__/
+runtime/
+*.DS_Store
+artifacts/
