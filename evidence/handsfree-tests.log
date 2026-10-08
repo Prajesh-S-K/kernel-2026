@@ -114,4 +114,25 @@ PASS a slow onset (ramp) is treated as pointing and never opens a candidate
 PASS keyed pointing corpus: every candidate is rejected, bounded, and nothing executes
 PASS deliberate gestures still execute after pointing candidates were rejected
 PASS patterns that both start on roll leave yaw/pitch pointing completely untouched
-116 passed, 0 failed
+PASS button: boot released, control stays disabled until one debounced press
+PASS button: held at boot never enables; a release and a new press are required
+PASS button: press and release bounce produce exactly one toggle
+PASS button: a long hold toggles once, repeated presses toggle once each
+PASS button: a second press needs a stable release first
+PASS button: disable acts at the first press edge; a glitch can only disable, never enable
+PASS button: clearing the latch (fault) requires a release and a new press
+PASS button: pressed and latched are reported separately
+PASS button: boot released and boot held both start disabled and never resume
+PASS button: enabling needs the explicit resume gesture, then daily use works
+PASS button: the disabling press stops movement at once, without another sample
+PASS button: the disabling press stops scrolling at once
+PASS button: the disabling press cancels a dwell in progress, no click follows
+PASS button: the disabling press releases a drag at once and never re-presses it
+PASS button: failed neutral delivery keeps output inhibited and presses cannot bypass it
+PASS button: sensor fault recovery is not bypassed by presses; a new press is needed
+PASS button: an invalid stored configuration stays inhibited whatever the button does
+PASS button: a saved maintained-switch configuration keeps its meaning after reboot
+PASS button: records written before the button existed decode as maintained, byte for byte
+PASS button: changing the input kind at commit starts disabled again
+PASS button: an unconfigured enable input still inhibits and the button cannot be bypassed
+137 passed, 0 failed

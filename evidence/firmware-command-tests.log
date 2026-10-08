@@ -2,7 +2,7 @@ PASS boot banner printed
 PASS simulated input announced
 PASS status acknowledged
 PASS protocol stays 1
-PASS protocol revision 3
+PASS protocol revision 4
 PASS handsFree object present
 PASS no record boots as legacy compatibility
 PASS missing record reported as MISSING
@@ -14,6 +14,9 @@ PASS commit without trained gestures refused
 PASS commit with trailing text refused
 PASS unknown handsfree verb refused
 PASS switchless needs on/off
+PASS enable kind needs a value
+PASS unknown enable kind refused
+PASS enable kind trailing text refused
 PASS switchless trailing text refused
 PASS train without verb refused
 PASS unknown train verb refused
@@ -35,13 +38,15 @@ PASS CRLF line accepted
 PASS control character refused
 PASS switchless staged
 PASS switchless unstaged
+PASS maintained kind staged
+PASS button kind staged, stored kind unchanged until commit
 PASS burst of 8 commands all acknowledged
 PASS burst acknowledged in order
 PASS simulated build answers status
 PASS source labelled FIRMWARE_SIMULATED
-PASS simulated switch defaults ON
-PASS enable 0 turns the switch OFF
-PASS enable 1 turns the switch ON
+PASS enable input starts released
+PASS enable 1 presses the input
+PASS enable 0 releases the input
 PASS enable
 PASS enable 2
 PASS enable -1
@@ -102,37 +107,60 @@ PASS commit enables hands-free
 PASS commit converts the profile to dwell
 PASS config record saved
 PASS commit never resumes control
+PASS a new setup starts with the button kind, disabled
 PASS gesture accepted for playback
-PASS pause/resume gesture resumes control
+PASS resume gesture ignored while disabled
+PASS helper resume refused while disabled
+PASS one press latches permission
+PASS enabling never resumes control
+PASS button released
+PASS raw pressed state and latched permission are separate
+PASS gesture accepted for playback
+PASS explicit gesture resumes after enabling
 PASS gesture accepted for playback
 PASS drag gesture starts a drag
-PASS switch OFF accepted
-PASS switch OFF pauses at once
-PASS switch OFF releases the drag
-PASS switch ON accepted
-PASS switch ON never resumes
-PASS gesture accepted for playback
-PASS gesture resumes after switch ON
-PASS hands-free setup persisted across reboot
+PASS the disabling press pauses, releases the drag and clears the latch at once
+PASS holding the button toggled again
+PASS button released
+PASS button held for the reboot
+PASS hands-free setup and button kind persisted across reboot
+PASS a button held at boot enabled control
 PASS reboot never resumes control
+PASS button released after boot
+PASS release alone enabled control
+PASS new press after boot
+PASS button released
+PASS a new press after release enables, without resuming
 PASS gesture accepted for playback
-PASS gesture resumes after reboot
+PASS gesture resumes after reboot and press
 PASS sensor fault injected
-PASS sensor fault stops control
+PASS sensor fault stops control and drops the button permission
+PASS press during the fault
+PASS release during the fault
+PASS a button press bypassed the fault
 PASS sensor fault cleared
 PASS fault recovery never resumes control
+PASS helper pause
+PASS maintained kind staged
+PASS maintained kind committed; its switch is released so control is inhibited
+PASS maintained switch ON
+PASS maintained ON permits without a latch and without resuming
+PASS gesture accepted for playback
+PASS gesture resumes under the maintained switch
+PASS maintained OFF pauses at once
+PASS the maintained kind persisted across reboot
 PASS oversize record written
 PASS oversize record classified corrupt
 PASS corrupt record fails closed as CONFIG_INVALID
 PASS no control while the record is invalid
 PASS gesture accepted for playback
 PASS no gesture control while the record is invalid
-129 firmware command checks, 0 failed
+157 firmware command checks, 0 failed
 PASS boot banner printed
 PASS hardware build does not announce simulation
 PASS status acknowledged
 PASS protocol stays 1
-PASS protocol revision 3
+PASS protocol revision 4
 PASS handsFree object present
 PASS no record boots as legacy compatibility
 PASS missing record reported as MISSING
@@ -144,6 +172,9 @@ PASS commit without trained gestures refused
 PASS commit with trailing text refused
 PASS unknown handsfree verb refused
 PASS switchless needs on/off
+PASS enable kind needs a value
+PASS unknown enable kind refused
+PASS enable kind trailing text refused
 PASS switchless trailing text refused
 PASS train without verb refused
 PASS unknown train verb refused
@@ -165,6 +196,8 @@ PASS CRLF line accepted
 PASS control character refused
 PASS switchless staged
 PASS switchless unstaged
+PASS maintained kind staged
+PASS button kind staged, stored kind unchanged until commit
 PASS burst of 8 commands all acknowledged
 PASS burst acknowledged in order
 PASS hardware build is not labelled simulated
@@ -179,4 +212,4 @@ PASS refused commands changed nothing
 PASS no sensor, no control
 PASS resume refused without a profile or sensor
 PASS commit refused with nothing trained
-51 firmware command checks, 0 failed
+56 firmware command checks, 0 failed

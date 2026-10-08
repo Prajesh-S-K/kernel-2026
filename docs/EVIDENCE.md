@@ -49,7 +49,7 @@ behavior remain physical tests. Cross-compilation does not establish real-time h
 # Hands-free revision (unreleased) — evidence
 
 Verified on the committed branch `claude/hands-free-revision` (on top of `8454580`) in a clean clone under a neutral path.
-The logs below were produced from the commit `6881548`; the only later commit adds those logs. This revision is **software and simulation only**.
+The logs below were produced from the commit `f4be75f`; the only later commit adds those logs. This revision is **software and simulation only**.
 Nothing below establishes hardware behaviour, accidental-trigger rates, comfort, training burden or suitability.
 
 ## Checks
@@ -72,7 +72,7 @@ program is built twice from the same test file (simulated and hardware configura
 boot-banner check) once gives the 170 in the table. Some check names repeat (a helper used at several call sites), so
 the table counts executed checks, not unique strings. Its log: [firmware command tests](../evidence/firmware-command-tests.log).
 
-Firmware: `esp32s3` (774,509 B flash), `esp32s3-sim` (781,841 B) and `esp32s3-n16r8-bench` (778,189 B) all built;
+Firmware: `esp32s3` (775,465 B flash), `esp32s3-sim` (782,773 B) and `esp32s3-n16r8-bench` (779,145 B) all built;
 GPIO defaults remain disabled and `NODX_ENABLE`/`NODX_BUZZER` default to -1. Compilation is not hardware
 qualification, and the DIO/QIO image-header question from the N16R8 note remains open.
 
