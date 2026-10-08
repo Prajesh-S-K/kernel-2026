@@ -314,7 +314,9 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         "\"drag\":%s,\"demoMovementOnly\":%s,"
         "\"training\":{\"phase\":\"%s\",\"gesture\":\"%s\",\"accepted\":%u,\"required\":%u,"
         "\"rejects\":%u,\"validated\":%s,\"reason\":\"%s\"},"
-        "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\"}",
+        "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\","
+        "\"uncalDemo\":{\"active\":%s,\"present\":%s,\"permitted\":%s,\"blocked\":\"%s\","
+        "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f}}",
         s.mode, s.config, static_cast<unsigned long>(s.configId),
         s.switchPresent ? "true" : "false", s.switchOn ? "true" : "false",
         s.permitted ? "true" : "false", s.switchless ? "true" : "false",
@@ -327,7 +329,10 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.demoMovementOnly ? "true" : "false", s.trainPhase, s.trainGesture, s.trainAccepted,
         s.trainRequired, s.trainRejects, s.trainValidated ? "true" : "false", s.trainReason,
         s.staged[0] ? "true" : "false", s.staged[1] ? "true" : "false",
-        s.stored[0] ? "true" : "false", s.stored[1] ? "true" : "false", s.blocked);
+        s.stored[0] ? "true" : "false", s.stored[1] ? "true" : "false", s.blocked,
+        s.uncalActive ? "true" : "false", s.uncalPresent ? "true" : "false",
+        s.uncalPermitted ? "true" : "false", s.uncalBlocked, s.profileState, s.uncalGain,
+        s.uncalDeadzone, s.uncalMaxStep);
     return (written > 0 && size_t(written) < capacity) ? size_t(written) : 0;
 }
 } // namespace nodx

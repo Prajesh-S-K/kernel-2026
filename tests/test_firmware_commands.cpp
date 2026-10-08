@@ -428,13 +428,20 @@ void hardwareChecks() {
     expect(has(ack, "\"source\":\"HARDWARE\""), "hardware build is not labelled simulated");
     expect(!has(ack, "FIRMWARE_SIMULATED"), "no simulated label");
     // Hardware frames carry the raw sensor view; the whole frame must stay well inside the
-    // 2048-byte telemetry buffer, otherwise the firmware silently drops it.
+    // 3072-byte telemetry buffer, otherwise the firmware silently drops it.
     expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
            "hardware telemetry has the raw sensor block");
-    expect(ack.size() < 1700, "hardware telemetry frame leaves headroom in the 2048-byte buffer");
+    expect(ack.size() < 2300, "hardware telemetry frame leaves headroom in the 3072-byte buffer");
     std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
+    expect(has(ack, "\"axes\":{\"valid\":"), "hardware telemetry reports the active axis mapping");
+    expect(has(ack, "\"uncalDemo\":{\"active\":false"), "uncalibrated demo is off at boot");
+    expect(refused(send("handsfree uncal start")), "uncalibrated demo refused without a button");
+    expect(refused(send("handsfree uncal sideways")), "bad uncalibrated demo argument refused");
+    expect(refused(send("handsfree uncal start extra")), "trailing text refused");
+    expect(ok(send("handsfree uncal stop")), "stop is always accepted");
+    expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.
     for (const char* command :
          {"enable 1", "enable 0", "gesture nod2", "motion 0 0 0", "fault 0"}) {

@@ -99,6 +99,8 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
         trainer_.cancel();
     }
     state_ = SystemState::SafeState;
+    uncal_ = false; // a fault always ends the demo; restarting is explicit
+    uncalGate_.clearLatch();
     enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
@@ -109,6 +111,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
 }
 
 void System::stop(SystemState next, uint32_t now) {
+    uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
         trainer_.cancel();
     }
@@ -193,6 +196,7 @@ bool System::setProfile(const UserProfile& candidate, bool persist) {
     }
     profile_ = candidate;
     hasProfile_ = true;
+    profileInvalidated_ = false;
     state_ = SystemState::Ready;
     diagnostics_.faultCode = FaultCode::None;
     diagnostics_.reason = "valid profile; explicit resume required";
@@ -211,6 +215,7 @@ bool System::temporarySettings(bool dwellEnabled, bool scrollEnabled) {
 
 void System::invalidateProfile() {
     hasProfile_ = false;
+    profileInvalidated_ = true;
     enterSafe(FaultCode::Profile, lastTick_);
     emitStationary();
 }
@@ -257,6 +262,10 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (hasProfile_ && !profile_.valid()) {
         fault = FaultCode::Profile;
     }
+    // The demo profile is RAM-only and re-checked on every pass; it can never be silently invalid.
+    if (uncal_ && !uncalProfile_.valid()) {
+        fault = FaultCode::Profile;
+    }
     if (!transport_.connected()) {
         fault = FaultCode::Transport;
     }
@@ -275,17 +284,24 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     const bool recognizing = handsFree && updateGestures(mapped, now, inputsValid);
 
     // Defensive: control never stays active while the maintained switch inhibits it.
-    if (handsFree && state_ == SystemState::Active && !enable_.permitted()) {
+    if (handsFree && !uncal_ && state_ == SystemState::Active && !enable_.permitted()) {
         stop(SystemState::Paused, now);
         diagnostics_.reason = "control switch OFF; explicit resume required";
     }
-    const bool active = state_ == SystemState::Active && inputsValid && hasProfile_;
+    // The physical enable button also governs the uncalibrated demo (fail safe at the press edge).
+    if (uncal_ && !uncalGate_.permitted()) {
+        stopUncalibratedDemo("demo stopped: enable button pressed or not present");
+    }
+    const bool movementOnly = demoMovementOnly_ || uncal_;
+    const UserProfile& control = uncal_ ? uncalProfile_ : profile_;
+    const bool profileOk = uncal_ || (hasProfile_ && profile_.valid());
+    const bool active = state_ == SystemState::Active && inputsValid && (hasProfile_ || uncal_);
     Intent intent;
     diagnostics_.motion = {};
     // Invalid input/profile never reaches control math or telemetry numbers.
-    if (inputsValid && profile_.valid()) {
-        diagnostics_.motion = processor_.process(mapped, profile_, dtSeconds);
-        intent = adaptive_.apply(diagnostics_.motion, profile_, dtSeconds);
+    if (inputsValid && control.valid()) {
+        diagnostics_.motion = processor_.process(mapped, control, dtSeconds);
+        intent = adaptive_.apply(diagnostics_.motion, control, dtSeconds);
     }
     bool scrolling = intent.wheel != 0;
     if (recognizing) {
@@ -294,7 +310,7 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         scrolling = false;
     }
     intent = intent_.resolve(intent, active, scrolling);
-    if (demoMovementOnly_) {
+    if (movementOnly) {
         intent.wheel = 0; // scrolling still suppresses pointing, but nothing is scrolled
     }
     x_ += hid_.last.dx;
@@ -305,7 +321,7 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
     const bool outputAllowed = active && state_ == SystemState::Active;
     Selection selected;
-    if (demoMovementOnly_ && outputAllowed) {
+    if (movementOnly && outputAllowed) {
         selection_.interrupt(); // movement-only demo: no dwell click, no selection, no drag
     } else if (!handsFree || !outputAllowed) {
         selected = selection_.update(lastRaw_, x_, y_, outputAllowed, scrolling, profile_, now);
@@ -318,16 +334,16 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         selected.down = true;
     }
     Command command = interaction_.compose(intent, selected);
-    if (demoMovementOnly_) {
+    if (movementOnly) {
+        const float limit = uncal_ ? start::uncalDemoMaxStep : start::demoMaxStep;
         command.down = command.pulse = false;
         command.wheel = 0;
-        command.dx = std::clamp(command.dx, -start::demoMaxStep, start::demoMaxStep);
-        command.dy = std::clamp(command.dy, -start::demoMaxStep, start::demoMaxStep);
+        command.dx = std::clamp(command.dx, -limit, limit);
+        command.dy = std::clamp(command.dy, -limit, limit);
     }
     // REQUIRED FINAL ORDER: safety gate -> HID manager -> transport.
     const Command safeCommand =
-        safety_.gate(command, outputAllowed, inputsValid, hasProfile_ && profile_.valid(),
-                     transport_.connected());
+        safety_.gate(command, outputAllowed, inputsValid, profileOk, transport_.connected());
     if (!outputAllowed || recognizing) {
         hid_.reset(); // no fractional movement survives a suppressed or inactive period
     }
@@ -396,10 +412,16 @@ const char* System::activationBlocker() const {
 
 void System::configureEnableInput(bool present) {
     enablePresent_ = present;
+    uncalGate_.configure(present, false, EnableKind::Momentary);
     enable_.configure(present, config_.switchlessQualified, config_.enableKind);
 }
 
 void System::setControlSwitch(bool active, uint32_t now) {
+    uncalGate_.update(active, now);
+    if (uncal_ && !uncalGate_.permitted()) {
+        // Disable at the press edge: release now, without waiting for another sensor sample.
+        stopUncalibratedDemo("demo stopped by the enable button; explicit restart required");
+    }
     const bool before = enable_.permitted();
     enable_.update(active, now);
     if (mode_ != InteractionMode::HandsFree || !before || enable_.permitted()) {
@@ -639,6 +661,91 @@ bool System::setDemoMovementOnly(bool on) {
     return true;
 }
 
+ProfileState System::profileState() const {
+    if (hasProfile_) {
+        return ProfileState::Valid;
+    }
+    // A stored record that fails to decode (or was invalidated at run time) stays CORRUPT; neither
+    // the demo nor calibration-free control ever repairs or accepts it.
+    return profileInvalidated_ || repository_.state() == ProfileState::Corrupt
+               ? ProfileState::Corrupt
+               : ProfileState::Missing;
+}
+
+static UserProfile uncalibratedDemoProfile() {
+    UserProfile demo; // bias 0: no rest measurement exists, so the deadzone must cover idle bias
+    demo.deadzone = {start::uncalDemoDeadzone, start::uncalDemoDeadzone};
+    demo.gain = {start::uncalDemoGain, start::uncalDemoGain, start::uncalDemoGain,
+                 start::uncalDemoGain};
+    demo.alpha = start::uncalDemoAlpha;
+    demo.dwellEnabled = false;
+    demo.scrollEnabled = false;
+    return demo;
+}
+
+const char* System::uncalibratedDemoBlocker() const {
+    if (uncal_ || state_ == SystemState::Active) {
+        return "control is already active";
+    }
+    if (state_ == SystemState::Calibrating) {
+        return "calibration in progress";
+    }
+    if (state_ == SystemState::Training) {
+        return "gesture training in progress";
+    }
+    if (state_ == SystemState::SafeState) {
+        return "safe state: wait for the fault to clear";
+    }
+    if (!axes.valid()) {
+        return "axis mapping invalid";
+    }
+    if (!transport_.connected()) {
+        return "BLE link unavailable";
+    }
+    if (healthyChecks_ < start::recoverySamples) {
+        return "waiting for healthy sensor samples";
+    }
+    if (!uncalGate_.present()) {
+        return "enable button not present";
+    }
+    if (!uncalGate_.permitted()) {
+        return "press the enable button first";
+    }
+    if (!uncalibratedDemoProfile().valid()) {
+        return "demo configuration invalid";
+    }
+    return nullptr;
+}
+
+bool System::startUncalibratedDemo(uint32_t now) {
+    if (const char* blocker = uncalibratedDemoBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    uncalProfile_ = uncalibratedDemoProfile();
+    if (!emitStationary()) {
+        enterSafe(FaultCode::Transport, now);
+        return false;
+    }
+    resetInteraction(now);
+    state_ = SystemState::Active;
+    uncal_ = true; // after resetInteraction(); never persisted, never reported as calibration
+    diagnostics_.faultCode = FaultCode::None;
+    diagnostics_.reason = "uncalibrated demo active; movement only";
+    return true;
+}
+
+void System::stopUncalibratedDemo(const char* reason) {
+    if (!uncal_) {
+        return;
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ != SystemState::SafeState) {
+        diagnostics_.reason = reason;
+    }
+    feedback_.update(state_, lastTick_);
+}
+
 HandsFreeStatus System::handsFreeStatus() const {
     HandsFreeStatus s;
     s.mode = name(mode_);
@@ -680,6 +787,16 @@ HandsFreeStatus System::handsFreeStatus() const {
     }
     const char* blocker = activationBlocker();
     s.blocked = blocker ? blocker : "";
+    const char* uncalBlocker = uncalibratedDemoBlocker();
+    s.uncalActive = uncal_;
+    s.uncalPresent = uncalGate_.present();
+    s.uncalPermitted = uncalGate_.permitted();
+    s.uncalBlocked = uncal_ ? "" : (uncalBlocker ? uncalBlocker : "");
+    s.profileState = name(profileState());
+    const UserProfile shown = uncalibratedDemoProfile();
+    s.uncalGain = shown.gain[0];
+    s.uncalDeadzone = shown.deadzone[0];
+    s.uncalMaxStep = start::uncalDemoMaxStep;
     return s;
 }
 } // namespace nodx

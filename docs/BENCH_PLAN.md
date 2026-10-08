@@ -197,3 +197,38 @@ validation, version-string consistency (separate tasks). V1 hardware readiness i
 `summary.json` from `scripts/bench_analyze.py`. Analyse an existing log without a port:
 `python3 scripts/bench_log.py --analyze <raw.log>`. `bench_log.py` needs `--port` explicitly, only sends the
 allow-listed diagnostic commands, never flashes and never guesses a port.
+
+## Uncalibrated pointer demo (temporary bench aid)
+
+Purpose: show the real sensor moving the Mac pointer while calibration is missing or FAILED. It is not a
+calibration, saves nothing and never reports a profile. Start values are in `docs/PARAMETERS.md`.
+
+* Start: companion, Setup page, "Start uncalibrated pointer demo" (hardware device only). Press the enable
+  button first; the demo has its own momentary latch (disabled at every boot, held-at-boot ignored,
+  cleared by every fault). Starting needs a healthy sensor (20 good samples), a valid axis mapping,
+  an unfaulted BLE link and no calibration, training or active control in progress.
+* Real sensor -> AxisTransform -> filtering -> bounded output -> SafetyManager -> HIDManager. Clicks,
+  dwell, drag and wheel are removed; pointer steps are at most 4 px per report.
+* Stop: "Stop demo" (banner and panel), the enable button (at the press edge, no sample needed),
+  starting a calibration, pause, any fault (sensor, mapping, timing, calculation), BLE disconnect or
+  delivery failure. After any stop the demo stays off until started again; reconnecting or rebooting
+  never starts it. Pause-on-focus-loss is suspended only while this demo runs, so the pointer can be
+  watched in another window.
+* A corrupt saved profile stays reported as CORRUPT (`profileState`); the demo uses its own RAM profile
+  and never repairs, replaces or accepts the record. It uses no NVS writes.
+* Banner text while active: "UNCALIBRATED DEMO — LIVE SENSOR". The Performance Lab refuses to start
+  while it is active, so it cannot enter a comparison.
+
+Pointer direction for the measured bench mounting (USB end = back; axis mapping measured with
+`scripts/bench_axes.py`, not inferred from the sensor identity). The mapping the firmware actually uses is
+shown on the panel from the `axes` telemetry (gyro axes 2,0,1 signs +,+,+ for the bench build):
+
+| Board motion | Pointer |
+| --- | --- |
+| Turn left (yaw rate negative) | left |
+| Turn right | right |
+| Tilt front end up (pitch rate negative) | up |
+| Tilt front end down | down |
+| Sideways roll | nothing (no scrolling) |
+
+A different mounting needs a new measured mapping, never an inferred one.

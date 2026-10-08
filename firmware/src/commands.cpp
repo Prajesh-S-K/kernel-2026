@@ -112,6 +112,14 @@ void command(const std::string& line, uint32_t now, bool truncated) {
             input >> value;
             ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
                  system.setDemoMovementOnly(value == "on");
+        } else if (verb == "uncal") {
+            input >> value;
+            ok = (value == "start" || value == "stop") && (input >> std::ws).eof();
+            if (ok && value == "start") {
+                ok = system.startUncalibratedDemo(now);
+            } else if (ok) {
+                system.stopUncalibratedDemo("demo stopped by the user; explicit restart required");
+            }
         } else if (verb == "enable") {
             input >> value;
             ok = (value == "maintained" || value == "momentary") && (input >> std::ws).eof();

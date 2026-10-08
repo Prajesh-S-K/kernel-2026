@@ -5,7 +5,7 @@
 #include <cstring>
 
 namespace {
-constexpr size_t telemetryBytes = 2048;
+constexpr size_t telemetryBytes = 3072; // an oversize frame is dropped, so keep real headroom
 constexpr size_t transmitBudgetBytes = 64;
 struct Frame {
     char data[telemetryBytes]{};
@@ -71,7 +71,7 @@ void transmitTelemetry() {
     }
 }
 void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
-    char buffer[2048];
+    static char buffer[telemetryBytes]; // static: keeps the loop task stack small
     size_t used = 0;
     auto& s = *systemEngine;
 #ifdef NODX_SIMULATED
@@ -122,6 +122,13 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            (unsigned long)(snap.seen ? uint32_t(now - snap.lastAtMs) : 0), snap.last.gyro[0],
            snap.last.gyro[1], snap.last.gyro[2], snap.last.accel[0], snap.last.accel[1],
            snap.last.accel[2], snap.angle[0], snap.angle[1], snap.angle[2]);
+    const auto& map = s.axes;
+    append(buffer, sizeof(buffer), used,
+           ",\"axes\":{\"valid\":%s,\"gyro\":[%u,%u,%u],\"gyroSigns\":[%.0f,%.0f,%.0f],"
+           "\"accel\":[%u,%u,%u],\"accelSigns\":[%.0f,%.0f,%.0f]}",
+           map.valid() ? "true" : "false", map.axes[0], map.axes[1], map.axes[2], map.signs[0],
+           map.signs[1], map.signs[2], map.accelAxes[0], map.accelAxes[1], map.accelAxes[2],
+           map.accelSigns[0], map.accelSigns[1], map.accelSigns[2]);
 #endif
     append(buffer, sizeof(buffer), used, "}\n");
     if (used >= sizeof(buffer)) {

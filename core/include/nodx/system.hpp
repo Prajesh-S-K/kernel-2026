@@ -79,6 +79,17 @@ public:
     bool demoMovementOnly() const {
         return demoMovementOnly_;
     }
+    // Temporary UNCALIBRATED pointer demo: real sensor, AxisTransform, filtering, output bounds,
+    // SafetyManager -> HIDManager and the physical enable button, but a validated RAM-only demo
+    // profile instead of a user profile. Movement only. Never saved, never a calibration, never
+    // started by a connection or a reboot; any stop needs an explicit restart.
+    bool startUncalibratedDemo(uint32_t now);
+    void stopUncalibratedDemo(const char* reason);
+    bool uncalibratedDemo() const {
+        return uncal_;
+    }
+    const char* uncalibratedDemoBlocker() const; // nullptr when a start would be accepted
+    ProfileState profileState() const;
     HandsFreeStatus handsFreeStatus() const;
     const char* activationBlocker() const; // nullptr when resume would be allowed
 
@@ -127,6 +138,10 @@ private:
     EnableKind stagedKind_ = EnableKind::Momentary; // a new setup assumes the push button
     bool dragging_ = false;
     bool demoMovementOnly_ = false;
+    bool uncal_ = false;
+    bool profileInvalidated_ = false;
+    UserProfile uncalProfile_;
+    EnableGate uncalGate_; // always the momentary button; independent of the hands-free record
     uint32_t refused_ = 0;
 
     void enterSafe(FaultCode fault, uint32_t now);

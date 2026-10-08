@@ -2507,6 +2507,319 @@ int main() {
         require(std::strstr(buffer, "\"demoMovementOnly\":true"), "on");
     });
 
+    // ------------------------------------------------ M: temporary UNCALIBRATED pointer demo
+    // Real sensor path, validated RAM-only demo profile, physical enable button, movement only.
+    // Missing/failed calibration alone is bypassed; every other fault still stops output.
+    auto uncalRig = [](bool saveProfile = false) {
+        HF h(saveProfile, EnableKind::Momentary);
+        h.sw = false;
+        h.quiet(400); // healthy samples; the button has not been pressed
+        return h;
+    };
+    auto uncalStart = [](HF& h) {
+        h.click(); // one press latches the permission
+        require(h.s().handsFreeStatus().uncalPermitted, "button did not permit the demo");
+        require(h.s().startUncalibratedDemo(h.now), "demo start refused");
+        h.quiet(300);
+    };
+    auto movedSince = [](HF& h, size_t mark) {
+        float dx = 0, dy = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            dx += h.transport.reports[i].dx;
+            dy += h.transport.reports[i].dy;
+        }
+        return std::array<float, 2>{dx, dy};
+    };
+    auto onlyMovement = [](HF& h, size_t mark) {
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            require(!r.down && r.wheel == 0, "a button or wheel report in the uncalibrated demo");
+        }
+    };
+    test("uncal demo: missing profile, no gestures: starts only after the button and a start",
+         [=] {
+             HF h = uncalRig();
+             require(h.s().profileState() == ProfileState::Missing, "profile state");
+             require(!h.s().startUncalibratedDemo(h.now), "started before the button");
+             require(std::string(h.s().diagnostics.reason) == "press the enable button first",
+                     "blocker reason");
+             h.click();
+             h.quiet(300);
+             require(h.s().state == SystemState::CalibrationRequired && !h.s().uncalibratedDemo(),
+                     "the button alone started the demo");
+             require(!h.s().resume(), "normal resume still needs a calibrated profile");
+             require(h.s().startUncalibratedDemo(h.now), "explicit start refused");
+             require(h.s().uncalibratedDemo() && h.s().state == SystemState::Active, "active");
+             require(!h.s().hasProfile && h.s().calibration.phase == CalPhase::Idle,
+                     "the demo must not report a profile or a calibration");
+             require(h.profileStorage.read(0).empty() && h.profileStorage.read(1).empty() &&
+                         h.configStorage.slots[0].empty() && h.configStorage.slots[1].empty(),
+                     "the demo wrote storage");
+         });
+    test("uncal demo: after a FAILED calibration the failure stays reported", [=] {
+        HF h = uncalRig();
+        h.s().calibrate(h.now);
+        h.run(hold(0, 40, 4000)); // rest phase moved: 'rest too unstable' / insufficient
+        for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+            h.run(hold(0, 40, 100));
+        }
+        require(h.s().calibration.phase == CalPhase::Failed, "precondition: calibration failed");
+        h.quiet(400);
+        h.click();
+        h.quiet(100);
+        require(h.s().startUncalibratedDemo(h.now), "demo after failed calibration");
+        h.quiet(300);
+        require(h.s().calibration.phase == CalPhase::Failed && !h.s().hasProfile,
+                "the demo changed the calibration result");
+    });
+    test("uncal demo: a corrupt saved profile stays corrupt and is never repaired", [=] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        require(h.repo.save(UserProfile{}), "save");
+        h.profileStorage.slots[0][20] ^= 0x55;
+        h.profileStorage.slots[1] = h.profileStorage.slots[0];
+        const auto slot0 = h.profileStorage.slots[0], slot1 = h.profileStorage.slots[1];
+        h.boot();
+        h.quiet(400);
+        require(h.s().profileState() == ProfileState::Corrupt && !h.s().hasProfile, "corrupt");
+        uncalStart(h);
+        h.run(hold(0, 60, 500));
+        require(h.s().uncalibratedDemo(), "demo runs without touching the record");
+        require(h.s().profileState() == ProfileState::Corrupt, "corruption silently accepted");
+        h.s().stopUncalibratedDemo("test");
+        require(h.s().profileState() == ProfileState::Corrupt && !h.s().hasProfile,
+                "corruption repaired");
+        require(h.profileStorage.slots[0] == slot0 && h.profileStorage.slots[1] == slot1,
+                "corrupt record rewritten");
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"profileState\":\"CORRUPT\""), "reported as corrupt");
+    });
+    test("uncal demo: real sensor movement controls the pointer in all four directions",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             struct Case {
+                 unsigned axis;
+                 float rate;
+                 int dx, dy;
+             };
+             for (const Case c : {Case{0, 60, 1, 0}, Case{0, -60, -1, 0}, Case{1, 60, 0, 1},
+                                  Case{1, -60, 0, -1}}) {
+                 h.quiet(600);
+                 const size_t mark = h.transport.reports.size();
+                 h.run(hold(c.axis, c.rate, 400));
+                 const auto moved = movedSince(h, mark);
+                 require(moved[0] * c.dx > 5 || c.dx == 0, "wrong or no horizontal movement");
+                 require(moved[1] * c.dy > 5 || c.dy == 0, "wrong or no vertical movement");
+                 require(std::abs(moved[c.dx ? 1 : 0]) < 2, "crosstalk into the other axis");
+                 onlyMovement(h, mark);
+             }
+         });
+    test("uncal demo: steps stay below the demo bound and below the normal bound", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 200, 1500)); // violent rotation
+        float biggest = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            biggest = std::max({biggest, std::abs(float(h.transport.reports[i].dx)),
+                                std::abs(float(h.transport.reports[i].dy))});
+        }
+        require(biggest > 0, "no movement");
+        require(biggest <= start::uncalDemoMaxStep, "a step exceeded the uncalibrated bound");
+        require(start::uncalDemoMaxStep < start::demoMaxStep, "bound is not the conservative one");
+        require(start::uncalDemoGain < start::gain, "gain is not conservative");
+    });
+    test("uncal demo: no button, no dwell click, no drag, no wheel; idle gyro bias is ignored",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             const size_t mark = h.transport.reports.size();
+             h.run(hold(2, -90, 1500)); // roll far past the scroll threshold
+             h.quiet(3000);             // dwell time would have clicked
+             h.run(hold(0, 40, 300));
+             h.quiet(2500);
+             onlyMovement(h, mark);
+             require(clicksSince(h, mark) == 0, "a click in the uncalibrated demo");
+             // Idle bias of the bench sensor (about -1.3, -0.9 deg/s) sits inside the deadzone.
+             const size_t idle = h.transport.reports.size();
+             for (unsigned i = 0; i < 300; ++i) {
+                 h.tick({-1.3f, -0.9f, 0.1f});
+             }
+             const auto drift = movedSince(h, idle);
+             require(std::abs(drift[0]) < 1 && std::abs(drift[1]) < 1, "idle bias moves the cursor");
+         });
+    test("uncal demo: Stop demo releases at once and needs an explicit restart", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.run(hold(0, 60, 300));
+        h.s().stopUncalibratedDemo("stopped by the user");
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "still active");
+        require(h.released(), "the stop did not release the pointer");
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        require(movedSince(h, mark)[0] == 0, "movement after Stop demo");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+    });
+    test("uncal demo: the physical button stops it at the press edge and again needs a press",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             h.run(hold(0, 60, 200));
+             h.sw = true;
+             h.tick(); // one pass: the press edge alone disables
+             require(!h.s().uncalibratedDemo() && h.released(), "not stopped at the press edge");
+             h.sw = false;
+             h.quiet(300);
+             require(!h.s().startUncalibratedDemo(h.now), "restarted without a new press");
+             // Without any further sensor sample: the press itself must already release.
+             HF direct = uncalRig();
+             uncalStart(direct);
+             direct.run(hold(0, 60, 200));
+             direct.s().setControlSwitch(true, direct.now + 1);
+             require(!direct.s().uncalibratedDemo() && direct.released(),
+                     "the press edge waited for a sensor sample");
+             h.click();
+             require(h.s().startUncalibratedDemo(h.now), "restart after a new press");
+         });
+    test("uncal demo: a start is rejected for an unhealthy sensor, bad mapping, no BLE, no button",
+         [=] {
+             {
+                 HF h(false, EnableKind::Momentary);
+                 h.sw = false;
+                 h.tick();
+                 h.click();
+                 require(!h.s().startUncalibratedDemo(h.now), "started before healthy samples");
+                 require(std::string(h.s().diagnostics.reason) ==
+                             "waiting for healthy sensor samples",
+                         "unhealthy sensor reason");
+             }
+             {
+                 HF h = uncalRig();
+                 h.click();
+                 h.s().axes.axes = {0, 0, 0};
+                 require(!h.s().axes.valid(), "precondition: mapping invalid");
+                 require(!h.s().startUncalibratedDemo(h.now), "started with an invalid mapping");
+             }
+             {
+                 HF h = uncalRig();
+                 h.click();
+                 h.transport.online = false;
+                 require(!h.s().startUncalibratedDemo(h.now), "started without BLE");
+                 require(std::string(h.s().diagnostics.reason) == "BLE link unavailable",
+                         "BLE reason");
+             }
+             {
+                 HF h = uncalRig();
+                 h.s().configureEnableInput(false);
+                 h.click();
+                 require(!h.s().startUncalibratedDemo(h.now), "started without an enable button");
+             }
+             {
+                 HF h = uncalRig();
+                 h.click();
+                 require(h.s().startUncalibratedDemo(h.now), "healthy start");
+                 require(!h.s().startUncalibratedDemo(h.now), "double start");
+             }
+         });
+    test("uncal demo: calibration, training and gestures take over and end the demo", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.s().calibrate(h.now);
+        require(h.s().state == SystemState::Calibrating && !h.s().uncalibratedDemo(),
+                "calibration did not end the demo");
+        require(h.released(), "calibration start did not release output");
+        HF g = uncalRig();
+        uncalStart(g);
+        g.s().pause();
+        require(!g.s().uncalibratedDemo() && g.released(), "pause did not end the demo");
+    });
+    test("uncal demo: sensor faults stop output and the demo; restart is explicit", [=] {
+        for (int kind = 0; kind < 4; ++kind) {
+            HF h = uncalRig();
+            uncalStart(h);
+            h.run(hold(0, 40, 200));
+            h.now += 10;
+            MotionSample bad{h.now, {0, 0, 0}, {0, 0, 1}, true};
+            if (kind == 0) {
+                bad.gyro = {NAN, 0, 0};
+            } else if (kind == 1) {
+                bad.gyro = {1e6f, 0, 0};
+            } else if (kind == 2) {
+                bad.valid = false;
+            } else {
+                bad.timestampMs = h.now - 400; // stale sample
+            }
+            h.s().tick(bad, h.now, false);
+            require(h.s().state == SystemState::SafeState, "fault did not stop control");
+            require(!h.s().uncalibratedDemo() && h.released(), "demo survived a sensor fault");
+            h.quiet(600); // recovery
+            require(h.s().state != SystemState::Active && !h.s().uncalibratedDemo(),
+                    "demo resumed by itself after recovery");
+            require(!h.s().startUncalibratedDemo(h.now), "restart without a new button press");
+            h.click();
+            require(h.s().startUncalibratedDemo(h.now), "explicit restart after recovery");
+        }
+    });
+    test("uncal demo: BLE disconnect and delivery failure stop it; reconnect never restarts it",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             h.transport.online = false;
+             h.quiet(100);
+             require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(),
+                     "disconnect did not stop the demo");
+             h.transport.online = true; // reconnect
+             h.quiet(800);
+             require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                     "reconnect restarted the demo");
+             h.click();
+             require(h.s().startUncalibratedDemo(h.now), "explicit restart after reconnect");
+             h.quiet(200);
+             h.transport.fail = true; // delivery failure while connected
+             h.run(hold(0, 60, 100));
+             require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(),
+                     "delivery failure did not stop the demo");
+         });
+    test("uncal demo: a reboot never starts it and forgets the button permission", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.boot();
+        h.quiet(600);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "boot started it");
+        require(!h.s().handsFreeStatus().uncalPermitted, "permission survived the reboot");
+        require(!h.s().startUncalibratedDemo(h.now), "start without a press after reboot");
+    });
+    test("uncal demo: normal calibrated control keeps its requirements", [=] {
+        HF h = uncalRig();
+        h.click();
+        require(!h.s().resume() && std::string(h.s().handsFreeStatus().blocked) ==
+                                       "calibrated profile required",
+                "resume without a profile");
+        HF normal(true, EnableKind::Momentary); // calibrated profile saved: normal path
+        normal.sw = false;
+        normal.setup();
+        normal.quiet(400);
+        normal.click();
+        require(normal.s().resume() && !normal.s().uncalibratedDemo(), "normal resume works");
+        require(!normal.s().startUncalibratedDemo(normal.now), "demo start while active");
+    });
+    test("uncal demo: status exposes the demo, its parameters and the profile state", [=] {
+        HF h = uncalRig();
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"uncalDemo\":{\"active\":false") &&
+                    std::strstr(buffer, "\"profileState\":\"MISSING\"") &&
+                    std::strstr(buffer, "\"blocked\":\"press the enable button first\""),
+                "idle status");
+        uncalStart(h);
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"uncalDemo\":{\"active\":true") &&
+                    std::strstr(buffer, "\"gain\":12.00") && std::strstr(buffer, "\"maxStep\":4.00"),
+                "active status");
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

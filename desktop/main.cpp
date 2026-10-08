@@ -448,6 +448,15 @@ int main(int argc, char** argv) {
                     cmd >> value;
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setDemoMovementOnly(value == "on");
+                } else if (verb == "uncal") {
+                    cmd >> value;
+                    ok = (value == "start" || value == "stop") && (cmd >> std::ws).eof();
+                    if (ok && value == "start") {
+                        ok = sys.startUncalibratedDemo(now);
+                    } else if (ok) {
+                        sys.stopUncalibratedDemo(
+                            "demo stopped by the user; explicit restart required");
+                    }
                 } else if (verb == "enable") {
                     cmd >> value;
                     ok = (value == "maintained" || value == "momentary") && (cmd >> std::ws).eof();

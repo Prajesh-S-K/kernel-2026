@@ -19,6 +19,11 @@
           ><button id="pause" class="quiet">Ⅱ Pause</button>
         </div>
       </header>
+      <div id="uncalBanner" class="uncal-banner" role="alert" hidden>
+        <strong>UNCALIBRATED DEMO — LIVE SENSOR</strong>
+        <span>Movement only. Not a calibration. Nothing is saved.</span>
+        <button id="uncalStopBanner" class="uncal-stop">Stop demo</button>
+      </div>
       <div class="layout">
         <aside>
           <div class="aside-label">YOUR CONTROL SPACE</div>
@@ -88,6 +93,38 @@
               ><span id="stepCal">03 Calibrate</span><span id="stepProfile">04 Profile</span
               ><span>05 Control test</span><span>06 Performance</span>
             </div>
+            <article class="panel uncal" id="uncalPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">TEMPORARY BENCH DEMO</span>
+                  <h2>Uncalibrated pointer demo</h2>
+                </div>
+                <span class="tag" id="uncalTag">OFF</span>
+              </div>
+              <p>
+                The real sensor moves the Mac pointer with conservative fixed settings, even
+                without a calibration. Pointer movement only: no clicks, dwell, drag or scrolling.
+                Press the enable button first, then start. Any fault, disconnect or button press
+                stops it, and you must start it again yourself.
+              </p>
+              <p id="uncalStatus" class="uncal-status"></p>
+              <p id="uncalCalibration" class="uncal-note"></p>
+              <div class="uncal-actions">
+                <button id="uncalStart" class="primary">Start uncalibrated pointer demo</button>
+                <button id="uncalStop" class="uncal-stop">Stop demo</button>
+              </div>
+              <div class="uncal-grid">
+                <div>
+                  <span class="eyebrow">WHICH ROTATION MOVES THE POINTER</span>
+                  <ul id="uncalRotations"></ul>
+                </div>
+                <div>
+                  <span class="eyebrow">ACTIVE AXIS MAPPING (MEASURED ON THE BENCH)</span>
+                  <ul id="uncalMapping"></ul>
+                  <small id="uncalParams"></small>
+                </div>
+              </div>
+            </article>
             <div class="setup-grid">
               <article class="panel calibration">
                 <div class="panel-head">

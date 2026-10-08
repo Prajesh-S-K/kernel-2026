@@ -43,5 +43,10 @@ constexpr uint32_t trainWaitMs = 6000;      // wait for an example to begin
 constexpr uint32_t trainCaptureMs = 3000;   // longest example
 constexpr uint32_t trainValidateMs = 20000; // time allowed for the validation repeat
 constexpr float demoMaxStep = 6.f;          // movement-only demo: pixels per report, both axes
+// Uncalibrated pointer demo (RAM only, movement only). Conservative START values, not tuned.
+constexpr float uncalDemoGain = 12.f;       // pixels per degree, all four directions
+constexpr float uncalDemoDeadzone = 2.5f;   // deg/s; above the measured idle bias of the bench MPU
+constexpr float uncalDemoAlpha = .3f;       // filter, dimensionless
+constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

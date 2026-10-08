@@ -1,3 +1,4 @@
+import { labBlocked } from './uncal.js';
 import { summarize, csv } from './metrics.js';
 import { freezeContext, invalidates, groupBlocks, comparisonSettings } from './lab.js';
 import { handsFreeOf } from './handsfree.js';
@@ -117,6 +118,10 @@ export function createPerformanceLab({
   }
   async function startLab() {
     if (lab || starting) return;
+    if (labBlocked(getDevice())) {
+      toast('Stop the uncalibrated demo first; it is never part of a Performance Lab comparison.');
+      return;
+    }
     if (!getDevice()?.hasProfile) {
       toast('Calibrate and save a valid profile first.');
       return;

@@ -700,3 +700,47 @@ test("the movement-only demo is shown in guidance and defaults to off for older 
   });
   assert.doesNotMatch(off.lines.join(" "), /MOVEMENT-ONLY/);
 });
+
+import { BANNER, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUIDE } from "../ui/uncal.js";
+const hw = (uncal, extra = {}) => ({
+  source: "HARDWARE",
+  connected: true,
+  handsFree: { uncalDemo: { active: false, present: true, permitted: true, blocked: "", profileState: "MISSING", gain: 12, deadzone: 2.5, maxStep: 4, ...uncal } },
+  axes: { valid: true, gyro: [2, 0, 1], gyroSigns: [1, 1, 1], accel: [1, 0, 2], accelSigns: [1, 1, -1] },
+  ...extra,
+});
+test("uncalibrated demo: only offered for live hardware and never started by the page", () => {
+  assert.equal(uncalView({ source: "SIMULATED", handsFree: {} }).hardware, false);
+  assert.equal(uncalView(undefined).canStart, false);
+  assert.equal(uncalView(hw({})).canStart, true);
+  assert.equal(uncalView(hw({ blocked: "press the enable button first" })).canStart, false);
+  assert.equal(uncalView(hw({}, { connected: false })).canStart, false);
+  assert.match(uncalView(hw({ blocked: "BLE link unavailable" })).status, /BLE link unavailable/);
+});
+test("uncalibrated demo: banner text appears exactly while active", () => {
+  assert.equal(uncalView(hw({})).banner, "");
+  assert.equal(uncalView(hw({ active: true })).banner, BANNER);
+  assert.equal(BANNER, "UNCALIBRATED DEMO — LIVE SENSOR");
+  assert.equal(uncalView(hw({ active: true })).canStart, false);
+});
+test("uncalibrated demo: a corrupt profile is reported as corrupt, not repaired", () => {
+  assert.match(uncalView(hw({ profileState: "CORRUPT" })).calibration, /CORRUPT/);
+  assert.match(uncalView(hw({ profileState: "MISSING" })).calibration, /not a calibration/);
+});
+test("uncalibrated demo: shows the reported axis mapping and the rotation guide", () => {
+  const lines = mappingLines(hw({}));
+  assert.match(lines[0], /Yaw.*Z axis, sign \+/);
+  assert.match(lines[1], /Pitch.*X axis/);
+  assert.match(lines[2], /Roll.*Y axis/);
+  assert.match(lines.at(-1), /Mapping valid/);
+  assert.match(mappingLines(hw({}, { axes: { valid: false, gyro: [0, 0, 0], gyroSigns: [1, 1, 1] } })).at(-1), /INVALID/);
+  assert.match(mappingLines({})[0], /did not report/);
+  assert.equal(ROTATION_GUIDE.length, 5);
+});
+test("uncalibrated demo: keeps focus-loss pause for everything except the active demo; out of the lab", () => {
+  assert.equal(pauseOnBlur(hw({})), true);
+  assert.equal(pauseOnBlur({ source: "SIMULATED" }), true);
+  assert.equal(pauseOnBlur(hw({ active: true })), false);
+  assert.equal(labBlocked(hw({ active: true })), true);
+  assert.equal(labBlocked(hw({})), false);
+});

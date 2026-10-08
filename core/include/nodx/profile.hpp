@@ -33,13 +33,20 @@ public:
     virtual std::vector<uint8_t> read(unsigned slot) = 0;
     virtual bool write(unsigned slot, const std::vector<uint8_t>& bytes) = 0;
 };
+// What the stored record looked like on the last load. A corrupt record is never repaired silently.
+enum class ProfileState { Missing, Valid, Corrupt };
+const char* name(ProfileState state);
 class ProfileRepository {
 public:
     explicit ProfileRepository(ProfileStorage& storage) : storage_(storage) {}
     bool load(UserProfile& profile);
     bool save(const UserProfile& profile);
+    ProfileState state() const {
+        return state_;
+    }
 
 private:
+    ProfileState state_ = ProfileState::Missing;
     ProfileStorage& storage_;
 };
 class MemoryStorage : public ProfileStorage {

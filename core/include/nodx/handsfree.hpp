@@ -130,6 +130,11 @@ struct HandsFreeStatus {
     bool trainValidated = false;
     std::array<bool, gestureCount> staged{}, stored{};
     const char* blocked = "";
+    // Temporary uncalibrated pointer demo (RAM only; never a calibration, never saved).
+    bool uncalActive = false, uncalPermitted = false, uncalPresent = false;
+    const char* uncalBlocked = "";
+    const char* profileState = "MISSING";
+    float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;
 };
 // Writes one JSON object (no trailing newline). Returns the length, or 0 if it does not fit.
 size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& status);

@@ -90,6 +90,8 @@ def command_for(data):
             return "handsfree switchless " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "demo":
             return "handsfree demo " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "uncal":
+            return "handsfree uncal " + ("start" if required_boolean(data, "enabled") else "stop")
         if operation == "enable" and data.get("kind") in ("maintained", "momentary"):
             return f"handsfree enable {data['kind']}"
         raise ValueError("Invalid hands-free request")

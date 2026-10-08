@@ -3,6 +3,7 @@ import { sourceLabels } from './source.js';
 import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
+import { BANNER, ROTATION_GUIDE, mappingLines, pauseOnBlur, uncalView } from './uncal.js';
 const client = new DeviceClient();
 const $ = (id) => document.getElementById(id);
 let device = null,
@@ -202,6 +203,7 @@ function render(data, applyReports = true) {
     $('studioResult').textContent =
       `Selections: ${selections} · Scroll: ${scrollTotal} · Drag distance: ${dragDistance.toFixed(0)} px`;
   }
+  renderUncal(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -384,14 +386,14 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => {
   keys.clear();
   setHeld(false);
-  action('pause');
+  if (pauseOnBlur(device)) action('pause');
   if (performanceLab.running) performanceLab.abort('window lost focus');
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     keys.clear();
     setHeld(false);
-    action('pause');
+    if (pauseOnBlur(device)) action('pause');
     if (performanceLab.running) performanceLab.abort('page hidden');
   }
 });
@@ -400,6 +402,32 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+function renderUncal(data) {
+  const view = uncalView(data);
+  $('uncalPanel').hidden = !view.hardware;
+  $('uncalBanner').hidden = !view.active;
+  document.title = view.active ? `${BANNER} · NodX Adapt` : baseTitle;
+  if (!view.hardware) return;
+  $('uncalTag').textContent = view.active ? 'ACTIVE' : 'OFF';
+  $('uncalStatus').textContent = view.status;
+  $('uncalCalibration').textContent = view.calibration;
+  $('uncalStart').disabled = !view.canStart;
+  $('uncalStop').disabled = !view.active;
+  $('uncalStopBanner').disabled = !view.active;
+  $('uncalRotations').replaceChildren(
+    ...ROTATION_GUIDE.map((line) => Object.assign(document.createElement('li'), { textContent: line })),
+  );
+  $('uncalMapping').replaceChildren(
+    ...mappingLines(data).map((line) => Object.assign(document.createElement('li'), { textContent: line })),
+  );
+  $('uncalParams').textContent =
+    `Fixed START values: ${view.u.gain} px/° gain, ${view.u.deadzone} °/s deadzone, ` +
+    `at most ${view.u.maxStep} px per report.`;
+}
+const baseTitle = document.title;
+$('uncalStart').onclick = () => action('handsfree', { op: 'uncal', enabled: true });
+for (const id of ['uncalStop', 'uncalStopBanner'])
+  $(id).onclick = () => action('handsfree', { op: 'uncal', enabled: false });
 async function tick() {
   if (busy || document.hidden) return;
   busy = true;
