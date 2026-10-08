@@ -118,20 +118,33 @@ def rest_accel(rows, count=8):
 
 
 def analyze(rows):
-    """Returns a dict with `ok`, `problems`, the three movement descriptions and the recommended mapping."""
+    """Returns a dict with `ok`, `problems`, the three movement descriptions and the recommended mapping.
+
+    The operator's pace varies, so movements are not matched by fixed timing: every burst of activity that
+    swept at least MIN_SPAN_DEG is classified by its dominant sensor axis, and the FIRST burst seen on each
+    axis is that movement's first lobe. Exactly three different axes must appear, in the guided order yaw,
+    pitch, roll. The caller must still confirm which direction was performed first in each movement."""
     problems = []
     if len(rows) < 20:
         return {"ok": False, "problems": ["too few telemetry samples with a seen sensor block"]}
-    spans = movements(rows)
-    if len(spans) != 3:
-        problems.append(f"expected 3 separated movements (yaw, pitch, roll), found {len(spans)}")
-        return {"ok": False, "problems": problems, "movementsFound": len(spans)}
-    yaw, pitch, roll = (describe(rows, s) for s in spans)
+    bursts = []
+    for span in movements(rows):
+        item = describe(rows, span)
+        if item["span_deg"] >= MIN_SPAN_DEG:
+            bursts.append((span, item))
+    firsts, order = {}, []
+    for span, item in bursts:
+        if item["axis"] not in firsts:
+            firsts[item["axis"]] = (span, item)
+            order.append(item["axis"])
+    if len(order) != 3:
+        problems.append(
+            f"expected movements on 3 different gyro axes (yaw, pitch, roll), found {len(order)}: {order}"
+        )
+        return {"ok": False, "problems": problems, "burstsFound": len(bursts)}
+    spans = [firsts[axis][0] for axis in order]
+    yaw, pitch, roll = (firsts[axis][1] for axis in order)
     for name, item in (("yaw", yaw), ("pitch", pitch), ("roll", roll)):
-        if item["span_deg"] < MIN_SPAN_DEG:
-            problems.append(
-                f"{name} movement swept only {item['span_deg']:.1f} deg on its dominant axis"
-            )
         if item["first_sign"] == 0:
             problems.append(f"{name} movement has no clear first lobe")
         others = sorted(item["other_axes_deg"], reverse=True)
@@ -139,9 +152,7 @@ def analyze(rows):
             problems.append(
                 f"{name} movement was not isolated: a second axis swept {others[1]:.0f} of {others[0]:.0f} deg"
             )
-    axes = [yaw["axis"], pitch["axis"], roll["axis"]]
-    if len(set(axes)) != 3:
-        problems.append(f"the three movements did not use three different gyro axes: {axes}")
+    axes = order
     if problems:
         return {"ok": False, "problems": problems, "yaw": yaw, "pitch": pitch, "roll": roll}
     # Gyro signs: yaw LEFT negative, pitch UP negative, roll RIGHT positive after mapping.
@@ -165,7 +176,6 @@ def analyze(rows):
     lateral_sign = 1 if lateral_move > 0 else -1
     if lateral_move == 0:
         problems.append("the lateral accelerometer axis did not move enough during the roll")
-    # With mapped az = vertical_sign*raw[vertical] and ay = lateral_sign*raw[lateral] (right tilt => ay up).
     return {
         "ok": not problems,
         "problems": problems,
@@ -177,6 +187,7 @@ def analyze(rows):
         "accelAxes": [forward, lateral, vertical],
         "accelSigns": [1, lateral_sign, vertical_sign],
         "restAccel": rest,
+        "burstsUsed": len(bursts),
     }
 
 

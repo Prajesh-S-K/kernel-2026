@@ -582,6 +582,23 @@ class AxisAnalysis(unittest.TestCase):
         self.assertIn("different gyro axes", "; ".join(same_axis["problems"]))
         self.assertFalse(AXES.analyze([])["ok"])
 
+    def test_a_slow_operator_with_long_holds_is_still_analysed(self):
+        # Holds of 4 s split each movement into several bursts; the first burst per axis still decides.
+        lines = synth()
+        rows = AXES.samples_from_lines(lines)
+        stretched = []
+        offset = 0
+        previous = None
+        for t, angle, accel in rows:
+            if previous is not None and angle == previous:
+                offset += 200  # stretch every hold by 200 ms per still sample
+            previous = angle
+            stretched.append((t + offset, angle, accel))
+        result = AXES.analyze(stretched)
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertEqual(result["gyroAxes"], [2, 0, 1])
+        self.assertEqual(result["gyroSigns"], [-1, 1, 1])
+
     def test_lines_without_a_sensor_block_are_ignored(self):
         mixed = [
             '{"timeMs": 5, "state": "READY"}',
