@@ -108,21 +108,45 @@ more and none for a shorter tap. Also do by hand and note: reset while the butto
 off), a floating-pin check (disconnect GPIO4 briefly: the pull-up must read HIGH).
 Gate: bounce within START limits (20 edges, 10 ms) or the debounce values are revisited with the evidence.
 
-## Stage 4 · BLE (`bench-ble-probe`) — DEFERRED, not to be run until instructed
+## Stage 4 · BLE (`bench-ble-probe`) — PREPARED, NOT FLASHED, NOT RUN; wait for an explicit instruction
 
-Uses the firmware's real BLE adapter but no control engine; reports leave **only on a serial command**:
+Prerequisites already met on the bench: stages 1-3 pass (board facts, sensor via the firmware driver, enable button).
+The probe uses the firmware's REAL BLE adapter (`BLEHID`: report-protocol mouse, bonded pairing, encrypted
+reports) and none of the control engine. **Reports leave only on a serial command**; the probe never moves the host
+pointer by itself. It builds without warnings and contains no bond-deleting code. The enable button, the sensor and
+the buzzer are not touched.
+
+Host-side precautions (the host is this Mac or another computer, because the board will appear as a real Bluetooth mouse):
+* Close anything that a stray click could activate. Park the pointer over an empty, harmless window before `down confirm`.
+* Pairing creates a **bond**, stored in the board's NVS by the BLE stack and on the host. Never erase the whole flash/NVS to
+  "clear" it. To start clean, remove "NodX Adapt" in the host's Bluetooth settings, and use `bonds` to read how many pairings
+  the board holds (read-only). The real-control firmware will see the same bond.
+* The native USB serial link and the Bluetooth link are independent: keep the USB cable connected for logging.
 
 ```bash
-pio run -e bench-ble-probe                                  # build is allowed now
-pio run -e bench-ble-probe -t upload --upload-port <PORT>   # NOT RUN
-python3 scripts/bench_log.py --port <PORT> --label stage4 --send status --send ping --send nudge --seconds 90   # NOT RUN
+pio run -e bench-ble-probe                                               # build is allowed now
+pio run -e bench-ble-probe -t upload --upload-port /dev/cu.usbmodem101  # NOT RUN: needs the explicit go (re-check the port first)
+python3 scripts/bench_port.py                                            # re-identify the port after the upload: <PORT>
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage4-pair --send status --send bonds --seconds 60   # NOT RUN
 ```
 
-Pair from the host's Bluetooth settings, then record: advertising and connect, encryption (`secured`),
-subscription, `ping` and `nudge` delivery, reconnect after disconnect, and (with a host window that can show
-a held button) `down confirm`, drop the link, then check the host released it (`up` afterwards). Also count
-whether the host sees unsolicited traffic while idle. Gate: a secured, subscribed link delivering commanded
-reports, and a known host-side result for a link lost with the button down.
+Checklist, in order, each recorded with the host-side result written next to the board's `BLE,` lines:
+1. **Advertising and boot:** the heartbeat shows `state` lines every 3 s with `connected=0`; the host lists "NodX Adapt".
+2. **Pair from the host's Bluetooth settings:** expect `secured=1`, then `subscribed=1`, `connected=1` in `link-change` lines,
+   in that order. Record whether the host asks for confirmation or a PIN (the adapter declares no input/output).
+3. **Delivery:** `ping` (no movement, no buttons) reports `delivered=1`; `nudge` (+2 then -2) moves the host pointer by nothing net;
+   `delivered=0` before the link is secured and subscribed is the expected, correct refusal.
+4. **Reconnect:** disconnect from the host side, then reconnect; the board advertises again by itself and the link returns
+   secured and subscribed without re-pairing. Also drop the link by moving the board out of range or turning host Bluetooth off.
+5. **Button down during a lost link:** with the pointer over a harmless spot, `down confirm` (host button pressed), turn host
+   Bluetooth off, then back on and `up`. Record what the host did (released on disconnect? stuck?). The probe prints
+   `link-lost-with-button-down` as a warning. This is the case the real firmware must handle (drag during disconnect).
+6. **Idle traffic:** with a secured link and no command, watch the host for unsolicited reports (expect none).
+7. **Both sides' view:** the host's Bluetooth details (device name, appearance) next to the probe's `state` lines.
+
+Gate: a secured, subscribed link that delivers commanded reports and survives disconnect/reconnect, and a recorded host-side
+result for the button-down link loss. Known gaps this stage will measure but not fix: idle report traffic and the missing
+Device Information service (separate tasks).
 
 ## Stage 5 · the real firmware (`bench-firmware`) with the companion — DEFERRED, not to be run until instructed
 

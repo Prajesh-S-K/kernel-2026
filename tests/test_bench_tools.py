@@ -385,7 +385,18 @@ class Logger(unittest.TestCase):
             "nudge",
         ):
             self.assertTrue(LOG.SAFE_COMMAND.fullmatch(ok), ok)
-        for bad in ("rm -rf /", "imu 1000", "flash", "ota", "imu;ls", "", "down  confirm"):
+        for bad in (
+            "rm -rf /",
+            "imu 1000",
+            "flash",
+            "ota",
+            "imu;ls",
+            "",
+            "down  confirm",
+            "unbond",
+            "deletebonds",
+            "erase",
+        ):
             self.assertFalse(LOG.SAFE_COMMAND.fullmatch(bad), bad)
 
     def test_a_port_is_never_guessed_and_analysis_needs_none(self):
