@@ -825,6 +825,12 @@ hr {
 .nodx-cursor.SAFE_STATE {
   color: #ff8f8f;
 }
+.nodx-cursor.GESTURE {
+  color: #b0bdff;
+}
+.nodx-cursor.GESTURE svg {
+  transform: scale(0.85);
+}
 .nodx-cursor.CLICK svg {
   animation: click 0.25s;
 }
@@ -864,6 +870,123 @@ hr {
 [hidden] {
   display: none !important;
 }
+.hf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.hf-chip {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  background: #0d161c;
+}
+.hf-chip b {
+  color: var(--white);
+  font-weight: 600;
+  margin-left: 6px;
+}
+.hf-chip.good {
+  border-color: #4c8f80;
+}
+.hf-chip.good b {
+  color: var(--cyan);
+}
+.hf-chip.warn {
+  border-color: #8a6a35;
+}
+.hf-chip.warn b {
+  color: #f3c783;
+}
+.hf-chip.bad {
+  border-color: #7a3a3c;
+}
+.hf-chip.bad b {
+  color: #ffb3ac;
+}
+.hf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+.hf-wide {
+  grid-column: 1 / -1;
+}
+.hf-steps {
+  list-style: none;
+  margin: 18px 0;
+  padding: 0;
+}
+.hf-steps li {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 4px 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.hf-steps li:first-child {
+  border-top: 0;
+}
+.hf-steps .mark {
+  grid-row: span 2;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+.hf-steps .title {
+  color: var(--white);
+  font-size: 13px;
+}
+.hf-steps .done .mark {
+  background: var(--cyan);
+  color: #082722;
+  border-color: var(--cyan);
+}
+.hf-steps .current .mark {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.hf-steps .todo .title {
+  color: var(--muted);
+}
+.hf-pair {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 14px;
+  align-items: end;
+  margin: 16px 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.hf-group {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.hf-group button {
+  margin-top: 8px;
+}
+.hf-guide {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.hf-guide li {
+  margin: 6px 0;
+}
+.hf-guide.error li {
+  color: #ffb3ac;
+}
 @keyframes orbit {
   to {
     transform: rotate(360deg);
@@ -895,6 +1018,9 @@ hr {
   }
 }
 @media (max-width: 1100px) {
+  .hf-grid {
+    grid-template-columns: 1fr;
+  }
   header {
     padding: 0 25px;
   }
