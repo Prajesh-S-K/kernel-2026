@@ -22,6 +22,7 @@ def load(name):
 ANALYZE = load("bench_analyze")
 LOG = load("bench_log")
 PORT = load("bench_port")
+AXES = load("bench_axes")
 
 INFO = """DIAG,info,chip=ESP32-S3,revision=2,cores=2,cpuMHz=240
 DIAG,info,flashBytes=16777216,flashMHz=80,flashMode=2,psramBytes=8388608,freeHeap=300000
@@ -464,6 +465,130 @@ class DiagnosticSource(unittest.TestCase):
         ):
             self.assertNotRegex(source, rf"(?<![\w.:])auto\s+{macro}\s*=", macro)
             self.assertNotRegex(source, rf"(?<![\w.:>]){macro}\(\s*\d", f"{macro}(<number>) call")
+
+
+def telemetry(series):
+    """series: [(timeMs, angle[3], accel[3])] -> firmware-style telemetry JSON lines."""
+    import json as _json
+
+    return [
+        _json.dumps(
+            {
+                "timeMs": t,
+                "sensor": {
+                    "variant": "MPU-6500",
+                    "seen": True,
+                    "frames": 1,
+                    "ageMs": 3,
+                    "gyro": [0, 0, 0],
+                    "accel": a,
+                    "angle": g,
+                },
+            }
+        )
+        for t, g, a in series
+    ]
+
+
+def synth(
+    yaw_axis=2,
+    yaw_first=1,
+    pitch_axis=0,
+    pitch_first=-1,
+    roll_axis=1,
+    roll_first=1,
+    rest=(0.0, 0.0, -0.98),
+    lateral=0,
+    lateral_dir=1,
+):
+    """A guided capture sampled at 5 Hz: still, yaw (first lobe + return + opposite lobe + return), still,
+    pitch, still, roll, still. Angles in degrees on the SENSOR axes; the roll also tilts gravity."""
+    t, angle, accel = 0, [0.0, 0.0, 0.0], list(rest)
+    out = []
+
+    def emit():
+        out.append((t, list(angle), list(accel)))
+
+    def hold(ms):
+        nonlocal t
+        for _ in range(ms // 200):
+            t += 200
+            emit()
+
+    def lobe(axis, delta, accel_axis=None, accel_delta=0.0):
+        nonlocal t
+        steps = 8
+        for i in range(steps):  # out
+            t += 200
+            angle[axis] += delta / steps
+            if accel_axis is not None:
+                accel[accel_axis] += accel_delta / steps
+            emit()
+        hold(1000)
+        for i in range(steps):  # back
+            t += 200
+            angle[axis] -= delta / steps
+            if accel_axis is not None:
+                accel[accel_axis] -= accel_delta / steps
+            emit()
+        hold(1000)
+
+    hold(2000)
+    lobe(yaw_axis, 40 * yaw_first)
+    lobe(yaw_axis, -40 * yaw_first)
+    hold(4000)
+    lobe(pitch_axis, 30 * pitch_first)
+    lobe(pitch_axis, -30 * pitch_first)
+    hold(4000)
+    lobe(roll_axis, 35 * roll_first, lateral, 0.4 * lateral_dir * roll_first)
+    lobe(roll_axis, -35 * roll_first, lateral, -0.4 * lateral_dir * roll_first)
+    hold(2000)
+    return telemetry(out)
+
+
+class AxisAnalysis(unittest.TestCase):
+    def test_the_mapping_is_recovered_from_a_guided_capture(self):
+        result = AXES.analyze(AXES.samples_from_lines(synth()))
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertEqual(result["gyroAxes"], [2, 0, 1])
+        # yaw left was +, pitch up was -, roll right was +: mapped yaw-left and pitch-up must be negative
+        self.assertEqual(result["gyroSigns"], [-1, 1, 1])
+        self.assertEqual(result["accelAxes"], [1, 0, 2])  # forward, lateral, vertical
+        self.assertEqual(result["accelSigns"], [1, 1, -1])  # vertical axis reads -1 g at rest
+        self.assertIn("-DNODX_GYRO_AXES=2,0,1", AXES.flags(result))
+        self.assertIn("-DNODX_ACCEL_SIGNS=1,1,-1", AXES.flags(result))
+
+    def test_signs_follow_the_measured_directions_not_the_defaults(self):
+        flipped = synth(
+            yaw_first=-1, pitch_first=1, roll_first=-1, lateral_dir=-1, rest=(0.0, 0.0, 0.98)
+        )
+        result = AXES.analyze(AXES.samples_from_lines(flipped))
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertEqual(result["gyroSigns"], [1, -1, -1])
+        self.assertEqual(result["accelSigns"][2], 1)
+        other = AXES.analyze(
+            AXES.samples_from_lines(synth(yaw_axis=0, pitch_axis=1, roll_axis=2, lateral=1))
+        )
+        self.assertTrue(other["ok"], other["problems"])
+        self.assertEqual(other["gyroAxes"], [0, 1, 2])
+
+    def test_an_unreliable_capture_is_refused_with_the_reason(self):
+        lines = synth()
+        short = AXES.analyze(AXES.samples_from_lines(lines[:60]))
+        self.assertFalse(short["ok"])
+        self.assertEqual(AXES.flags(short), "")
+        same_axis = AXES.analyze(AXES.samples_from_lines(synth(pitch_axis=2)))
+        self.assertFalse(same_axis["ok"])
+        self.assertIn("different gyro axes", "; ".join(same_axis["problems"]))
+        self.assertFalse(AXES.analyze([])["ok"])
+
+    def test_lines_without_a_sensor_block_are_ignored(self):
+        mixed = [
+            '{"timeMs": 5, "state": "READY"}',
+            "not json",
+            '{"timeMs": 6, "sensor": {"seen": false}}',
+        ] + synth()
+        self.assertEqual(len(AXES.samples_from_lines(mixed)), len(AXES.samples_from_lines(synth())))
 
 
 class PortIdentification(unittest.TestCase):

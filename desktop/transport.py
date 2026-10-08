@@ -96,7 +96,16 @@ class SerialDevice:
     def __init__(self, port):
         import serial
 
-        self.serial = serial.Serial(port, 115200, timeout=0.05, write_timeout=0.2)
+        # DTR/RTS are held LOW before the port opens: on the ESP32-S3 native USB port their edges
+        # reset the chip, and the companion must not reboot the device by connecting to it.
+        self.serial = serial.Serial()
+        self.serial.port = port
+        self.serial.baudrate = 115200
+        self.serial.timeout = 0.05
+        self.serial.write_timeout = 0.2
+        self.serial.dtr = False
+        self.serial.rts = False
+        self.serial.open()
         self.sequence = 0
 
     def request(self, command):

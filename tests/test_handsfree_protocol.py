@@ -485,6 +485,70 @@ class MomentaryEnableButton(HandsFreeCase):
                 SERVER.command_for({"action": "handsfree", "op": "enable", "kind": bad})
 
 
+class MovementOnlyDemo(HandsFreeCase):
+    """Temporary movement-only demo: no dwell click, drag or wheel, bounded steps; RAM only."""
+
+    def test_the_demo_is_a_validated_temporary_mode(self):
+        self.setup_hands_free("maintained")
+        self.quiet(60)
+        self.assertFalse(self.send("status")["handsFree"]["demoMovementOnly"])
+        for bad in ("handsfree demo", "handsfree demo maybe", "handsfree demo on extra"):
+            self.assertFalse(self.send(bad)["ok"], bad)
+
+        def saved():
+            return tuple(
+                (self.runtime / name).read_bytes() if (self.runtime / name).exists() else None
+                for name in ("hf0.bin", "hf1.bin")
+            )
+
+        before = saved()
+        on = self.send("handsfree demo on")
+        self.assertTrue(on["ok"])
+        self.assertTrue(on["handsFree"]["demoMovementOnly"])
+        after = saved()
+        self.assertTrue(any(item is not None for item in before), "a configuration was saved")
+        self.assertEqual(before, after, "the demo must not touch the saved configuration")
+        self.assertTrue(self.send("handsfree demo off")["ok"])
+        self.assertFalse(self.send("status")["handsFree"]["demoMovementOnly"])
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "demo", "enabled": True}),
+            "handsfree demo on",
+        )
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "demo"})
+
+    def test_no_drag_no_click_and_bounded_steps_in_the_demo(self):
+        self.setup_hands_free("maintained")
+        self.quiet(60)
+        self.assertTrue(self.send("handsfree demo on")["ok"])
+        self.quiet(60)
+        self.assertTrue(self.send("resume")["ok"])
+        refused_before = self.send("status")["handsFree"]["gesture"]["refused"]
+        dragging = self.send("gesture tilt2")
+        self.assertFalse(dragging["handsFree"]["drag"], "a drag started in the demo")
+        self.assertEqual(dragging["handsFree"]["gesture"]["refused"], refused_before + 1)
+        self.assertEqual(dragging["state"], "ACTIVE")
+        self.send("step 30 40 0 0 0 1 0 0")  # fast yaw
+        clicks = 0
+        biggest = 0
+        for _ in range(8):
+            result = self.send("step 50 0 0 0 0 1 0 0")  # hold still: a dwell would click
+            for dx, dy, wheel, down in result["reports"]:
+                clicks += bool(down)
+                biggest = max(biggest, abs(dx), abs(dy))
+        self.assertEqual(clicks, 0, "a dwell click in the demo")
+        self.assertLessEqual(biggest, 6)
+
+    def test_the_demo_is_off_after_a_restart_and_the_profile_keeps_dwell(self):
+        self.setup_hands_free("maintained")
+        self.assertTrue(self.send("handsfree demo on")["ok"])
+        self.restart()
+        status = self.send("status")
+        self.assertFalse(status["handsFree"]["demoMovementOnly"])
+        self.assertTrue(status["profile"]["dwellEnabled"])
+        self.assertEqual(status["handsFree"]["mode"], "HANDS_FREE")
+
+
 class SwitchAndTransport(HandsFreeCase):
     def test_switch_off_releases_immediately_and_on_never_resumes(self):
         self.setup_hands_free()

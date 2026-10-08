@@ -39,6 +39,7 @@ const EMPTY = Object.freeze({
     suppressing: false,
   },
   drag: false,
+  demoMovementOnly: false, // temporary movement-only demo (never saved)
   training: {
     phase: 'IDLE',
     gesture: 'NONE',
@@ -255,7 +256,9 @@ export function recoveryGuidance(device) {
   } else if (device?.state === 'ACTIVE') {
     title = 'Active';
     lines.push(
-      'Pointing follows your head; dwell clicks automatically after you hold still.',
+      hf.demoMovementOnly
+        ? 'MOVEMENT-ONLY DEMO: the pointer moves in small bounded steps; clicks, drag and scrolling are switched off.'
+        : 'Pointing follows your head; dwell clicks automatically after you hold still.',
       hf.drag
         ? 'Dragging: perform the drag gesture to release.'
         : 'Perform the drag gesture to start a drag.',

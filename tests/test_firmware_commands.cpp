@@ -100,6 +100,13 @@ void parserChecks() {
     expect(refused(send("handsfree commit now")), "commit with trailing text refused");
     expect(refused(send("handsfree bogus")), "unknown handsfree verb refused");
     expect(refused(send("handsfree switchless maybe")), "switchless needs on/off");
+    expect(refused(send("handsfree demo")), "demo needs a value");
+    expect(refused(send("handsfree demo maybe")), "demo value must be on/off");
+    expect(refused(send("handsfree demo on extra")), "demo trailing text refused");
+    ack = send("handsfree demo on");
+    expect(ok(ack) && has(ack, "\"demoMovementOnly\":true"), "demo on is reported");
+    ack = send("handsfree demo off");
+    expect(ok(ack) && has(ack, "\"demoMovementOnly\":false"), "demo off is reported");
     expect(refused(send("handsfree enable")), "enable kind needs a value");
     expect(refused(send("handsfree enable bogus")), "unknown enable kind refused");
     expect(refused(send("handsfree enable momentary extra")), "enable kind trailing text refused");

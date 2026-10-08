@@ -148,7 +148,29 @@ Gate: a secured, subscribed link that delivers commanded reports and survives di
 result for the button-down link loss. Known gaps this stage will measure but not fix: idle report traffic and the missing
 Device Information service (separate tasks).
 
-## Stage 5 · the real firmware (`bench-firmware`) with the companion — DEFERRED, not to be run until instructed
+## Stage 5 · the real firmware (`bench-firmware`), attended movement-only demo
+
+`bench-firmware` is the real firmware with the START bench pins (SDA 8, SCL 9, enable button GPIO4, buzzer off, native USB
+serial), the MPU-6500-class driver, BLE mouse and the hands-free engine. Order, each step recorded in `hardware-evidence/`:
+
+1. **Flash** (explicit authorization given; port re-checked first; no full erase, NVS and the BLE bond preserved):
+   `pio run -e bench-firmware -t upload --upload-port /dev/cu.usbmodem101`, then `python3 scripts/bench_port.py`.
+2. **Prerequisites seen in telemetry** (`status`): `source` HARDWARE, `sensor.seen` with frames increasing and a small `ageMs`,
+   `connected` true (BLE secured + subscribed), `state` never ACTIVE at boot.
+3. **Axis mapping from measurement while output is inhibited.** The operator performs three isolated movements, each separated
+   by stillness: yaw (turn left, return, turn right, return), pitch (tilt up, return, tilt down, return), roll (tilt right, return,
+   tilt left, return). `scripts/bench_axes.py` finds the dominant raw gyro axis and the first-lobe direction of each, and the
+   gravity axes, and prints build flags; it refuses a capture whose movements were not isolated. The flags go into the bench
+   environment and the board is re-flashed with them. Conventions it targets: yaw left negative, pitch up negative, roll right positive.
+4. **Real calibration and gesture training** through the companion in hardware mode (`python3 desktop/server.py --serial <PORT>`):
+   no synthetic gestures (`gesture` is refused on hardware), no bypassed prerequisites; the operator performs the movements.
+5. **Movement-only demo**: `handsfree demo on` (or the checkbox in the setup view): no dwell click, no drag, no wheel, steps
+   bounded to 6 px per report, the saved profile unchanged, off after every restart.
+6. **Enable permission and intentional resume**: press the enable button (latch), then the resume gesture; gently rotate/tilt the
+   assembly while watching the pointer; press the button to disable and confirm the pointer stops.
+Not run in this stage: clicking, dragging, held-button disconnect.
+
+## Stage 5 (original outline) — superseded by the list above
 
 Build is allowed now: `pio run -e bench-firmware`. After a go-ahead: flash it, run
 `python3 desktop/server.py --serial <PORT>` and use the companion (source label `HARDWARE`).

@@ -52,6 +52,26 @@ void initializeRuntime() {
 #else
     systemEngine->configureEnableInput(NODX_ENABLE >= 0);
 #endif
+#ifndef NODX_SIMULATED
+    // Optional MEASURED sensor-to-head axis mapping from the build (bench sessions): gyro
+    // axes/signs for yaw, pitch, roll and accel axes/signs for mapped x, lateral y, vertical z.
+    // Without these flags the START mount assumption in AxisTransform applies. An invalid mapping
+    // makes every sample invalid.
+#ifdef NODX_GYRO_AXES
+    systemEngine->axes.axes = {NODX_GYRO_AXES};
+#endif
+#ifdef NODX_GYRO_SIGNS
+    systemEngine->axes.signs = {NODX_GYRO_SIGNS};
+#endif
+#ifdef NODX_ACCEL_AXES
+    systemEngine->axes.accelAxes = {NODX_ACCEL_AXES};
+#endif
+#ifdef NODX_ACCEL_SIGNS
+    systemEngine->axes.accelSigns = {NODX_ACCEL_SIGNS};
+#endif
+    Serial.println(systemEngine->axes.valid() ? "[AXES] mapping valid"
+                                              : "[AXES] mapping INVALID; samples will be rejected");
+#endif
 #ifdef NODX_SIMULATED
     systemEngine->axes.axes = {0, 1, 2};
     systemEngine->axes.accelAxes = {0, 1, 2};

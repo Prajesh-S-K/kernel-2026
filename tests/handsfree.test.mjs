@@ -678,3 +678,25 @@ test("a Lab block freezes the gesture configuration whose identity includes the 
     "gesture configuration changed",
   );
 });
+
+test("the movement-only demo is shown in guidance and defaults to off for older engines", () => {
+  assert.equal(handsFreeOf({}).demoMovementOnly, false);
+  const on = recoveryGuidance({
+    state: "ACTIVE",
+    hasProfile: true,
+    faultCode: "NONE",
+    handsFree: handsFree({ demoMovementOnly: true }),
+  });
+  assert.match(on.lines.join(" "), /MOVEMENT-ONLY DEMO/);
+  assert.match(
+    on.lines.join(" "),
+    /clicks, drag and scrolling are switched off/,
+  );
+  const off = recoveryGuidance({
+    state: "ACTIVE",
+    hasProfile: true,
+    faultCode: "NONE",
+    handsFree: handsFree(),
+  });
+  assert.doesNotMatch(off.lines.join(" "), /MOVEMENT-ONLY/);
+});

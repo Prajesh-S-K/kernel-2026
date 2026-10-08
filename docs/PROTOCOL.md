@@ -56,6 +56,8 @@ HOST_CLICK trials on the desktop measure ordinary host pointing, not NodX adapta
 
 ## Revision 3 additions: hands-free (additive)
 
+Hardware firmware (not the simulators) adds a `sensor` object to every telemetry frame for bench sessions: `variant`, `seen`, `frames`, `ageMs`, the last raw `gyro` (deg/s) and `accel` (g) in SENSOR coordinates before any axis mapping, and `angle`, the running integral of each raw gyro axis since boot (deg). Additive; the frame stays well inside the 2048-byte buffer (measured 1581 bytes idle).
+
 `protocol` stays 1; `protocolRevision` is 4 (3 added the hands-free commands; 4 adds the enable-input kind and the raw-vs-latched fields; both additive). Every existing command, field and the 84-byte profile
 encoding are unchanged; old clients ignore the new object.
 
@@ -64,6 +66,7 @@ encoding are unchanged; old clients ignore the new object.
 | Command | Bridge action | Notes |
 |---|---|---|
 | `enable 0\|1` | `{"action":"enable","enabled":bool}` | Simulated RAW enable input: button pressed / switch ON (simulators only; refused by hardware firmware). `enabled` is required. Starts released. A disabling edge releases at once |
+| `handsfree demo on\|off` | `{"action":"handsfree","op":"demo","enabled":bool}` | Temporary movement-only demo (RAM only, off at every boot, never saved): no dwell click, no drag (the drag gesture is refused and counted), no wheel, pointer steps bounded to 6 px per report; the enable input and every safety check are unchanged. Changing it while control is active pauses control. Reported as `handsFree.demoMovementOnly` |
 | `handsfree enable maintained\|momentary` | `{"action":"handsfree","op":"enable","kind":"momentary"}` | Stages the enable-input kind (default for a new setup: `momentary`); stored only by `handsfree commit`. `handsFree.switch` reports `kind`, `kindStaged`, `pressed` (raw), `latched` (button permission), `armed`, `on`, `permitted` |
 | `step … fault [enable]` | `step` with optional `"enabled":bool` | Optional ninth integer 0/1 (raw input); omitted keeps the current simulated input state |
 | `gesture <nod\|turn\|tilt><1-3> [scale]` | `{"action":"gesture","name":"nod2","scale":1}` | Scripted synthetic motion (simulators only); scale 0.25–3 |
