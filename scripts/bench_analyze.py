@@ -437,6 +437,22 @@ def judge(data):
                     f"{rate:.1f} frames/s of {drv.get('polls')} polls",
                 )
             )
+        if "i2cErrors" in drv:
+            out.append(
+                check(
+                    "no I2C transfer failed during the driver run (including tolerated ones)",
+                    "PASS" if drv["i2cErrors"] == "0" else "FAIL",
+                    f"{drv['i2cErrors']} of {drv.get('i2cTransactions')} transfers failed",
+                )
+            )
+        else:
+            out.append(
+                check(
+                    "I2C errors during the driver run",
+                    "WARN",
+                    "not counted by this diagnostic version; a failed status read is not visible in valid-frame counts",
+                )
+            )
         mag = number(drv.get("accelMagMeanG"))
         if mag is not None:
             out.append(

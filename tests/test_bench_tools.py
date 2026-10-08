@@ -233,6 +233,17 @@ class Analysis(unittest.TestCase):
         )
         name = "the firmware's own sensor driver"
         self.assertEqual(status_of(GOOD + good, name), "PASS")
+        self.assertEqual(
+            status_of(GOOD + good, "I2C errors during the driver run"), "WARN", "older format"
+        )
+        counted = good + "DIAG,imuinit,i2cTransactions=4000,i2cErrors=0\n"
+        self.assertEqual(status_of(GOOD + counted, "no I2C transfer failed"), "PASS")
+        self.assertEqual(
+            status_of(
+                GOOD + counted.replace("i2cErrors=0", "i2cErrors=2"), "no I2C transfer failed"
+            ),
+            "FAIL",
+        )
         self.assertEqual(status_of(GOOD + good.replace("begin=1", "begin=0"), name), "FAIL")
         self.assertEqual(
             status_of(

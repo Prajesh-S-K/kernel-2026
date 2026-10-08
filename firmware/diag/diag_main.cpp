@@ -312,11 +312,19 @@ void imuRaw(unsigned seconds) {
 // configuration registers, so run it after `imuregs` has captured the as-found state.
 class WireBus : public nodx::RegisterBus {
 public:
+    unsigned errors = 0,
+             transactions = 0; // every failed or short transfer, even ones the driver tolerates
     bool write(uint8_t reg, uint8_t value) override {
-        return writeReg(reg, value);
+        ++transactions;
+        const bool ok = writeReg(reg, value);
+        errors += !ok;
+        return ok;
     }
     bool read(uint8_t reg, uint8_t* bytes, size_t count) override {
-        return readReg(reg, bytes, count);
+        ++transactions;
+        const bool ok = readReg(reg, bytes, count);
+        errors += !ok;
+        return ok;
     }
 };
 void imuInit(unsigned seconds) {
@@ -361,6 +369,7 @@ void imuInit(unsigned seconds) {
     Serial.printf("DIAG,imuinit,seconds=%u,polls=%u,validFrames=%u\n", seconds, polls, valid);
     Serial.printf("DIAG,imuinit,accelMagMeanG=%.4f,accelMagStdG=%.4f,gyroMeanDps=%.3f/%.3f/%.3f\n",
                   mag.mean(), mag.stddev(), gyroX.mean(), gyroY.mean(), gyroZ.mean());
+    Serial.printf("DIAG,imuinit,i2cTransactions=%u,i2cErrors=%u\n", bus.transactions, bus.errors);
     Serial.printf("DIAG,imuinit,accelMagMinG=%.4f,accelMagMaxG=%.4f,gyroPeakDps=%.1f\n", mag.min(),
                   mag.max(), gyroPeak);
 }
