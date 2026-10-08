@@ -147,3 +147,8 @@ ready, enabled, frame, state, suppressing, accepted, rejected, candidates, click
 last{excursion,residual,durationMs}, sensitivity, returnTolerance, blocked}`. `state` is OFF, NEUTRAL, READY,
 OUTWARD, RETURN or SETTLING (the last three pause the pointer); `lastReject` is NONE, TOO_SMALL, CROSS_AXIS,
 NO_RETURN, NOT_BACK_TO_START, TIMEOUT or INVALID_SAMPLE.
+
+Hardware-only raw capture (bench): `capture start <1-10>` records raw sensor rows into RAM (1000 rows at
+most); `capture stop`; `capture get <offset>` makes the next frame carry up to 16 rows of that page
+(`capture.rows` = `[t_ms, gx, gy, gz, ax, ay, az]` in register units: gyro 131 LSB per deg/s, accel 16384 LSB
+per g, sensor coordinates). Status frames carry `capture` `{active, count, capacity}`. The simulator refuses it.

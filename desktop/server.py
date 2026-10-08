@@ -115,6 +115,21 @@ def command_for(data):
         raise ValueError("Invalid hands-free request")
     if action == "calibrate":
         return "calibrate guided" if data.get("guided") is True else "calibrate"
+    if action == "capture":
+        operation = data.get("op")
+        if operation == "start":
+            seconds = data.get("seconds")
+            if type(seconds) is not int or not 1 <= seconds <= 10:
+                raise ValueError("Capture length must be 1 to 10 seconds")
+            return f"capture start {seconds}"
+        if operation == "stop":
+            return "capture stop"
+        if operation == "get":
+            offset = data.get("offset")
+            if type(offset) is not int or not 0 <= offset < 1000:
+                raise ValueError("Capture offset must be 0 to 999")
+            return f"capture get {offset}"
+        raise ValueError("Invalid capture request")
     if action == "quick":
         operation = data.get("op")
         if operation == "practice" and data.get("frame") in ("fallback", "configured"):

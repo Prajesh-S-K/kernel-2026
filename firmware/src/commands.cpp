@@ -113,6 +113,33 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "capture") {
+#ifdef NODX_SIMULATED
+        ok = false;
+#else
+        std::string verb;
+        input >> verb;
+        if (verb == "start") {
+            unsigned seconds = 0;
+            ok = bool(input >> seconds) && (input >> std::ws).eof() && seconds >= 1 && seconds <= 10;
+            if (ok) {
+                captureState.count = 0;
+                captureState.untilMs = now + seconds * 1000u;
+                captureState.active = true;
+            }
+        } else if (verb == "stop") {
+            ok = (input >> std::ws).eof();
+            captureState.active = false;
+        } else if (verb == "get") {
+            unsigned long offset = 0;
+            ok = bool(input >> offset) && (input >> std::ws).eof() && offset < captureState.count;
+            if (ok) {
+                captureState.pageOffset = size_t(offset);
+            }
+        } else {
+            ok = false;
+        }
+#endif
     } else if (ok && operation == "quick") {
         std::string verb, value;
         input >> verb;

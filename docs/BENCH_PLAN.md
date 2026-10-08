@@ -386,3 +386,24 @@ comfortable tilts (5 orientations x 5 speeds x 3 amplitudes) clicked once; 600 s
 reversals and tremor gave 0 false clicks and 0 candidates (so 0 ms of suppression); incomplete returns,
 wandering, tiny tilts and timeouts were rejected with reasons. Real wearable recordings, false clicks, missed
 gestures and suppression time on a person are NOT measured yet and are reported separately when they are.
+
+## Real wearable recordings (tooling ready; nothing recorded yet)
+
+No real recording exists yet: the status stream is 10 Hz, too coarse for 150 ms confirmations, so the quick
+gesture was tuned on synthetic data only. The next firmware upload adds a passive raw capture (`capture
+start <1-10 s>`, `capture stop`, `capture get <offset>`; 16 KB of RAM, never affects control, simulator
+refuses it) and the host tools:
+
+* `python3 scripts/capture_session.py --label practice --seconds 10` writes
+  `hardware-evidence/captures/<time>-<label>.csv` (+ a small .json; local, git-ignored, no device identifiers).
+* `build/nodx_replay quick --practice practice.csv --eval pointing.csv --eval gestures.csv:2000,6000` replays
+  the practice through the same guided practice the device runs, configures the recognizer from it and reports,
+  per evaluation file: clicks, candidates, rejections, pointer-suppressed time (also as a percentage), and with
+  the intended gesture times (ms from the file start) hits, MISSED gestures and FALSE clicks.
+
+Plan for the attended recording session (wearing it, harmless target, nothing flashed beyond the authorised
+upload): (1) capture the practice while practising; (2) 10 s captures of normal pointing in several styles
+(slow, fast, reversals, diagonals, tremor-like, wrist rolls, head tilts); (3) 10 s captures with deliberate
+gestures at noted times; (4) replay all of it, report hits, misses, false clicks and suppression time as
+HARDWARE results, separately from the synthetic ones, and only then consider tuning the EXPERIMENTAL START
+values (which are never tuned on the same recordings used to report them).

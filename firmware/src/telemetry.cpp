@@ -121,6 +121,24 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     const size_t quickLength = quickJson(quick, sizeof(quick), s.quickStatus(now));
     append(buffer, sizeof(buffer), used, ",\"quick\":%s", quickLength ? quick : "{}");
 #ifndef NODX_SIMULATED
+    append(buffer, sizeof(buffer), used, ",\"capture\":{\"active\":%s,\"count\":%lu,\"capacity\":%lu",
+           captureState.active ? "true" : "false", (unsigned long)captureState.count,
+           (unsigned long)captureCapacity);
+    if (captureState.pageOffset != size_t(-1) && requestId != 0) {
+        append(buffer, sizeof(buffer), used, ",\"offset\":%lu,\"rows\":[",
+               (unsigned long)captureState.pageOffset);
+        const size_t end = std::min(captureState.count, captureState.pageOffset + capturePage);
+        for (size_t i = captureState.pageOffset; i < end; ++i) {
+            const CaptureRow& r = captureRows[i];
+            append(buffer, sizeof(buffer), used, "%s[%lu,%d,%d,%d,%d,%d,%d]", i == captureState.pageOffset ? "" : ",",
+                   (unsigned long)r.t, r.g[0], r.g[1], r.g[2], r.a[0], r.a[1], r.a[2]);
+        }
+        append(buffer, sizeof(buffer), used, "]");
+        captureState.pageOffset = size_t(-1);
+    }
+    append(buffer, sizeof(buffer), used, "}");
+#endif
+#ifndef NODX_SIMULATED
     // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
     const auto& snap = sensorSnapshot;
     append(buffer, sizeof(buffer), used,

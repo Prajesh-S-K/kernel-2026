@@ -264,6 +264,27 @@ class CommandValidation(HandsFreeCase):
         )
         self.assertEqual(SERVER.command_for({"action": "click", "op": "accept"}), "click accept")
         self.assertEqual(
+            SERVER.command_for({"action": "capture", "op": "start", "seconds": 8}),
+            "capture start 8",
+        )
+        self.assertEqual(SERVER.command_for({"action": "capture", "op": "stop"}), "capture stop")
+        self.assertEqual(
+            SERVER.command_for({"action": "capture", "op": "get", "offset": 32}), "capture get 32"
+        )
+        for bad in (
+            {"action": "capture"},
+            {"action": "capture", "op": "start"},
+            {"action": "capture", "op": "start", "seconds": 0},
+            {"action": "capture", "op": "start", "seconds": 11},
+            {"action": "capture", "op": "start", "seconds": 2.5},
+            {"action": "capture", "op": "start", "seconds": True},
+            {"action": "capture", "op": "get", "offset": -1},
+            {"action": "capture", "op": "get", "offset": 1000},
+            {"action": "capture", "op": "get"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        self.assertEqual(
             SERVER.command_for({"action": "quick", "op": "practice", "frame": "fallback"}),
             "quick practice fallback",
         )

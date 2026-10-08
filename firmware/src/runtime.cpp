@@ -1,4 +1,6 @@
 #include "runtime.hpp"
+#include <algorithm>
+#include <cmath>
 NVSStorage storage;
 I2CBus bus;
 MPU6050Sensor mpu(bus);
@@ -16,6 +18,23 @@ size_t gesturePosition = 0;
 #endif
 System* systemEngine = nullptr;
 SensorSnapshot sensorSnapshot;
+CaptureState captureState;
+CaptureRow captureRows[captureCapacity];
+void captureSample(const MotionSample& sample, uint32_t now) {
+    if (!captureState.active) {
+        return;
+    }
+    if (captureState.count >= captureCapacity || int32_t(now - captureState.untilMs) >= 0) {
+        captureState.active = false;
+        return;
+    }
+    CaptureRow& row = captureRows[captureState.count++];
+    row.t = now;
+    for (unsigned i = 0; i < 3; ++i) {
+        row.g[i] = int16_t(std::lround(std::clamp(sample.gyro[i] * 131.f, -32768.f, 32767.f)));
+        row.a[i] = int16_t(std::lround(std::clamp(sample.accel[i] * 16384.f, -32768.f, 32767.f)));
+    }
+}
 DebouncedSwitch pauseSwitch, calSwitch;
 uint32_t lastPoll = 0, lastSample = 0, lastProbe = 0, lastDiagnostic = 0;
 bool previousPause = false, previousCal = false;
@@ -154,6 +173,7 @@ void serviceRuntime() {
             for (unsigned i = 0; i < 3 && dt > 0 && dt <= 0.05; ++i) {
                 sensorSnapshot.angle[i] += double(sample.gyro[i]) * dt;
             }
+            captureSample(sample, now);
             sensorSnapshot.last = sample;
             sensorSnapshot.seen = true;
             sensorSnapshot.lastAtMs = now;
