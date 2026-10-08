@@ -41,8 +41,8 @@ All numeric values below are experimental starting settings. Bounds are defensiv
 | MPU scale | ±250°/s / ±2g | 131 LSB/(°/s), 16384 LSB/g | Raw conversion/real sensor checks |
 | Gyro map | yaw=Z, pitch=X, roll=Y; signs + | START mount | Verify all six signed motions |
 | Gravity map | mapped `{sensorY,-sensorX,sensorZ}` | START roll-Y convention | Gravity roll agrees with gyro roll |
-| Reprobe/telemetry | 1000 / 500 | ms | Recovery and serial bandwidth |
-| Buzzer transition pulse | 80 normal /300 Safe State | ms | Electrical driver/current and user comfort |
+| Reprobe/telemetry | 1000 / 200 | ms (telemetry 5 Hz, see v0.2.0 table; earlier value was 500) | Recovery and serial bandwidth |
+| Buzzer transition pulse | 80 normal /300 Safe State | ms; buzzer deferred, type and rating unknown, `NODX_BUZZER=-1` | Identify buzzer type, voltage and current first |
 
 The lab's 32/56/80px target diameters, 12 trials and geometry are experiment design constants, not validated accessibility settings. The stability readout `1/(1+filtered speed)` is an illustrative motion metric, not a measured personal ability/comfort score.
 

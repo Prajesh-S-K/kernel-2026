@@ -4,7 +4,7 @@ Version 0.1.0 · 8 October 2026. Scope recovered from the original design discus
 
 ## Product contract
 
-ESP32-S3, MPU6050 on a rigid headband, an accessible momentary selection switch, pause/calibration controls and an active buzzer. USB provides power/programming/debugging. BLE HID provides target interaction. Yaw → pointer X; pitch → pointer Y; roll → wheel. Switch press/release → mouse down/up, including hold/drag. Dwell is opt-in; movement cancels it, and meaningful movement is required after a click. Pause stops pointer/wheel, releases the button and disables dwell.
+ESP32-S3, MPU6050 on a rigid headband, an accessible momentary selection switch, pause/calibration controls. A buzzer is deferred: its type, voltage and current rating are unknown, it stays disconnected, and `NODX_BUZZER=-1`. USB provides power/programming/debugging. BLE HID provides target interaction. Yaw → pointer X; pitch → pointer Y; roll → wheel. Switch press/release → mouse down/up, including hold/drag. Dwell is opt-in; movement cancels it, and meaningful movement is required after a click. Pause stops pointer/wheel, releases the button and disables dwell.
 
 Personal calibration measures rest and comfortable directional movement. It generates bias, noise-dependent deadzones, directional gain and bounded smoothing. Smaller comfortable movement receives greater directional gain; excessive noise or insufficient controllable movement fails calibration rather than producing a misleading profile. Natural movement supplies a final sample window; it does not currently infer a medical ability or comfort score.
 
@@ -33,14 +33,14 @@ SimulatedSensor / ReplaySensor / MPU6050Sensor (future sensors implement Sensor)
 |---|---|
 | `core/include/nodx/sensor.hpp`, `core/src/sensor.cpp` | Standard timestamp/gyro/acceleration/valid sample; synthetic/fault input; timestamp-respecting replay; MPU register adapter; coordinate transforms; input health |
 | `core/include/nodx/profile.hpp`, `core/src/profile.cpp` | Bounds, explicit versioned wire encoding, CRC32, two-slot generation selection, validate/save/read-back; in-memory fault storage |
-| `CalibrationEngine` in `core/src/engine.cpp` | REST, LEFT, RIGHT, UP, DOWN, NATURAL, ANALYZE, VALIDATE, PROFILE_SAVE; candidate kept separate from active profile |
-| `MotionProcessor`, `AdaptiveEngine` | Sensor-to-motion processing, asymmetric gain, precision/normal/travel response, roll scroll |
-| `IntentEngine`, `InteractionEngine`, `SelectionManager` | Arbitration, command composition, switch debounce/drag, dwell arming/progress/cancel/lockout |
-| `SafetyManager`, `HIDManager` | Final permission and bounds; fractional reporting and button release |
-| `System`, `Diagnostics`, `Feedback` | State transitions, persistence coordination, reason/counters/cursor state; nonblocking state-change buzzer pulse |
+| `core/include/nodx/calibration.hpp`, `core/src/calibration.cpp` (`CalibrationEngine`) | REST, LEFT, RIGHT, UP, DOWN, NATURAL, ANALYZE, VALIDATE, PROFILE_SAVE; candidate kept separate from active profile |
+| `core/include/nodx/motion.hpp`, `core/src/motion.cpp` (`MotionProcessor`, `AdaptiveEngine`) | Sensor-to-motion processing, asymmetric gain, precision/normal/travel response, roll scroll |
+| `IntentEngine` in `motion`, `InteractionEngine` in `output.hpp`, `SelectionManager` in `selection` (`core/src/selection.cpp`) | Arbitration, command composition, switch debounce/drag, dwell arming/progress/cancel/lockout |
+| `core/include/nodx/output.hpp`, `core/src/output.cpp` (`SafetyManager`, `HIDManager`) | Final permission and bounds; fractional reporting and button release |
+| `core/include/nodx/system.hpp`, `core/src/system.cpp` (`System`, `Diagnostics`, `Feedback`) | State transitions, persistence coordination, reason/counters/cursor state; nonblocking state-change buzzer pulse logic (no buzzer is connected) |
 | `desktop/main.cpp` | Native engine process, durable POSIX file slots, line protocol, raw recording, CSV replay |
 | `desktop/server.py` | Loopback HTTP; serialized engine requests; raw trial JSONL; optional USB serial adapter |
-| `firmware/src/main.cpp` | GPIO/I²C adapter, NVS adapter, BLE report service, bounded serial commands and sampling scheduler |
+| `firmware/src/adapters.hpp`, `runtime.cpp`, `commands.cpp`, `telemetry.cpp`, `main.cpp` | `adapters.hpp`: I²C, NVS and BLE report service. `runtime.cpp`: GPIO controls and sampling scheduler. `commands.cpp`: bounded serial commands. `telemetry.cpp`: fixed-size telemetry. `main.cpp`: Arduino entry points only |
 | `ui/` | Setup/calibration, live trace/profile, geometric animated state cursor, control demo, Fitts-style lab |
 
 ## System states

@@ -63,13 +63,35 @@ pio run -e esp32s3 -e esp32s3-sim
 
 Images appear in `.pio/build/<environment>/firmware.bin`; ELF, bootloader and partition artifacts stay together in that build directory. `esp32s3` reads real MPU6050; `esp32s3-sim` supports synthetic serial `motion` and `fault` commands. Both compile the shared core. Compile success is not successful flashing or hardware validation.
 
-All GPIOs default to **-1 (disabled)**. After pin qualification, set build flags in `platformio.ini`, for example:
+### N16R8 bench environment (provisional, compile-only)
+
+`pio run -e esp32s3-n16r8-bench` builds with candidate settings for an ESP32-S3 N16R8 module (16 MB flash, 8 MB octal PSRAM): 16 MB flash size, `qio_opi` memory type, `opi` PSRAM and `BOARD_HAS_PSRAM`. It sets no GPIOs, and the existing 8 MB partition layout and NVS layout are unchanged. The released `esp32s3` and `esp32s3-sim` environments are unchanged.
+
+**Compiling does not qualify the physical board.** A successful build does not show that the exact purchased board's flash mode, PSRAM, USB or UART behavior, or pin availability is correct. Before uploading, identify the module marking and the board schematic, then record the result in EVIDENCE. The build was checked only by comparing image headers (16 MB flash size field versus 8 MB for `esp32s3`); no board was booted.
+
+**Unresolved: DIO image header.** Although `board_build.flash_mode = qio` is set, both the bootloader and application image headers of `esp32s3-n16r8-bench` (and of `esp32s3`) record DIO (`0x02`) as the flash mode. How this relates to the configured QIO and to what upload or the ROM bootloader actually uses has **not** been determined or verified. Do not assume upload corrects it. Resolve it by inspecting the upload command and by booting a real board, and record the outcome in EVIDENCE.
+
+#### Candidate wiring for later qualification (not approved, not in any environment)
+
+Confirm every pin against the exact board before wiring. On octal-PSRAM boards avoid GPIO35, GPIO36 and GPIO37; also avoid USB GPIO19/GPIO20, strapping pins and UART pins unless checked.
+
+| Connection | Candidate | Note |
+|---|---|---|
+| MPU SDA / SCL | GPIO8 / GPIO9 (`NODX_SDA`, `NODX_SCL`) | Pull-ups to 3.3 V; start at 100 kHz |
+| Selection switch | GPIO4 to GND (`NODX_SWITCH`) | Active low, internal pull-up |
+| Pause switch | GPIO5 to GND (`NODX_PAUSE`) | Accessible physical pause recommended |
+| Calibration switch | GPIO6 to GND (`NODX_CALIBRATE`) | Optional |
+| Buzzer | None | Deferred; `NODX_BUZZER=-1` |
+
+To try them after qualification, add the flags to a separate bench environment; never to the released ones.
+
+All GPIOs default to **-1 (disabled)** in every environment, including `esp32s3-n16r8-bench`. After pin qualification, set build flags in `platformio.ini`, for example:
 
 ```ini
-build_flags = ${env.build_flags} -DNODX_SDA=8 -DNODX_SCL=9 -DNODX_SWITCH=4 -DNODX_PAUSE=5 -DNODX_CALIBRATE=6 -DNODX_BUZZER=7
+build_flags = ${env.build_flags} -DNODX_SDA=8 -DNODX_SCL=9 -DNODX_SWITCH=4 -DNODX_PAUSE=5 -DNODX_CALIBRATE=6
 ```
 
-These numbers are illustrative START candidates, not approved wiring. Selection/pause/calibration are active-low INPUT_PULLUP; buzzer is active-high logic to a qualified driver circuit. Verify voltages, pin conflicts, external pull-ups, buzzer current and sensor address independently. Verify gyro/gravity axis transforms in `AxisTransform`. Do not wear an unqualified wired assembly.
+These numbers are illustrative START candidates, not approved wiring. Selection/pause/calibration are active-low INPUT_PULLUP. The buzzer is **deferred**: the HXD part's type (active or passive), voltage and current are unknown, so leave it disconnected and keep `NODX_BUZZER=-1`. Do not drive it from a GPIO until it is identified and a qualified driver circuit exists. Verify voltages, pin conflicts, external pull-ups and sensor address independently. Verify gyro/gravity axis transforms in `AxisTransform`. Do not wear an unqualified wired assembly.
 
 After physical qualification, build then flash with `pio run -e esp32s3 -t upload`; serial monitor: `pio device monitor`. Pair the BLE mouse and ensure encryption/report subscription before calibration. Monitor provides instructions via `status`/phase telemetry. Commands: `calibrate`, `cancel`, `resume`, `pause`, `load`, `generic`, `dwell on/off`, `scroll on/off`. Physical pause/calibration buttons trigger the same state transitions. Simulated firmware additionally accepts `motion <yaw> <pitch> <roll>` and `fault <0..5>`.
 
