@@ -53,5 +53,38 @@ constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 // pixels. The dwell duration is the progress phase; the selection manager's 250 ms arming precedes it.
 constexpr uint32_t uncalDwellMs = 1200;
 constexpr float uncalDwellTolerance = 8.f;
+// One Euro smoothing for configured control. EXPERIMENTAL START values: chosen on synthetic recordings
+// only (tests/test_mapping.cpp prints the comparison with the old EMA); not hardware-measured.
+constexpr float oneEuroMinCutoffHz = 2.0f;
+constexpr float oneEuroBeta = 0.02f;
+constexpr float oneEuroDerivativeCutoffHz = 2.0f;
+// Guided mapping (teaching). START values, not measured on users.
+constexpr uint32_t mapStillMs = 2000;       // qualified stillness required (contiguous)
+constexpr uint32_t mapStillWindowMs = 10000; // time allowed to get it
+constexpr float mapStillGyroDeviation = 4.f;   // deg/s from the running mean while "still"
+constexpr float mapStillAccelDeviation = .08f; // g from the running mean while "still"
+constexpr uint32_t mapCountdownMs = 3000;   // 3-2-1 before each example
+constexpr uint32_t mapOnsetWindowMs = 2000; // time to start moving after "go"
+constexpr uint32_t mapMaxMoveMs = 2500;     // longest accepted movement
+constexpr uint32_t mapSettleMs = 1500;      // return-to-centre cue (samples ignored)
+constexpr uint32_t mapMinMoveMs = 120;
+constexpr uint32_t mapCalmMs = 150;         // calm this long = movement finished
+constexpr float mapOnsetFloor = 12.f;       // deg/s, also at least 8 sigma
+constexpr float mapExitFloor = 6.f;         // deg/s, also at least 4 sigma
+constexpr float mapMinAngle = 6.f;          // degrees of net rotation per example
+constexpr float mapMinStraightness = .6f;   // net rotation / path length
+constexpr float mapConsistency = .8f;       // cosine to the earlier examples of a direction
+constexpr float mapOppositeMax = -.8f;      // right vs left and up vs down must be this opposed
+constexpr float mapSeparationMax = .5f;     // |cos| of horizontal vs vertical
+constexpr unsigned mapExamples = 3;         // per direction, plus one validation each
+constexpr unsigned mapMaxRetries = 3;       // per example
+constexpr float mapTravelPixels = 300.f;    // output units a comfortable movement should cover
+constexpr float mapGainFallback = 12.f;
+constexpr float mapDeadzoneSigmas = 4.f;
+constexpr float mapDeadzoneFloor = .8f;
+constexpr float mapDeadzoneCap = 10.f;
+constexpr float mapHysteresis = .6f;        // exit threshold / enter threshold
+constexpr float mapMountingToleranceDeg = 25.f; // gravity direction change that needs relearning
+constexpr uint32_t mapPreviewTimeoutMs = 120000;
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

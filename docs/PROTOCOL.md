@@ -69,6 +69,8 @@ encoding are unchanged; old clients ignore the new object.
 | `handsfree demo on\|off` | `{"action":"handsfree","op":"demo","enabled":bool}` | Temporary movement-only demo (RAM only, off at every boot, never saved): no dwell click, no drag (the drag gesture is refused and counted), no wheel, pointer steps bounded to 6 px per report; the enable input and every safety check are unchanged. Changing it while control is active pauses control. Reported as `handsFree.demoMovementOnly` |
 | `handsfree uncal start\|stop` | `{"action":"handsfree","op":"uncal","enabled":bool}` | Temporary UNCALIBRATED pointer demo (see `docs/BENCH_PLAN.md`): RAM-only validated demo profile, movement only, never saved, never started by a connection or reboot. `start` is refused (ok:false, reason set) unless the sensor is healthy, the axis mapping valid, BLE connected, the enable button is wired and has been pressed, and no calibration/training/fault/active control exists; an enable-button permission is required (`needsEnable`, `present`, `permitted` in the status). Any stop (Stop demo, the next button press, calibration, pause, fault, disconnect, delivery failure) needs an explicit new start. Reported as `handsFree.uncalDemo` `{active, blocked, profileState, gain, deadzone, maxStep}`; `profileState` is MISSING, VALID or CORRUPT (a corrupt record is never repaired) |
 | `handsfree uncal reverse <h 0\|1> <v 0\|1>` | `{"action":"handsfree","op":"uncalreverse","horizontal":bool,"vertical":bool}` | Flip the fallback's horizontal and/or vertical pointer direction. RAM only; reported as `uncalDemo.reverseX/reverseY` |
+| `map start\|cancel\|accept\|save\|clear` | `{"action":"map","op":"start"}` etc. | Guided mapping. `start` needs a healthy sensor and BLE and no active control; teaching never moves the pointer and is never started by a boot, reconnect or fault. `accept` (only in the preview) makes the learned mapping active in RAM and does NOT write storage. `save` is explicit, transactional (two slots, version, checksum) and refused while control is active; a failed save keeps the RAM mapping and the previous stored one (`saveResult` SAVE_FAILED_RAM_ONLY). `clear` forgets the RAM mapping only |
+| `control start\|stop` | `{"action":"control","op":"start"}` | Configured control with the learned mapping: same safety rules as the uncalibrated fallback (healthy sensor, valid mapping, BLE, enable-button permission, never automatic), plus a valid learned mapping and an unchanged mounting (gravity within 25 degrees). Movement only. `stop` is always accepted |
 | `handsfree uncal dwell on\|off` | `{"action":"handsfree","op":"uncaldwell","enabled":bool}` | Explicitly enable dwell clicking inside the RUNNING uncalibrated demo (refused when the demo is not running). Off at every start; cleared by every stop. One primary-button click per completed dwell; no drag, double-click, right-click or scrolling |
 | `handsfree uncal dwell set <ms> <tolerance>` | `{"action":"handsfree","op":"uncaldwellset","ms":int,"tolerance":number}` | Temporary dwell settings, RAM only, validated (500-5000 ms, tolerance 2-50). A running dwell restarts. Reported in `handsFree.uncalDemo.dwell` `{enabled, ms, tolerance, state, progress, clicks}`; `dwellProgress` (top level) follows the profile in use |
 | `handsfree enable maintained\|momentary` | `{"action":"handsfree","op":"enable","kind":"momentary"}` | Stages the enable-input kind (default for a new setup: `momentary`); stored only by `handsfree commit`. `handsFree.switch` reports `kind`, `kindStaged`, `pressed` (raw), `latched` (button permission), `armed`, `on`, `permitted` |
@@ -110,3 +112,17 @@ trial that differs from its context. Aborted rows keep `abortReason` (for exampl
 **Replay CSV** may carry a ninth `enable` column (0/1, default 1). Native recordings now write it.
 
 Hardware status frames also carry `axes` `{valid, gyro, gyroSigns, accel, accelSigns}` (the active axis mapping: mapped yaw, pitch, roll take sensor gyro axis indices 0=X, 1=Y, 2=Z). The status frame buffer is 3072 bytes; a frame that does not fit is dropped, so the firmware tests keep it below 2300.
+
+Status frames also carry `mapping` `{phase, cue, step, steps, direction, validation, example, perDirection,
+retries, interruptions, cueMs, stillMs, windowMs, progress, reason, preview{x,y,angleX,angleY}, bias, noise,
+learnedValid, unsaved, stored, mode, blocked, saveResult}`. `mode` is OFF, UNCALIBRATED_DEMO or CONFIGURED;
+`stored` is MISSING, VALID or CORRUPT (a corrupt record is never used or overwritten); `unsaved` is true while
+the active mapping exists only in RAM; `blocked` is why configured control cannot start. New system state
+`TEACHING`.
+
+Learned-settings record (separate from the 84-byte profile and the hands-free record; NVS namespace
+`nodx-ctl`, keys `ctl0`/`ctl1`; files `ctl0.bin`/`ctl1.bin` in the simulator): 120 bytes, little-endian, magic
+`CNTL`, schema 1, generation, horizontal row (3 floats), vertical row, gyro bias, noise sigma, gravity, gain
+L/R/U/D, One Euro min cutoff / beta / derivative cutoff, deadzone enter x2, deadzone exit x2, CRC-32.
+Decoding rejects a wrong size, magic, schema or checksum, non-finite values, rows that are not unit and
+orthogonal, and out-of-range parameters.

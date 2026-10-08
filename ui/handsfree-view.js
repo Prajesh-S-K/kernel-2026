@@ -99,7 +99,7 @@ export function createHandsFreeView({ $, action, toast }) {
         ? `${view.accepted} of ${view.required} examples accepted`
         : `${view.required} examples are needed per gesture`;
     const driven = canDrive(device);
-    const setupBlocked = !device.hasProfile || ['CALIBRATING', 'SAFE_STATE'].includes(device.state);
+    const setupBlocked = !device.hasProfile || ['CALIBRATING', 'SAFE_STATE', 'TEACHING'].includes(device.state);
     const busy = device.state === 'TRAINING' && !view.failed;
     $('trainPause').disabled = setupBlocked || busy;
     $('trainDrag').disabled = setupBlocked || busy;

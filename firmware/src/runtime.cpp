@@ -7,6 +7,8 @@ BLEHID ble;
 ProfileRepository repository(storage);
 NVSConfigStorage configStorage;
 HandsFreeRepository configRepository(configStorage);
+NVSControlStorage controlStorage;
+ControlRepository controlRepository(controlStorage);
 #ifdef NODX_SIMULATED
 bool simulatedEnable = false; // raw enable input: released
 std::vector<Rates> gestureScript;
@@ -26,7 +28,7 @@ const char* bootResetReason = "UNKNOWN";
 void initializeRuntime() {
     Serial.begin(115200);
     Serial.println("[NODX] 0.2.0 pre-hardware; START parameters; ESP32-S3");
-    bool storageOK = storage.begin() && configStorage.begin();
+    bool storageOK = storage.begin() && configStorage.begin() && controlStorage.begin();
     Serial.println(storageOK ? "[STORAGE] initialized" : "[STORAGE] failed");
     for (int pin : {NODX_SWITCH, NODX_PAUSE, NODX_CALIBRATE, NODX_ENABLE}) {
         if (pin >= 0) {
@@ -46,6 +48,7 @@ void initializeRuntime() {
                          : "[IMU] unavailable; outputs inhibited");
     ble.begin();
     systemEngine = new System(ble, repository, configRepository);
+    systemEngine->setControlRepository(controlRepository);
     // Hands-free needs the enable input (switch or push button); without NODX_ENABLE control stays
     // inhibited unless setup qualified an alternative.
 #ifdef NODX_SIMULATED

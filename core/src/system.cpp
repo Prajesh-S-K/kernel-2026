@@ -21,6 +21,8 @@ const char* name(SystemState state) {
         return "SAFE_STATE";
     case SystemState::Training:
         return "TRAINING";
+    case SystemState::Teaching:
+        return "TEACHING";
     }
     return "SAFE_STATE";
 }
@@ -74,6 +76,7 @@ void System::loadConfig() {
 void System::resetInteraction(uint32_t now) {
     selection_.reset(lastRaw_, now);
     processor_.reset();
+    controlProc_.reset();
     hid_.reset();
     diagnostics_.motion = {};
     dragging_ = false;
@@ -99,6 +102,10 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     if (state_ == SystemState::Training) {
         trainer_.cancel();
     }
+    if (state_ == SystemState::Teaching) {
+        teacher_.cancel();
+    }
+    configured_ = false;
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
     uncalDwell_ = false;
@@ -113,6 +120,10 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
 }
 
 void System::stop(SystemState next, uint32_t now) {
+    if (state_ == SystemState::Teaching && next != SystemState::Teaching) {
+        teacher_.cancel();
+    }
+    configured_ = false;
     uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
     uncalDwell_ = false; // dwell clicking never outlives the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
@@ -277,7 +288,18 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
 
     const bool inputsValid = fault == FaultCode::None;
+    if (inputsValid) {
+        lastAccel_ = {raw.accel[0], raw.accel[1], raw.accel[2]};
+    }
     const MotionSample mapped = axes.apply(raw);
+    if (state_ == SystemState::Teaching && inputsValid) {
+        teacher_.tick(raw, now);
+        if (teacher_.phase() == MapPhase::Failed) {
+            const char* why = teacher_.status(now).reason;
+            stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, now);
+            diagnostics_.reason = why; // the plain-words reason stays visible
+        }
+    }
     if (state_ == SystemState::Calibrating && inputsValid) {
         advanceCalibration(mapped, now);
     }
@@ -302,7 +324,10 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     diagnostics_.motion = {};
     // Invalid input/profile never reaches control math or telemetry numbers.
     if (inputsValid && control.valid()) {
-        diagnostics_.motion = processor_.process(mapped, control, dtSeconds);
+        // Configured control projects the RAW gyro on the learned rows; everything else uses the
+        // default axis mapping and the EMA processor.
+        diagnostics_.motion = uncal_ && configured_ ? controlProc_.process(raw, learned_)
+                                                    : processor_.process(mapped, control, dtSeconds);
         intent = adaptive_.apply(diagnostics_.motion, control, dtSeconds);
     }
     bool scrolling = intent.wheel != 0;
@@ -312,7 +337,7 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         scrolling = false;
     }
     intent = intent_.resolve(intent, active, scrolling);
-    if (uncal_) {
+    if (uncal_ && !configured_) { // learned mapping needs no reversal: relearn instead
         intent.dx = uncalReverseX_ ? -intent.dx : intent.dx;
         intent.dy = uncalReverseY_ ? -intent.dy : intent.dy;
     }
@@ -690,12 +715,21 @@ ProfileState System::profileState() const {
                : ProfileState::Missing;
 }
 
+UserProfile System::configuredProfile() const {
+    UserProfile configured; // learned gains; thresholds stay at the START values; no scrolling
+    configured.gain = learned_.gain;
+    configured.deadzone = {learned_.deadzoneEnter[0], learned_.deadzoneEnter[1]};
+    return configured;
+}
 UserProfile System::uncalibratedDemoProfile() const {
-    UserProfile demo; // bias 0: no rest measurement exists, so the deadzone must cover idle bias
-    demo.deadzone = {start::uncalDemoDeadzone, start::uncalDemoDeadzone};
-    demo.gain = {start::uncalDemoGain, start::uncalDemoGain, start::uncalDemoGain,
-                 start::uncalDemoGain};
-    demo.alpha = start::uncalDemoAlpha;
+    // bias 0: no rest measurement exists in the fallback, so its deadzone must cover idle bias
+    UserProfile demo = configured_ ? configuredProfile() : UserProfile{};
+    if (!configured_) {
+        demo.deadzone = {start::uncalDemoDeadzone, start::uncalDemoDeadzone};
+        demo.gain = {start::uncalDemoGain, start::uncalDemoGain, start::uncalDemoGain,
+                     start::uncalDemoGain};
+        demo.alpha = start::uncalDemoAlpha;
+    }
     demo.dwellEnabled = uncalDwell_; // movement-only unless dwell clicking was explicitly enabled
     demo.dwellMs = uncalDwellMs_;
     demo.dwellTolerance = uncalDwellTolerance_;
@@ -703,7 +737,7 @@ UserProfile System::uncalibratedDemoProfile() const {
     return demo;
 }
 
-const char* System::uncalibratedDemoBlocker() const {
+const char* System::sessionBlocker(bool configured) const {
     if (uncal_ || state_ == SystemState::Active) {
         return "control is already active";
     }
@@ -712,6 +746,9 @@ const char* System::uncalibratedDemoBlocker() const {
     }
     if (state_ == SystemState::Training) {
         return "gesture training in progress";
+    }
+    if (state_ == SystemState::Teaching) {
+        return "mapping teaching in progress";
     }
     if (state_ == SystemState::SafeState) {
         return "safe state: wait for the fault to clear";
@@ -725,26 +762,44 @@ const char* System::uncalibratedDemoBlocker() const {
     if (healthyChecks_ < start::recoverySamples) {
         return "waiting for healthy sensor samples";
     }
+    if (configured) {
+        if (!learnedValid_) {
+            return "no learned mapping: teach the movements first";
+        }
+        // A changed mounting changes which gyro axes mean left/right/up/down.
+        if (dot(lastAccel_, learned_.gravity) <
+            norm(lastAccel_) * std::cos(start::mapMountingToleranceDeg * 3.14159265f / 180.f)) {
+            return "mounting changed: teach the movements again";
+        }
+    }
     if (uncalNeedsEnable_ && !uncalGate_.present()) {
         return "enable button not present";
     }
     if (uncalNeedsEnable_ && !uncalGate_.permitted()) {
         return "press the enable button first";
     }
-    if (!uncalibratedDemoProfile().valid()) {
+    if (!configured && !uncalibratedDemoProfile().valid()) {
         return "demo configuration invalid";
     }
     return nullptr;
 }
+const char* System::uncalibratedDemoBlocker() const {
+    return sessionBlocker(false);
+}
+const char* System::configuredBlocker() const {
+    return sessionBlocker(true);
+}
 
-bool System::startUncalibratedDemo(uint32_t now) {
-    if (const char* blocker = uncalibratedDemoBlocker()) {
+bool System::startSession(uint32_t now, bool configured) {
+    if (const char* blocker = sessionBlocker(configured)) {
         diagnostics_.reason = blocker;
         return false;
     }
     uncalDwell_ = false; // every start is movement-only until dwell is enabled again
+    configured_ = configured;
     uncalProfile_ = uncalibratedDemoProfile();
     if (!emitStationary()) {
+        configured_ = false;
         enterSafe(FaultCode::Transport, now);
         return false;
     }
@@ -753,8 +808,131 @@ bool System::startUncalibratedDemo(uint32_t now) {
     uncal_ = true; // after resetInteraction(); never persisted, never reported as calibration
     uncalClicks_ = 0;
     diagnostics_.faultCode = FaultCode::None;
-    diagnostics_.reason = "uncalibrated demo active; movement only";
+    diagnostics_.reason = configured ? "configured control active; movement only"
+                                     : "uncalibrated demo active; movement only";
     return true;
+}
+bool System::startUncalibratedDemo(uint32_t now) {
+    return startSession(now, false);
+}
+bool System::startConfiguredControl(uint32_t now) {
+    return startSession(now, true);
+}
+
+void System::setControlRepository(ControlRepository& repository) {
+    controlRepo_ = &repository;
+    LearnedControl stored;
+    if (repository.load(stored)) {
+        learned_ = stored; // available in RAM, never activated by itself
+        learnedValid_ = true;
+        learnedSaved_ = true;
+    }
+    controlRecord_ = repository.state();
+}
+const char* System::teachBlocker() const {
+    if (uncal_ || state_ == SystemState::Active) {
+        return "control is active: stop it first";
+    }
+    if (state_ == SystemState::Calibrating || state_ == SystemState::Training ||
+        state_ == SystemState::Teaching) {
+        return "another setup is in progress";
+    }
+    if (state_ == SystemState::SafeState) {
+        return "safe state: wait for the fault to clear";
+    }
+    if (!transport_.connected()) {
+        return "BLE link unavailable";
+    }
+    if (healthyChecks_ < start::recoverySamples) {
+        return "waiting for healthy sensor samples";
+    }
+    return nullptr;
+}
+bool System::teachStart(uint32_t now) {
+    if (const char* blocker = teachBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    stop(SystemState::Teaching, now); // releases output first
+    if (state_ != SystemState::Teaching) {
+        return false;
+    }
+    teacher_.begin(now);
+    diagnostics_.reason = "mapping teaching: hold the assembly completely still";
+    return true;
+}
+void System::teachCancel() {
+    if (state_ != SystemState::Teaching) {
+        return;
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ != SystemState::SafeState) {
+        diagnostics_.reason = "teaching cancelled; previous settings kept";
+    }
+}
+bool System::teachAccept() {
+    if (state_ != SystemState::Teaching || !teacher_.accept()) {
+        return false;
+    }
+    const LearnedControl candidate = teacher_.candidate();
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ == SystemState::SafeState || !candidate.valid()) {
+        return false;
+    }
+    learned_ = candidate;
+    learnedValid_ = true;
+    learnedSaved_ = false;
+    saveResult_ = "";
+    diagnostics_.reason = "mapping accepted and active in memory; not saved yet";
+    return true;
+}
+bool System::teachSave() {
+    if (!learnedValid_) {
+        saveResult_ = "NOTHING_TO_SAVE";
+        return false;
+    }
+    if (!controlRepo_) {
+        saveResult_ = "NO_STORAGE";
+        return false;
+    }
+    if (uncal_ || state_ == SystemState::Active || state_ == SystemState::Teaching) {
+        saveResult_ = "STOP_CONTROL_FIRST";
+        return false;
+    }
+    if (controlRepo_->save(learned_)) {
+        learnedSaved_ = true;
+        controlRecord_ = controlRepo_->state();
+        saveResult_ = "SAVED";
+        diagnostics_.reason = "mapping saved";
+        return true;
+    }
+    // Previous stored settings are untouched and the RAM settings keep working.
+    saveResult_ = "SAVE_FAILED_RAM_ONLY";
+    diagnostics_.reason = "saving failed; the mapping works in memory only";
+    return false;
+}
+void System::clearLearned() {
+    if (uncal_ && configured_) {
+        stopUncalibratedDemo("learned mapping cleared; explicit restart required");
+    }
+    learnedValid_ = false;
+    learnedSaved_ = false;
+    saveResult_ = "";
+}
+MappingStatus System::mappingStatus(uint32_t now) const {
+    MappingStatus st = teacher_.status(now);
+    st.learnedValid = learnedValid_;
+    st.unsaved = learnedValid_ && !learnedSaved_;
+    st.stored = name(controlRecord_);
+    st.mode = !uncal_ ? "OFF" : configured_ ? "CONFIGURED" : "UNCALIBRATED_DEMO";
+    const char* blocker = configuredBlocker();
+    st.blocked = uncal_ ? "" : (blocker ? blocker : "");
+    st.saveResult = saveResult_;
+    if (learnedValid_ && teacher_.phase() == MapPhase::Idle) {
+        st.bias = learned_.bias;
+        st.noise = learned_.noise;
+    }
+    return st;
 }
 
 void System::stopUncalibratedDemo(const char* reason) {

@@ -33,6 +33,37 @@
 #endif
 
 using namespace nodx;
+// Learned-control settings: its own NVS namespace and keys, so the 84-byte profile and the
+// hands-free record are never touched. A record of the wrong size is reported as one invalid
+// byte (corrupt), not as missing.
+class NVSControlStorage : public ProfileStorage {
+public:
+    bool begin() {
+        return prefs_.begin("nodx-ctl", false);
+    }
+    std::vector<uint8_t> read(unsigned slot) override {
+        const char* key = slot ? "ctl1" : "ctl0";
+        const size_t size = prefs_.getBytesLength(key);
+        if (size == 0) {
+            return {};
+        }
+        if (size > 256) {
+            return {0xff};
+        }
+        std::vector<uint8_t> bytes(size);
+        if (prefs_.getBytes(key, bytes.data(), size) != size) {
+            return {0xff};
+        }
+        return bytes;
+    }
+    bool write(unsigned slot, const std::vector<uint8_t>& bytes) override {
+        return bytes.size() <= 256 &&
+               prefs_.putBytes(slot ? "ctl1" : "ctl0", bytes.data(), bytes.size()) == bytes.size();
+    }
+
+private:
+    Preferences prefs_;
+};
 class NVSStorage : public ProfileStorage {
 public:
     bool begin() {

@@ -44,6 +44,36 @@ bool durableWrite(const std::string& root, const std::string& target,
     ::close(directory);
     return synced;
 }
+// Learned-control slots ctl0.bin / ctl1.bin; wrong-sized files are reported as corrupt, not missing.
+class FileControlStorage : public ProfileStorage {
+public:
+    explicit FileControlStorage(std::string root) : root_(std::move(root)) {
+        std::filesystem::create_directories(root_);
+    }
+    std::vector<uint8_t> read(unsigned slot) override {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path(slot), error);
+        if (error || size == 0) {
+            return {};
+        }
+        if (size > 256) {
+            return {0xff};
+        }
+        std::ifstream file(path(slot), std::ios::binary);
+        std::vector<uint8_t> bytes(size);
+        file.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+        return file ? bytes : std::vector<uint8_t>{0xff};
+    }
+    bool write(unsigned slot, const std::vector<uint8_t>& bytes) override {
+        return bytes.size() <= 256 && durableWrite(root_, path(slot), bytes);
+    }
+
+private:
+    std::string root_;
+    std::string path(unsigned slot) {
+        return root_ + "/ctl" + std::to_string(slot) + ".bin";
+    }
+};
 class FileStorage : public ProfileStorage {
 public:
     explicit FileStorage(std::string root) : root_(std::move(root)) {
@@ -149,6 +179,9 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     char hands[handsFreeJsonCapacity];
     const size_t handsLength = handsFreeJson(hands, sizeof hands, s.handsFreeStatus());
     std::cout << ",\"handsFree\":" << (handsLength ? hands : "{}");
+    char mapping[mappingJsonCapacity];
+    const size_t mappingLength = mappingJson(mapping, sizeof mapping, s.mappingStatus(now));
+    std::cout << ",\"mapping\":" << (mappingLength ? mapping : "{}");
     std::cout << ",\"reports\":[";
     for (size_t j = 0; j < hid.reports.size(); ++j) {
         const auto& r = hid.reports[j];
@@ -233,7 +266,10 @@ int main(int argc, char** argv) {
         FileConfigStorage configStorage(argc > 1 ? argv[1] : "runtime");
         HandsFreeRepository configRepo(configStorage);
         SimHID transport;
+        FileControlStorage controlStorage(argc > 1 ? argv[1] : "runtime");
+        ControlRepository controlRepo(controlStorage);
         System sys(transport, repo, configRepo);
+        sys.setControlRepository(controlRepo);
         sys.configureEnableInput(true); // the simulator has a simulated enable input
         bool simEnable = false;         // raw input: switch ON / button pressed; released at start
         sys.axes.axes = {0, 1, 2};      // desktop inputs already yaw/pitch/roll
@@ -429,6 +465,34 @@ int main(int argc, char** argv) {
                     } else if (ok) {
                         ok = sys.trainAccept();
                     }
+                } else {
+                    ok = false;
+                }
+            } else if (op == "map") {
+                std::string verb;
+                cmd >> verb;
+                ok = (cmd >> std::ws).eof();
+                if (ok && verb == "start") {
+                    ok = sys.teachStart(now);
+                } else if (ok && verb == "cancel") {
+                    sys.teachCancel();
+                } else if (ok && verb == "accept") {
+                    ok = sys.teachAccept();
+                } else if (ok && verb == "save") {
+                    ok = sys.teachSave();
+                } else if (ok && verb == "clear") {
+                    sys.clearLearned();
+                } else {
+                    ok = false;
+                }
+            } else if (op == "control") {
+                std::string verb;
+                cmd >> verb;
+                ok = (cmd >> std::ws).eof();
+                if (ok && verb == "start") {
+                    ok = sys.startConfiguredControl(now);
+                } else if (ok && verb == "stop") {
+                    sys.stopUncalibratedDemo("control stopped by the user; explicit restart required");
                 } else {
                     ok = false;
                 }

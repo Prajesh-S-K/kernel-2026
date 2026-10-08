@@ -170,8 +170,8 @@ class SetupAndDailyWorkflow(HandsFreeCase):
         for state in states:
             encoded = json.dumps(state, allow_nan=False, separators=(",", ":"))
             self.assertIn("handsFree", state)
-            # Firmware frames are bounded at 2048 bytes; keep real headroom for longer reasons.
-            self.assertLess(len(encoded), 1900)
+            # Firmware frames are bounded at 4096 bytes; keep real headroom for longer reasons.
+            self.assertLess(len(encoded), 3000)  # firmware frame buffer is 4096 bytes
 
 
 class CommandValidation(HandsFreeCase):
@@ -250,6 +250,22 @@ class CommandValidation(HandsFreeCase):
         )
         with self.assertRaises(ValueError):
             SERVER.command_for({"action": "handsfree", "op": "uncalreverse", "horizontal": True})
+        for operation in ("start", "cancel", "accept", "save", "clear"):
+            self.assertEqual(
+                SERVER.command_for({"action": "map", "op": operation}), f"map {operation}"
+            )
+        for operation in ("start", "stop"):
+            self.assertEqual(
+                SERVER.command_for({"action": "control", "op": operation}), f"control {operation}"
+            )
+        for bad in (
+            {"action": "map", "op": "stop"},
+            {"action": "map"},
+            {"action": "control", "op": "accept"},
+            {"action": "control", "op": "start; rm"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
         self.assertEqual(
             SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": True}),
             "handsfree uncal dwell on",

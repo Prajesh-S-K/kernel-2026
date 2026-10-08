@@ -454,6 +454,17 @@ void hardwareChecks() {
     expect(refused(send("handsfree uncal reverse 2 0")), "bad reversal value refused");
     expect(refused(send("handsfree uncal reverse 1")), "missing reversal value refused");
     expect(ok(send("handsfree uncal reverse 0 0")), "reversal cleared");
+    expect(refused(send("map start")), "teaching refused before the sensor is healthy");
+    expect(refused(send("map accept")), "accept needs a preview");
+    expect(refused(send("map save")), "nothing to save");
+    expect(refused(send("map sideways")), "bad map verb refused");
+    expect(refused(send("map start now")), "trailing text refused");
+    expect(ok(send("map cancel")) && ok(send("map clear")), "cancel and clear are always accepted");
+    expect(refused(send("control start")), "configured control needs a learned mapping");
+    expect(refused(send("control sideways")), "bad control verb refused");
+    expect(ok(send("control stop")), "stop is always accepted");
+    expect(has(status(), "\"mapping\":{\"phase\":\"IDLE\""), "mapping status reported");
+    expect(has(status(), "\"stored\":\"MISSING\""), "no stored mapping");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

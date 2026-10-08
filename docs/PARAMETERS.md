@@ -83,6 +83,15 @@ qualification; a held switch must release and the user must resume explicitly.
 | BLE movement notification gap | 20 ms (idle zero reports sent once) | ms | START; whether 50 Hz movement is smooth enough on the Mac |
 | Uncalibrated demo dwell | 1200 ms dwell (plus the selection manager's 250 ms arming), tolerance 8 outgoing-HID movement units, lockout radius 1.5 x tolerance | ms / HID units | START, RAM only, adjustable (500-5000 ms, 2-50). Units are accumulated outgoing HID movement; the host applies pointer acceleration, so they are NOT verified screen pixels. Whether 1.2 s and 8 units suit a real user and the Mac's acceleration |
 | Uncalibrated demo step bound | 4 px per report, both axes | px | START; stricter than the 6 px movement-only demo bound |
+| One Euro filter (configured control) | min cutoff 2.0 Hz, beta 0.02 Hz per deg/s^2, derivative cutoff 2.0 Hz | Hz | EXPERIMENTAL START, picked on synthetic recordings only (`tests/test_mapping.cpp` prints the comparison with the old EMA). Real head/hand recordings at 100 Hz on hardware are needed before choosing release defaults |
+| Learned deadzone | enter = clamp(4 sigma of the projected gyro noise, 0.8, 10) deg/s; exit = 0.6 x enter (hysteresis) | deg/s | START; sigma comes from the 2 s stillness measurement |
+| Stillness measurement | 2000 ms contiguous within a 10 s window; each axis within 4 deg/s and gravity within 0.08 g of the running mean | ms / deg/s / g | START; bias must be within 20 deg/s and sigma at most 4 deg/s |
+| Teaching cues | 3 s countdown, 2 s to start moving, 2.5 s longest movement, 1.5 s return-to-centre, calm 150 ms ends a movement | ms | START; whether people find the pacing comfortable |
+| Teaching examples | 3 per direction plus 1 check each, 3 retries per example | count | START |
+| Example acceptance | onset max(12, 8 sigma) deg/s, exit max(6, 4 sigma); net rotation at least 6 deg, at least 0.6 of the path length, 0.8 cosine to earlier examples of the same direction | deg/s / deg / cosine | START |
+| Direction checks | right vs left and up vs down cosine at most -0.8; horizontal vs vertical |cosine| at most 0.5 | cosine | START; rejects inconsistent or indistinguishable directions |
+| Learned gain | 300 / (mean taught rotation in degrees), clamped 3 to 40 px/deg per direction | px/deg | START; 300 is a guess at a comfortable travel |
+| Mounting guard | gravity direction within 25 degrees of the one measured while teaching | degrees | START; larger changes need a new teaching |
 
 Templates learned in training are also START values: they are stored per user and marked unvalidated
 until measured. The record format bounds are defensive software limits, not human limits.

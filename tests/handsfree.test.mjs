@@ -772,3 +772,63 @@ test("fallback: permission, reversal and the Start without calibration wording",
   assert.equal(uncalView(hw({ profileState: "CORRUPT" })).canStart, true);
   assert.match(uncalView(hw({ profileState: "CORRUPT" })).calibration, /CORRUPT/);
 });
+
+import { mappingView, mappingOf } from "../ui/mapping.js";
+const mapDev = (m, extra = {}) => ({ source: "HARDWARE", connected: true, mapping: { phase: "IDLE", cue: "NONE", step: 0, steps: 16, direction: "NONE", validation: false, example: 0, perDirection: 3, retries: 0, interruptions: 0, cueMs: 0, stillMs: 0, windowMs: 0, progress: 0, reason: "idle", preview: { x: 0, y: 0, angleX: 0, angleY: 0 }, learnedValid: false, unsaved: false, stored: "MISSING", mode: "OFF", blocked: "", saveResult: "", ...m }, ...extra });
+test("guided setup: only for hardware, start is explicit, nothing runs by itself", () => {
+  assert.equal(mappingView({ source: "SIMULATED", mapping: {} }).hardware, false);
+  assert.equal(mappingView(undefined).canStart, false);
+  const idle = mappingView(mapDev({}));
+  assert.equal(idle.canStart, true);
+  assert.equal(idle.canControl, false);
+  assert.equal(idle.running, false);
+  assert.match(idle.instruction, /nothing moves the pointer/);
+});
+test("guided setup: countdown, go, recording and return-to-centre cues", () => {
+  const countdown = mappingView(mapDev({ phase: "EXAMPLE", cue: "COUNTDOWN", direction: "RIGHT", cueMs: 2100, example: 1 }));
+  assert.equal(countdown.big, "3");
+  assert.match(countdown.title, /right · example 2 of 3/);
+  assert.match(countdown.instruction, /GO/);
+  assert.equal(mappingView(mapDev({ phase: "EXAMPLE", cue: "GO", direction: "UP" })).big, "GO");
+  assert.match(mappingView(mapDev({ phase: "EXAMPLE", cue: "GO", direction: "UP" })).instruction, /tilt the front end up/);
+  assert.equal(mappingView(mapDev({ phase: "EXAMPLE", cue: "RECORDING", direction: "LEFT" })).big, "●");
+  const settle = mappingView(mapDev({ phase: "EXAMPLE", cue: "RETURN_TO_CENTRE", direction: "LEFT", reason: "movement too small: turn a little further", retries: 1 }));
+  assert.match(settle.instruction, /Return slowly to the centre/);
+  assert.match(settle.instruction, /too small/);
+  assert.match(settle.instruction, /Retry 1 of 3/);
+  assert.match(mappingView(mapDev({ phase: "EXAMPLE", cue: "COUNTDOWN", direction: "DOWN", validation: true, cueMs: 500 })).title, /Check: one more down/);
+});
+test("guided setup: stillness shows interruptions and why", () => {
+  const still = mappingView(mapDev({ phase: "STILL", cue: "HOLD_STILL", stillMs: 1200, windowMs: 4000, interruptions: 2, reason: "movement detected: hold the assembly completely still" }));
+  assert.match(still.instruction, /1\.2 of 2\.0 s/);
+  assert.match(still.instruction, /interrupted 2×: movement detected/);
+  assert.equal(still.canCancel, true);
+  assert.equal(still.canStart, false);
+});
+test("guided setup: preview, accept, save and configured start follow the rules", () => {
+  const preview = mappingView(mapDev({ phase: "PREVIEW", cue: "PREVIEW", progress: 1, preview: { x: 5, y: 0, angleX: 99, angleY: -99 } }));
+  assert.equal(preview.canAccept, true);
+  assert.equal(preview.preview.angleX, 45);
+  assert.equal(preview.preview.angleY, -45);
+  assert.equal(preview.canControl, false);
+  const unsaved = mappingView(mapDev({ learnedValid: true, unsaved: true }));
+  assert.equal(unsaved.canSave, true);
+  assert.equal(unsaved.canControl, true);
+  assert.match(unsaved.settings, /memory only/);
+  const blocked = mappingView(mapDev({ learnedValid: true, blocked: "press the enable button first" }));
+  assert.equal(blocked.canControl, false);
+  assert.match(blocked.controlBlocked, /enable button/);
+  const running = mappingView(mapDev({ learnedValid: true, mode: "CONFIGURED" }));
+  assert.equal(running.running, true);
+  assert.equal(running.canStart, false);
+  assert.equal(running.canSave, false);
+  assert.match(mappingView(mapDev({ phase: "FAILED", reason: "right and left were not opposite movements; teach them again" })).instruction, /not opposite/);
+});
+test("guided setup: a corrupt stored record is reported and the banner names the mode", () => {
+  assert.match(mappingView(mapDev({ stored: "CORRUPT" })).stored, /CORRUPT.*not used and not overwritten/);
+  assert.equal(mappingOf({ mapping: { learnedValid: "yes", preview: { angleX: "x" } } }).learnedValid, false);
+  const configured = { ...hw({ active: true }), mapping: { mode: "CONFIGURED" } };
+  assert.equal(uncalView(configured).banner, "CONFIGURED CONTROL — LIVE SENSOR");
+  assert.equal(uncalView({ ...hw({ active: true, dwell: { enabled: true } }), mapping: { mode: "CONFIGURED" } }).banner, "CONFIGURED CONTROL — DWELL CLICK");
+  assert.equal(uncalView(hw({ active: true })).banner, "UNCALIBRATED DEMO — LIVE SENSOR");
+});

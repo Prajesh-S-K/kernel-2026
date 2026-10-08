@@ -2,6 +2,7 @@
 #include "calibration.hpp"
 #include "fault.hpp"
 #include "handsfree.hpp"
+#include "mapping.hpp"
 #include "output.hpp"
 
 namespace nodx {
@@ -13,7 +14,8 @@ enum class SystemState {
     Active,
     Paused,
     SafeState,
-    Training
+    Training,
+    Teaching
 };
 const char* name(SystemState state);
 class Feedback {
@@ -100,12 +102,34 @@ public:
     void setUncalibratedNeedsEnable(bool required) {
         uncalNeedsEnable_ = required;
     }
+    // Guided mapping and configured control. Teaching is never started by a reboot, reconnect or
+    // fault; its result lives in RAM until saved explicitly; saving never blocks using it.
+    void setControlRepository(ControlRepository& repository); // loads the stored settings
+    bool teachStart(uint32_t now);
+    void teachCancel();
+    bool teachAccept();                          // preview accepted: active in RAM, not saved
+    bool teachSave();                            // explicit, transactional; failure keeps RAM use
+    void clearLearned();                         // forget the RAM settings (the stored record stays)
+    bool startConfiguredControl(uint32_t now);
+    const char* configuredBlocker() const;       // nullptr when a start would be accepted
+    const char* teachBlocker() const;
+    bool configuredControl() const {
+        return uncal_ && configured_;
+    }
+    MappingStatus mappingStatus(uint32_t now) const;
+    const LearnedControl& learned() const {
+        return learned_;
+    }
+    bool learnedValid() const {
+        return learnedValid_;
+    }
     bool uncalibratedDwell() const {
         return uncal_ && uncalDwell_;
     }
     float dwellProgress(uint32_t now) const; // progress of the profile that is actually in use
     ProfileState profileState() const;
     UserProfile uncalibratedDemoProfile() const; // validated demo configuration (RAM only)
+    UserProfile configuredProfile() const;       // gains from the learned mapping
     HandsFreeStatus handsFreeStatus() const;
     const char* activationBlocker() const; // nullptr when resume would be allowed
 
@@ -155,6 +179,15 @@ private:
     bool dragging_ = false;
     bool demoMovementOnly_ = false;
     bool uncal_ = false;
+    bool configured_ = false; // the running session uses the learned mapping (not the default one)
+    ControlRepository* controlRepo_ = nullptr;
+    LearnedControl learned_;
+    bool learnedValid_ = false, learnedSaved_ = false;
+    ControlRecordState controlRecord_ = ControlRecordState::Missing;
+    const char* saveResult_ = "";
+    MappingTeacher teacher_;
+    ControlProcessor controlProc_;
+    Vec3 lastAccel_{0, 0, 1};
     bool uncalDwell_ = false;
     uint32_t uncalDwellMs_ = start::uncalDwellMs;
     float uncalDwellTolerance_ = start::uncalDwellTolerance;
@@ -167,6 +200,8 @@ private:
     bool uncalReverseX_ = false, uncalReverseY_ = false; // RAM only, user controls
     uint32_t refused_ = 0;
 
+    const char* sessionBlocker(bool configured) const;
+    bool startSession(uint32_t now, bool configured);
     void enterSafe(FaultCode fault, uint32_t now);
     void resetInteraction(uint32_t now);
     bool emitStationary();

@@ -115,6 +115,15 @@ def command_for(data):
         raise ValueError("Invalid hands-free request")
     if action == "calibrate":
         return "calibrate guided" if data.get("guided") is True else "calibrate"
+    if action in ("map", "control"):
+        operation = data.get("op")
+        allowed = {
+            "map": ("start", "cancel", "accept", "save", "clear"),
+            "control": ("start", "stop"),
+        }[action]
+        if operation not in allowed:
+            raise ValueError(f"Invalid {action} request")
+        return f"{action} {operation}"
     if action in ("status", "cancel", "resume", "pause", "generic", "load", "corrupt"):
         return action
     if action in ("dwell", "scroll"):

@@ -96,6 +96,34 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "map") {
+        std::string verb;
+        input >> verb;
+        ok = (input >> std::ws).eof();
+        if (ok && verb == "start") {
+            ok = system.teachStart(now);
+        } else if (ok && verb == "cancel") {
+            system.teachCancel();
+        } else if (ok && verb == "accept") {
+            ok = system.teachAccept();
+        } else if (ok && verb == "save") {
+            ok = system.teachSave();
+        } else if (ok && verb == "clear") {
+            system.clearLearned();
+        } else {
+            ok = false;
+        }
+    } else if (ok && operation == "control") {
+        std::string verb;
+        input >> verb;
+        ok = (input >> std::ws).eof();
+        if (ok && verb == "start") {
+            ok = system.startConfiguredControl(now);
+        } else if (ok && verb == "stop") {
+            system.stopUncalibratedDemo("control stopped by the user; explicit restart required");
+        } else {
+            ok = false;
+        }
     } else if (ok && operation == "handsfree") {
         std::string verb, value;
         input >> verb;

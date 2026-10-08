@@ -277,3 +277,18 @@ counts clicks):
 5. Move the board clearly away and back to the target, then hold still: one more click (rearmed).
 6. Untick the box or click "Stop demo" (or press the enable button): clicking stops at once.
 Do not test drag, held buttons or disconnects with the button held.
+
+## Guided mapping and configured control (software complete, hardware pending)
+
+Companion Setup page, "Teach the movements": 1) hold still (2 s contiguous within 10 s; interruptions are
+counted and explained), 2) teach RIGHT, LEFT, UP, DOWN, three examples each with a 3-2-1 countdown, GO, a
+recording indicator and a return-to-centre cue (not measured), then one check example per direction; a failed
+example is retried alone (3 tries); 3) preview (a dot follows the learned mapping) and Accept. Accept keeps
+the mapping in memory only; "Save settings" is a separate explicit step. "Start configured control" needs
+the same preconditions as the fallback plus an unchanged mounting. The fallback "Start without calibration"
+remains available when calibration is missing or failed or the saved profile is corrupt.
+
+Software evidence only (synthetic recordings, no hardware): learning for identity, upside-down, two
+sideways and two oblique mountings; rejection of wobbles, wrong directions, indistinguishable or non-opposite
+directions; One Euro versus the old EMA (run `./build/nodx_mapping_tests` to print the table). Hardware
+measurement of jitter, drift, gentle response and stopping delay is still to do; every parameter stays START.

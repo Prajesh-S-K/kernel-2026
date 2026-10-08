@@ -3183,6 +3183,267 @@ int main() {
         require(std::strstr(buffer, "\"reverseX\":false"), "reversal survived a reboot");
     });
 
+    // ------------------------------------------------ P: guided mapping and configured control
+    // A modelled sensor with a fixed mounting: sensor = mount x body (gyro and gravity).
+    using M3 = std::array<std::array<float, 3>, 3>;
+    const M3 mountIdentity = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    const M3 mountSideways = {{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}}}; // 90 deg about z
+    const M3 mountUpsideDown = {{{1, 0, 0}, {0, -1, 0}, {0, 0, -1}}}; // 180 deg about x
+    auto rawTick = [](HF& h, const M3& m, std::array<float, 3> body) {
+        h.now += 10;
+        h.sys->setControlSwitch(h.sw, h.now);
+        std::array<float, 3> g{}, a{};
+        for (unsigned i = 0; i < 3; ++i) {
+            g[i] = m[i][0] * body[0] + m[i][1] * body[1] + m[i][2] * body[2] + (i == 0 ? -1.2f : 0.f);
+            a[i] = m[i][2]; // gravity along body z
+        }
+        h.sys->tick({h.now, g, a, true}, h.now, false);
+    };
+    auto teachRig = [](bool momentary = false) {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.quiet(400);
+        (void)momentary;
+        return h;
+    };
+    // Runs the whole guided teaching through the System, one half-sine movement per GO cue.
+    auto teachAll = [=](HF& h, const M3& m, const std::function<std::array<float, 3>(int, bool, unsigned)>& body = nullptr) {
+        static const std::array<float, 3> dirs[4] = {{1, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+        require(h.s().teachStart(h.now), "teaching refused");
+        MapCue last = MapCue::None;
+        uint32_t moveStart = 0, moveMs = 600;
+        std::array<float, 3> dir{};
+        unsigned attempt = 0;
+        bool moving = false;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const MappingStatus st = h.s().mappingStatus(h.now);
+            if (st.phase == MapPhase::Preview) {
+                break;
+            }
+            if (st.cue == MapCue::Go && last != MapCue::Go) {
+                ++attempt;
+                dir = body ? body(st.direction, st.validation, attempt) : dirs[st.direction];
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (moving && h.now >= moveStart) {
+                const float t = float(h.now - moveStart) / float(moveMs);
+                if (t > 1) {
+                    moving = false;
+                } else {
+                    const float level = 40.f * std::sin(3.14159265f * t);
+                    b = {dir[0] * level, dir[1] * level, dir[2] * level};
+                }
+            }
+            rawTick(h, m, b);
+        }
+        return h.s().mappingStatus(h.now).phase == MapPhase::Preview;
+    };
+    auto pointerAfter = [=](HF& h, const M3& m, std::array<float, 3> dir) {
+        h.quiet(400);
+        const size_t mark = h.transport.reports.size();
+        for (unsigned i = 0; i < 80; ++i) {
+            const float level = i < 60 ? 40.f * std::sin(3.14159265f * float(i) / 60.f) : 0.f;
+            rawTick(h, m, {dir[0] * level, dir[1] * level, dir[2] * level});
+        }
+        for (unsigned i = 0; i < 60; ++i) {
+            rawTick(h, m, {0, 0, 0});
+        }
+        float dx = 0, dy = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            dx += h.transport.reports[i].dx;
+            dy += h.transport.reports[i].dy;
+        }
+        return std::array<float, 2>{dx, dy};
+    };
+    test("mapping: teaching is explicit, blocked until healthy, and never moves the pointer", [=] {
+        HF fresh(false, EnableKind::Momentary);
+        fresh.sw = false;
+        require(!fresh.s().teachStart(fresh.now), "teaching before healthy samples");
+        HF h = teachRig();
+        h.s().calibrate(h.now);
+        require(!h.s().teachStart(h.now), "teaching during calibration");
+        h.s().cancelCalibration();
+        h.quiet(300);
+        const size_t mark = h.transport.reports.size();
+        require(teachAll(h, mountSideways), "no preview");
+        require(h.s().state == SystemState::Teaching, "state");
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(h.transport.reports[i].dx == 0 && h.transport.reports[i].dy == 0 &&
+                        !h.transport.reports[i].down,
+                    "pointer output while teaching");
+        }
+        require(!h.s().startConfiguredControl(h.now), "control started while teaching");
+        require(!h.s().learnedValid(), "nothing is learned before accepting");
+    });
+    test("mapping: accepted mapping works in RAM for a sideways mounting, all four directions", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways), "no preview");
+        require(h.s().teachAccept(), "accept");
+        require(h.s().state != SystemState::Teaching && h.s().learnedValid(), "state");
+        const MappingStatus st = h.s().mappingStatus(h.now);
+        require(st.unsaved && std::string(st.stored) == "MISSING", "must be reported as unsaved");
+        h.quiet(300);
+        require(!h.s().configuredControl(), "accepting must not start control");
+        require(h.s().startConfiguredControl(h.now), "configured start refused");
+        h.quiet(200);
+        require(std::string(h.s().mappingStatus(h.now).mode) == "CONFIGURED", "mode");
+        const std::array<float, 3> dirs[4] = {{1, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+        const int wantX[4] = {1, -1, 0, 0}, wantY[4] = {0, 0, -1, 1};
+        for (unsigned d = 0; d < 4; ++d) {
+            const auto moved = pointerAfter(h, mountSideways, dirs[d]);
+            require(moved[0] * float(wantX[d]) + moved[1] * float(wantY[d]) > 6.f, "wrong or no movement");
+            require(std::abs(moved[0] * float(wantY[d])) + std::abs(moved[1] * float(wantX[d])) <
+                        .2f * (std::abs(moved[0]) + std::abs(moved[1])),
+                    "crosstalk");
+        }
+        for (const auto& r : h.transport.reports) {
+            require(!r.down && r.wheel == 0 && std::abs(r.dx) <= start::uncalDemoMaxStep &&
+                        std::abs(r.dy) <= start::uncalDemoMaxStep,
+                    "movement-only bounds");
+        }
+    });
+    test("mapping: upside down also works, and a changed mounting asks to teach again", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountUpsideDown) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        // still upside down: fine
+        for (unsigned i = 0; i < 40; ++i) {
+            rawTick(h, mountUpsideDown, {0, 0, 0});
+        }
+        require(h.s().startConfiguredControl(h.now), "same mounting refused");
+        h.s().stopUncalibratedDemo("test");
+        // now mounted the other way up: gravity direction differs by far more than 25 degrees
+        for (unsigned i = 0; i < 40; ++i) {
+            rawTick(h, mountIdentity, {0, 0, 0});
+        }
+        require(!h.s().startConfiguredControl(h.now), "start allowed after the mounting changed");
+        require(std::string(h.s().diagnostics.reason) == "mounting changed: teach the movements again",
+                "reason");
+    });
+    test("mapping: saving is explicit and transactional; failure keeps RAM use; reboot loads it inactive",
+         [=] {
+             HF h = teachRig();
+             require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+             require(h.controlStorage.slots[0].empty(), "accept must not write storage");
+             h.controlStorage.failWrite = true;
+             require(!h.s().teachSave(), "failed save reported as success");
+             require(std::string(h.s().mappingStatus(h.now).saveResult) == "SAVE_FAILED_RAM_ONLY" &&
+                         h.s().mappingStatus(h.now).unsaved,
+                     "failure must say RAM only");
+             require(h.s().learnedValid(), "settings lost by a failed save");
+             h.quiet(300);
+             require(h.s().startConfiguredControl(h.now), "RAM-only control must still work");
+             require(!h.s().teachSave(), "saving while control is active");
+             h.s().stopUncalibratedDemo("test");
+             h.controlStorage.failWrite = false;
+             require(h.s().teachSave(), "save");
+             require(!h.s().mappingStatus(h.now).unsaved &&
+                         std::string(h.s().mappingStatus(h.now).stored) == "VALID",
+                     "saved status");
+             require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                     "the 84-byte profile and the hands-free record must be untouched");
+             h.boot();
+             h.quiet(300);
+             require(h.s().learnedValid() && !h.s().configuredControl(),
+                     "stored mapping loaded but never activated at boot");
+             require(!h.s().mappingStatus(h.now).unsaved, "loaded settings are saved ones");
+         });
+    test("mapping: a corrupt stored record is reported corrupt and never used or overwritten", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept() && h.s().teachSave(), "setup");
+        h.controlStorage.slots[0][12] ^= 0x5a;
+        h.controlStorage.slots[1] = h.controlStorage.slots[0];
+        const auto kept = h.controlStorage.slots[0];
+        h.boot();
+        h.quiet(400);
+        require(!h.s().learnedValid(), "corrupt settings were used");
+        require(std::string(h.s().mappingStatus(h.now).stored) == "CORRUPT", "not reported corrupt");
+        require(h.controlStorage.slots[0] == kept, "the corrupt record was rewritten");
+        require(!h.s().startConfiguredControl(h.now), "configured start with no valid mapping");
+        // the uncalibrated fallback still works
+        require(h.s().startUncalibratedDemo(h.now), "fallback must remain available");
+    });
+    test("mapping: failure, cancel, faults and pauses keep the previous valid settings", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "first teaching");
+        const LearnedControl before = h.s().learned();
+        h.quiet(300);
+        // a cancelled teaching
+        require(h.s().teachStart(h.now), "start");
+        h.quiet(200);
+        h.s().teachCancel();
+        require(h.s().state != SystemState::Teaching && h.s().learned().horizontal == before.horizontal,
+                "cancel changed the settings");
+        // teaching that fails (the user never holds still)
+        require(h.s().teachStart(h.now), "start");
+        for (unsigned i = 0; i < 1200 && h.s().state == SystemState::Teaching; ++i) {
+            rawTick(h, mountIdentity, {(i / 100) % 2 ? 50.f : -50.f, 0, 0});
+        }
+        require(h.s().state != SystemState::Teaching, "teaching should have failed");
+        require(h.s().learnedValid() && h.s().learned().horizontal == before.horizontal &&
+                    std::string(h.s().diagnostics.reason).find("hold still") != std::string::npos,
+                "failure must keep the previous settings and say why");
+        // a disconnect during teaching
+        h.quiet(400);
+        require(h.s().teachStart(h.now), "start");
+        h.transport.online = false;
+        h.quiet(50);
+        require(h.s().state == SystemState::SafeState && h.s().learnedValid(), "disconnect");
+        h.transport.online = true;
+        h.quiet(600);
+        require(h.s().state != SystemState::Teaching, "reconnect resumed teaching");
+        // an invalid sample during teaching
+        h.quiet(400);
+        require(h.s().teachStart(h.now), "start");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        require(h.s().state == SystemState::SafeState && h.s().learnedValid(), "invalid sample");
+    });
+    test("mapping: configured control needs the enable permission and never auto-starts", [=] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.uncalNeedsEnable = true;
+        h.boot();
+        h.quiet(400);
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        require(!h.s().startConfiguredControl(h.now) &&
+                    std::string(h.s().diagnostics.reason) == "press the enable button first",
+                "started without permission");
+        h.click();
+        h.quiet(300);
+        require(!h.s().configuredControl(), "the press started it");
+        require(h.s().startConfiguredControl(h.now), "start with permission");
+        h.click(); // next press disables
+        require(!h.s().configuredControl() && h.released(), "physical disable");
+        require(h.s().learnedValid(), "settings must survive");
+        h.click();
+        require(h.s().startConfiguredControl(h.now), "restart");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        h.quiet(800);
+        require(!h.s().configuredControl() && h.s().state != SystemState::Active,
+                "a fault must not leave or restart control");
+    });
+    test("mapping: status JSON is complete, bounded and finite", [=] {
+        HF h = teachRig();
+        char buffer[mappingJsonCapacity];
+        require(mappingJson(buffer, sizeof buffer, h.s().mappingStatus(h.now)) > 0, "idle json");
+        require(teachAll(h, mountSideways), "preview");
+        const size_t n = mappingJson(buffer, sizeof buffer, h.s().mappingStatus(h.now));
+        require(n > 100 && n < mappingJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        for (const char* key : {"\"phase\":\"PREVIEW\"", "\"learnedValid\"", "\"unsaved\"", "\"stored\"",
+                                "\"preview\"", "\"retries\"", "\"interruptions\"", "\"reason\""}) {
+            require(std::strstr(buffer, key), key);
+        }
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

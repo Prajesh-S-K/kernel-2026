@@ -1278,3 +1278,32 @@ hr {
   color: var(--muted);
   display: block;
 }
+
+.map-big {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  min-height: 70px;
+  color: var(--cyan);
+}
+.map-preview {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.map-preview i {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  left: 50%;
+  top: 50%;
+}
+.map-preview[hidden] {
+  display: none;
+}

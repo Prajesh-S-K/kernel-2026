@@ -142,6 +142,8 @@ struct HF {
     LossyConfigStorage configLossy{configStorage, budget};
     ProfileRepository repo{profileLossy};
     HandsFreeRepository configRepo{configLossy};
+    MemoryStorage controlStorage;
+    ControlRepository controlRepo{controlStorage};
     TestHID transport;
     std::unique_ptr<System> sys;
     uint32_t now = 0;
@@ -166,6 +168,7 @@ struct HF {
         sys->axes.accelSigns = {1, 1, 1};
         sys->configureEnableInput(true);
         sys->setUncalibratedNeedsEnable(uncalNeedsEnable);
+        sys->setControlRepository(controlRepo);
     }
     System& s() {
         return *sys;

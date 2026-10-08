@@ -3,6 +3,7 @@ import { sourceLabels } from './source.js';
 import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
+import { mappingView } from './mapping.js';
 import {
   BANNER,
   DWELL_NOTE,
@@ -149,7 +150,8 @@ function render(data, applyReports = true) {
           : instructions[cal][1];
     $('phaseLabel').textContent = cal === 'COMPLETE' ? 'PROFILE GENERATED' : 'CALIBRATION / ' + cal;
   }
-  $('calibrate').disabled = performanceLab.running || data.state === 'CALIBRATING';
+  $('calibrate').disabled =
+    performanceLab.running || ['CALIBRATING', 'TEACHING'].includes(data.state);
   $('cancel').disabled = data.state !== 'CALIBRATING';
   $('calProgress').style.width = data.calibrationProgress * 100 + '%';
   $('calPercent').textContent = Math.round(data.calibrationProgress * 100) + '%';
@@ -211,6 +213,7 @@ function render(data, applyReports = true) {
       `Selections: ${selections} · Scroll: ${scrollTotal} · Drag distance: ${dragDistance.toFixed(0)} px`;
   }
   renderUncal(data);
+  renderMapping(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -409,6 +412,29 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+function renderMapping(data) {
+  const view = mappingView(data);
+  $('mapPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('mapTag').textContent = view.running ? 'CONFIGURED' : view.teaching ? 'TEACHING' : 'OFF';
+  $('mapTitle').textContent = view.title;
+  $('mapBig').textContent = view.big;
+  $('mapBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('mapInstruction').textContent = view.instruction;
+  $('mapPreview').hidden = !(view.teaching && view.m.phase === 'PREVIEW');
+  $('mapDot').style.left = `${50 + (view.preview.angleX / 45) * 45}%`;
+  $('mapDot').style.top = `${50 + (view.preview.angleY / 45) * 45}%`;
+  $('mapStart').disabled = !view.canStart;
+  $('mapAccept').disabled = !view.canAccept;
+  $('mapCancel').disabled = !view.canCancel;
+  $('mapSave').disabled = !view.canSave;
+  $('mapClear').disabled = !view.canClear;
+  $('mapControl').disabled = !view.canControl;
+  $('mapControlStop').disabled = !view.running;
+  $('mapSettings').textContent = `${view.settings} ${view.saveResult === 'SAVE_FAILED_RAM_ONLY' ? 'Saving failed: it works in memory only.' : view.saveResult === 'SAVED' ? 'Saved.' : ''}`;
+  $('mapStored').textContent = view.stored;
+  $('mapBlocked').textContent = view.controlBlocked ? `Configured control: ${view.controlBlocked}.` : '';
+}
 function renderUncal(data) {
   const view = uncalView(data);
   $('uncalPanel').hidden = !view.hardware;
@@ -469,6 +495,16 @@ $('reconnect').onclick = async () => {
     toast(`Reconnect failed: ${error.message}`);
   }
 };
+for (const [id, action_, extra] of [
+  ['mapStart', 'map', { op: 'start' }],
+  ['mapAccept', 'map', { op: 'accept' }],
+  ['mapCancel', 'map', { op: 'cancel' }],
+  ['mapSave', 'map', { op: 'save' }],
+  ['mapClear', 'map', { op: 'clear' }],
+  ['mapControl', 'control', { op: 'start' }],
+  ['mapControlStop', 'control', { op: 'stop' }],
+])
+  $(id).onclick = () => action(action_, extra);
 $('uncalStart').onclick = () => action('handsfree', { op: 'uncal', enabled: true });
 for (const id of ['uncalStop', 'uncalStopBanner'])
   $(id).onclick = () => action('handsfree', { op: 'uncal', enabled: false });

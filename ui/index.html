@@ -94,6 +94,40 @@
               ><span id="stepCal">03 Calibrate</span><span id="stepProfile">04 Profile</span
               ><span>05 Control test</span><span>06 Performance</span>
             </div>
+            <article class="panel uncal" id="mapPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">GUIDED SETUP</span>
+                  <h2>Teach the movements</h2>
+                </div>
+                <span class="tag" id="mapTag">OFF</span>
+              </div>
+              <p>
+                Teach right, left, up and down (three examples each, then one check each). The
+                firmware learns which rotation means horizontal and vertical for however the board is
+                mounted. Changing the mounting needs a new teaching. Nothing here moves the pointer
+                until you start configured control.
+              </p>
+              <h3 id="mapTitle"></h3>
+              <div class="map-big" id="mapBig"></div>
+              <div class="uncal-bar"><i id="mapBar"></i></div>
+              <p id="mapInstruction" class="uncal-status"></p>
+              <div class="map-preview" id="mapPreview" hidden><i id="mapDot"></i></div>
+              <div class="uncal-actions">
+                <button id="mapStart" class="primary">Start guided setup</button>
+                <button id="mapAccept" class="primary">Accept preview</button>
+                <button id="mapCancel" class="quiet">Cancel</button>
+                <button id="mapSave" class="quiet">Save settings</button>
+                <button id="mapClear" class="quiet">Forget</button>
+              </div>
+              <p id="mapSettings" class="uncal-note"></p>
+              <p id="mapStored" class="uncal-note"></p>
+              <div class="uncal-actions">
+                <button id="mapControl" class="primary">Start configured control</button>
+                <button id="mapControlStop" class="uncal-stop">Stop control</button>
+              </div>
+              <p id="mapBlocked" class="uncal-note"></p>
+            </article>
             <article class="panel uncal" id="uncalPanel" hidden>
               <div class="panel-head">
                 <div>

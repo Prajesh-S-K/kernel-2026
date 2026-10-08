@@ -111,6 +111,9 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     static char hands[handsFreeJsonCapacity]; // static: keeps the loop task stack small
     const size_t handsLength = handsFreeJson(hands, sizeof(hands), s.handsFreeStatus());
     append(buffer, sizeof(buffer), used, ",\"handsFree\":%s", handsLength ? hands : "{}");
+    static char mapping[mappingJsonCapacity];
+    const size_t mappingLength = mappingJson(mapping, sizeof(mapping), s.mappingStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"mapping\":%s", mappingLength ? mapping : "{}");
 #ifndef NODX_SIMULATED
     // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
     const auto& snap = sensorSnapshot;
