@@ -33,8 +33,8 @@ void expect(bool condition, const char* name) {
     ++checks;
     if (!condition) {
         ++failures;
-        std::printf("FAIL %s\n", name);
     }
+    std::printf("%s %s\n", condition ? "PASS" : "FAIL", name);
 }
 bool has(const std::string& text, const char* part) {
     return text.find(part) != std::string::npos;

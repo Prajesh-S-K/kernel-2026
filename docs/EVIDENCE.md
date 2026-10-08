@@ -68,8 +68,9 @@ Each named check counts once; a test executable is not counted as one check. Log
 JavaScript), [named C++ results](../evidence/handsfree-tests.log), [firmware builds](../evidence/handsfree-firmware-build.log).
 `ctest` reports 4 test programs; the 150 named C++ checks are inside the first two. The firmware command-path
 program is built twice from the same test file (simulated and hardware configuration): 129 + 51 check
-*executions*, of which 142 are distinct named checks (37 parser checks and the boot-banner check run in both
-configurations). Its log: [firmware command tests](../evidence/firmware-command-tests.log).
+*executions*; counting the 38 checks that run identically in both configurations (37 parser checks and the
+boot-banner check) once gives the 142 in the table. Some check names repeat (a helper used at several call sites), so
+the table counts executed checks, not unique strings. Its log: [firmware command tests](../evidence/firmware-command-tests.log).
 
 Firmware: `esp32s3` (774,509 B flash), `esp32s3-sim` (781,841 B) and `esp32s3-n16r8-bench` (778,189 B) all built;
 GPIO defaults remain disabled and `NODX_ENABLE`/`NODX_BUZZER` default to -1. Compilation is not hardware
