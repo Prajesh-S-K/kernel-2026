@@ -444,6 +444,10 @@ int main(int argc, char** argv) {
                     if (ok) {
                         sys.stageSwitchless(value == "on");
                     }
+                } else if (verb == "demo") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setDemoMovementOnly(value == "on");
                 } else if (verb == "enable") {
                     cmd >> value;
                     ok = (value == "maintained" || value == "momentary") && (cmd >> std::ws).eof();

@@ -14,6 +14,16 @@ extern bool simulatedEnable;             // simulated raw enable input (default 
 extern std::vector<Rates> gestureScript; // synthetic gesture samples still to play
 #endif
 extern System* systemEngine;
+// Hardware builds keep the last raw sensor frame (sensor coordinates, before any axis mapping) and
+// the running integral of each gyro axis so a bench session can read axis directions from
+// telemetry.
+struct SensorSnapshot {
+    MotionSample last;
+    bool seen = false;
+    uint32_t frames = 0, lastAtMs = 0;
+    double angle[3] = {0, 0, 0}; // degrees, integral of the raw gyro per sensor axis since boot
+};
+extern SensorSnapshot sensorSnapshot;
 void initializeRuntime();
 void serviceRuntime();
 void command(const std::string& line, uint32_t now, bool truncated = false);

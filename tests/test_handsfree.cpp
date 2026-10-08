@@ -2348,6 +2348,165 @@ int main() {
                      "unwired input permitted");
          });
 
+    // ------------------------------------------------ L: temporary movement-only demo mode
+    // No dwell click, no drag, no wheel, bounded steps; every safety check and the enable input
+    // stay. RAM only: never written to the profile or the configuration record, off at every boot.
+    auto demoActive = [](HF& h) {
+        h.active();
+        require(h.s().setDemoMovementOnly(true), "demo on");
+        require(h.s().state == SystemState::Paused,
+                "turning the demo on while active pauses control");
+        h.quiet(300);
+        require(h.s().resume(), "explicit resume");
+        h.quiet(400);
+    };
+    test("demo: a completed dwell produces no click while normal hands-free mode does",
+         [demoActive] {
+             HF normal;
+             normal.active();
+             const size_t markNormal = normal.transport.reports.size();
+             moveAway(normal);
+             normal.quiet(2500);
+             require(clicksSince(normal, markNormal) >= 1,
+                     "precondition: dwell clicks in normal mode");
+             HF h;
+             demoActive(h);
+             const size_t mark = h.transport.reports.size();
+             moveAway(h);
+             h.quiet(2500);
+             require(clicksSince(h, mark) == 0, "a dwell click in the movement-only demo");
+             for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                 require(!h.transport.reports[i].down, "a button was pressed in the demo");
+             }
+         });
+    test("demo: the drag gesture is refused and nothing is pressed", [demoActive] {
+        HF h;
+        demoActive(h);
+        const uint32_t refusedBefore = h.s().handsFreeStatus().refused;
+        const size_t mark = h.transport.reports.size();
+        perform(h, "tilt2");
+        require(!h.s().dragging, "drag started in the demo");
+        require(h.s().state == SystemState::Active, "refusing the drag changed the state");
+        require(h.s().handsFreeStatus().refused == refusedBefore + 1, "refusal not counted");
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "a button was pressed");
+        }
+    });
+    test("demo: no wheel reports even while rolled past the scroll threshold", [demoActive] {
+        auto rolled = [](HF& h) {
+            UserProfile profile = h.s().profile;
+            profile.scrollThreshold = 5;
+            profile.scrollGain = 3;
+            profile.scrollEnabled = true;
+            require(h.s().setProfile(profile, false), "profile");
+            h.quiet(300);
+            require(h.s().resume(), "resume");
+            h.quiet(400);
+            const size_t mark = h.transport.reports.size();
+            h.run(hold(2, -60, 1000));
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                if (h.transport.reports[i].wheel != 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        HF normal;
+        normal.active();
+        require(rolled(normal), "precondition: the same roll scrolls in normal mode");
+        HF h;
+        demoActive(h);
+        require(!rolled(h), "a wheel report in the movement-only demo");
+    });
+    test("demo: the pointer still moves and every step is bounded", [demoActive] {
+        HF h;
+        demoActive(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 90, 1000)); // fast yaw: far above the bound in normal mode
+        float total = 0, biggest = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            total += std::abs(float(h.transport.reports[i].dx));
+            biggest = std::max(biggest, std::abs(float(h.transport.reports[i].dx)));
+        }
+        require(total > 50, "the demo does not move the pointer");
+        require(biggest <= start::demoMaxStep, "a step exceeded the demo bound");
+        HF normal;
+        normal.active();
+        const size_t markNormal = normal.transport.reports.size();
+        normal.run(hold(0, 90, 1000));
+        float biggestNormal = 0;
+        for (size_t i = markNormal; i < normal.transport.reports.size(); ++i) {
+            biggestNormal =
+                std::max(biggestNormal, std::abs(float(normal.transport.reports[i].dx)));
+        }
+        require(biggestNormal > start::demoMaxStep, "precondition: normal mode exceeds the bound");
+    });
+    test("demo: nothing is saved, and the mode is off after a reboot", [] {
+        HF h;
+        h.active();
+        const auto profileBefore = h.profileStorage.read(0);
+        const auto profileBefore1 = h.profileStorage.read(1);
+        const auto configBefore0 = h.configStorage.slots[0],
+                   configBefore1 = h.configStorage.slots[1];
+        require(h.s().setDemoMovementOnly(true), "on");
+        h.quiet(500);
+        require(h.profileStorage.read(0) == profileBefore &&
+                    h.profileStorage.read(1) == profileBefore1,
+                "the saved profile changed");
+        require(h.configStorage.slots[0] == configBefore0 &&
+                    h.configStorage.slots[1] == configBefore1,
+                "the saved configuration changed");
+        require(h.s().profile.dwellEnabled, "the hands-free profile lost dwell");
+        h.boot();
+        require(!h.s().demoMovementOnly(), "the demo survived a reboot");
+        require(!h.s().handsFreeStatus().demoMovementOnly, "status");
+        require(h.s().interaction == InteractionMode::HandsFree, "mode");
+    });
+    test("demo: switching the mode while active pauses control and releases outputs", [] {
+        HF h;
+        h.active();
+        beginDrag(h);
+        require(h.s().setDemoMovementOnly(true), "on");
+        require(h.s().state == SystemState::Paused && !h.s().dragging && h.released(),
+                "a drag survived the mode change");
+        h.quiet(300);
+        require(h.s().resume(), "resume");
+        h.quiet(300);
+        require(h.s().setDemoMovementOnly(false), "off");
+        require(h.s().state == SystemState::Paused && h.released(), "turning it off pauses");
+        require(h.s().setDemoMovementOnly(false), "idempotent");
+    });
+    test("demo: the enable input and every fault still stop output", [demoActive] {
+        HF h(true, EnableKind::Momentary);
+        h.active();
+        require(h.s().setDemoMovementOnly(true), "on");
+        h.quiet(300);
+        h.click(); // the second press disables, so permission is off; enable again for the test
+        h.click();
+        require(h.s().handsFreeStatus().permitted, "permission");
+        require(h.s().resume(), "resume");
+        h.quiet(300);
+        h.run(hold(0, 40, 300));
+        h.s().setControlSwitch(true, h.now + 1); // the disabling press edge
+        require(h.s().state == SystemState::Paused && h.released(),
+                "the button did not stop the demo");
+        HF faulty;
+        demoActive(faulty);
+        faulty.now += 10;
+        faulty.s().tick({faulty.now, {NAN, 0, 0}, {0, 0, 1}, true}, faulty.now, false);
+        require(faulty.s().state == SystemState::SafeState, "a sensor fault did not stop the demo");
+    });
+    test("demo: the flag is reported in the hands-free status", [] {
+        HF h;
+        h.active();
+        char buffer[1024];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"demoMovementOnly\":false"), "off");
+        require(h.s().setDemoMovementOnly(true), "on");
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"demoMovementOnly\":true"), "on");
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

@@ -311,7 +311,7 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         "\"latched\":%s,\"armed\":%s},"
         "\"gesture\":{\"state\":\"%s\",\"last\":\"%s\",\"lastReject\":\"%s\",\"candidates\":%lu,"
         "\"rejected\":%lu,\"executed\":%lu,\"refused\":%lu,\"suppressing\":%s},"
-        "\"drag\":%s,"
+        "\"drag\":%s,\"demoMovementOnly\":%s,"
         "\"training\":{\"phase\":\"%s\",\"gesture\":\"%s\",\"accepted\":%u,\"required\":%u,"
         "\"rejects\":%u,\"validated\":%s,\"reason\":\"%s\"},"
         "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\"}",
@@ -323,11 +323,11 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.switchArmed ? "true" : "false", s.recognizer, s.lastGesture, s.lastReject,
         static_cast<unsigned long>(s.candidates), static_cast<unsigned long>(s.rejected),
         static_cast<unsigned long>(s.executed), static_cast<unsigned long>(s.refused),
-        s.suppressing ? "true" : "false", s.dragging ? "true" : "false", s.trainPhase,
-        s.trainGesture, s.trainAccepted, s.trainRequired, s.trainRejects,
-        s.trainValidated ? "true" : "false", s.trainReason, s.staged[0] ? "true" : "false",
-        s.staged[1] ? "true" : "false", s.stored[0] ? "true" : "false",
-        s.stored[1] ? "true" : "false", s.blocked);
+        s.suppressing ? "true" : "false", s.dragging ? "true" : "false",
+        s.demoMovementOnly ? "true" : "false", s.trainPhase, s.trainGesture, s.trainAccepted,
+        s.trainRequired, s.trainRejects, s.trainValidated ? "true" : "false", s.trainReason,
+        s.staged[0] ? "true" : "false", s.staged[1] ? "true" : "false",
+        s.stored[0] ? "true" : "false", s.stored[1] ? "true" : "false", s.blocked);
     return (written > 0 && size_t(written) < capacity) ? size_t(written) : 0;
 }
 } // namespace nodx

@@ -13,6 +13,7 @@ std::vector<Rates> gestureScript;
 size_t gesturePosition = 0;
 #endif
 System* systemEngine = nullptr;
+SensorSnapshot sensorSnapshot;
 DebouncedSwitch pauseSwitch, calSwitch;
 uint32_t lastPoll = 0, lastSample = 0, lastProbe = 0, lastDiagnostic = 0;
 bool previousPause = false, previousCal = false;
@@ -124,6 +125,15 @@ void serviceRuntime() {
 #else
         MotionSample sample = mpu.read(now);
         if (sample.valid) {
+            const double dt =
+                sensorSnapshot.seen ? double(uint32_t(now - sensorSnapshot.lastAtMs)) / 1000.0 : 0;
+            for (unsigned i = 0; i < 3 && dt > 0 && dt <= 0.05; ++i) {
+                sensorSnapshot.angle[i] += double(sample.gyro[i]) * dt;
+            }
+            sensorSnapshot.last = sample;
+            sensorSnapshot.seen = true;
+            sensorSnapshot.lastAtMs = now;
+            ++sensorSnapshot.frames;
             lastSample = now;
             s.tick(sample, now, selectionPressed);
         } else if (uint32_t(now - lastSample) > start::timeoutMs) {

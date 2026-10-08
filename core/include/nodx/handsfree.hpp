@@ -122,7 +122,7 @@ struct HandsFreeStatus {
     const char* lastGesture = "NONE";
     const char* lastReject = "NONE";
     uint32_t candidates = 0, rejected = 0, executed = 0, refused = 0;
-    bool suppressing = false, dragging = false;
+    bool suppressing = false, dragging = false, demoMovementOnly = false;
     const char* trainPhase = "IDLE";
     const char* trainGesture = "NONE";
     const char* trainReason = "idle";

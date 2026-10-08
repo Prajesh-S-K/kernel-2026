@@ -72,6 +72,13 @@ public:
     bool useLegacyMode();                  // helper: explicit compatibility mode
     void stageSwitchless(bool qualified);  // helper: alternative to the enable switch
     void stageEnableKind(EnableKind kind); // helper: maintained switch or momentary button
+    // Temporary movement-only demo (RAM only, off at every boot, never saved): no dwell clicks, no
+    // drag, no wheel, and pointer steps bounded. Every safety check and the enable input stay as
+    // they are. Changing it while control is active pauses control (explicit resume afterwards).
+    bool setDemoMovementOnly(bool on);
+    bool demoMovementOnly() const {
+        return demoMovementOnly_;
+    }
     HandsFreeStatus handsFreeStatus() const;
     const char* activationBlocker() const; // nullptr when resume would be allowed
 
@@ -119,6 +126,7 @@ private:
     bool stagedSwitchless_ = false;
     EnableKind stagedKind_ = EnableKind::Momentary; // a new setup assumes the push button
     bool dragging_ = false;
+    bool demoMovementOnly_ = false;
     uint32_t refused_ = 0;
 
     void enterSafe(FaultCode fault, uint32_t now);

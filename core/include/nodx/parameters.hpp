@@ -41,5 +41,6 @@ constexpr unsigned trainRestSamples = 80;
 constexpr uint32_t trainWaitMs = 6000;      // wait for an example to begin
 constexpr uint32_t trainCaptureMs = 3000;   // longest example
 constexpr uint32_t trainValidateMs = 20000; // time allowed for the validation repeat
+constexpr float demoMaxStep = 6.f;          // movement-only demo: pixels per report, both axes
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

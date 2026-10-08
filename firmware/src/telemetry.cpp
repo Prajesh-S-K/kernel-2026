@@ -109,7 +109,20 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            p.dwellEnabled ? "true" : "false", p.scrollEnabled ? "true" : "false");
     static char hands[1024]; // static: keeps the loop task stack small
     const size_t handsLength = handsFreeJson(hands, sizeof(hands), s.handsFreeStatus());
-    append(buffer, sizeof(buffer), used, ",\"handsFree\":%s}\n", handsLength ? hands : "{}");
+    append(buffer, sizeof(buffer), used, ",\"handsFree\":%s", handsLength ? hands : "{}");
+#ifndef NODX_SIMULATED
+    // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
+    const auto& snap = sensorSnapshot;
+    append(buffer, sizeof(buffer), used,
+           ",\"sensor\":{\"variant\":\"%s\",\"seen\":%s,\"frames\":%lu,\"ageMs\":%lu,"
+           "\"gyro\":[%.2f,%.2f,%.2f],\"accel\":[%.4f,%.4f,%.4f],"
+           "\"angle\":[%.3f,%.3f,%.3f]}",
+           name(mpu.variant()), snap.seen ? "true" : "false", (unsigned long)snap.frames,
+           (unsigned long)(snap.seen ? uint32_t(now - snap.lastAtMs) : 0), snap.last.gyro[0],
+           snap.last.gyro[1], snap.last.gyro[2], snap.last.accel[0], snap.last.accel[1],
+           snap.last.accel[2], snap.angle[0], snap.angle[1], snap.angle[2]);
+#endif
+    append(buffer, sizeof(buffer), used, "}\n");
     if (used >= sizeof(buffer)) {
         return;
     }

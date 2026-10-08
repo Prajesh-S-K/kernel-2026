@@ -294,6 +294,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         scrolling = false;
     }
     intent = intent_.resolve(intent, active, scrolling);
+    if (demoMovementOnly_) {
+        intent.wheel = 0; // scrolling still suppresses pointing, but nothing is scrolled
+    }
     x_ += hid_.last.dx;
     y_ += hid_.last.dy;
     if (!std::isfinite(x_) || !std::isfinite(y_)) {
@@ -302,7 +305,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
     const bool outputAllowed = active && state_ == SystemState::Active;
     Selection selected;
-    if (!handsFree || !outputAllowed) {
+    if (demoMovementOnly_ && outputAllowed) {
+        selection_.interrupt(); // movement-only demo: no dwell click, no selection, no drag
+    } else if (!handsFree || !outputAllowed) {
         selected = selection_.update(lastRaw_, x_, y_, outputAllowed, scrolling, profile_, now);
     } else if (recognizing || dragging_) {
         selection_.interrupt(); // no dwell click while recognizing or dragging
@@ -312,7 +317,13 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (handsFree && outputAllowed && dragging_) {
         selected.down = true;
     }
-    const Command command = interaction_.compose(intent, selected);
+    Command command = interaction_.compose(intent, selected);
+    if (demoMovementOnly_) {
+        command.down = command.pulse = false;
+        command.wheel = 0;
+        command.dx = std::clamp(command.dx, -start::demoMaxStep, start::demoMaxStep);
+        command.dy = std::clamp(command.dy, -start::demoMaxStep, start::demoMaxStep);
+    }
     // REQUIRED FINAL ORDER: safety gate -> HID manager -> transport.
     const Command safeCommand =
         safety_.gate(command, outputAllowed, inputsValid, hasProfile_ && profile_.valid(),
@@ -437,8 +448,8 @@ void System::executeGesture(GestureId id) {
         }
         return;
     }
-    if (state_ != SystemState::Active) {
-        ++refused_;
+    if (state_ != SystemState::Active || demoMovementOnly_) {
+        ++refused_; // no drag outside active control, and none in the movement-only demo
         return;
     }
     if (dragging_) {
@@ -613,6 +624,21 @@ bool System::useLegacyMode() {
     return true;
 }
 
+bool System::setDemoMovementOnly(bool on) {
+    if (on == demoMovementOnly_) {
+        return true;
+    }
+    if (state_ == SystemState::Active || dragging_) {
+        stop(SystemState::Paused, lastTick_); // releases everything before the rules change
+        if (state_ == SystemState::SafeState) {
+            return false;
+        }
+        diagnostics_.reason = "movement-only demo mode changed; explicit resume required";
+    }
+    demoMovementOnly_ = on;
+    return true;
+}
+
 HandsFreeStatus System::handsFreeStatus() const {
     HandsFreeStatus s;
     s.mode = name(mode_);
@@ -639,6 +665,7 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.refused = refused_;
     s.suppressing = recognizer_.suppressing();
     s.dragging = dragging_;
+    s.demoMovementOnly = demoMovementOnly_;
     s.trainPhase = name(trainer_.phase);
     s.trainGesture = trainer_.phase == TrainPhase::Idle ? "NONE" : name(trainer_.id);
     s.trainReason = trainer_.reason;

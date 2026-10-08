@@ -415,6 +415,12 @@ void hardwareChecks() {
     std::string ack = status();
     expect(has(ack, "\"source\":\"HARDWARE\""), "hardware build is not labelled simulated");
     expect(!has(ack, "FIRMWARE_SIMULATED"), "no simulated label");
+    // Hardware frames carry the raw sensor view; the whole frame must stay well inside the
+    // 2048-byte telemetry buffer, otherwise the firmware silently drops it.
+    expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
+           "hardware telemetry has the raw sensor block");
+    expect(ack.size() < 1700, "hardware telemetry frame leaves headroom in the 2048-byte buffer");
+    std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
     // Simulation-only commands do not exist on hardware.
