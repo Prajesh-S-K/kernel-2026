@@ -24,10 +24,10 @@ void state(const char* why) {
                   why, static_cast<unsigned long>(millis()), int(ble.secured.load()),
                   int(ble.subscribed.load()), int(ble.connected()), int(buttonDown));
 }
-void send(int8_t dx, bool down, const char* what) {
+void send(int8_t dx, bool down, const char* what, int8_t dy = 0) {
     Report report;
     report.dx = dx;
-    report.dy = 0;
+    report.dy = dy;
     report.wheel = 0;
     report.down = down;
     const bool ok = ble.send(report);
@@ -47,7 +47,8 @@ void setup() {
         "BLE,banner,name=NodX-bench-ble-probe,stage=4,reports=only-on-command,engine=none");
     ble.begin();
     state("boot-advertising");
-    Serial.println("BLE,help,commands=help|status|bonds|ping|nudge|down confirm|up|adv");
+    Serial.println("BLE,help,commands=help|status|bonds|ping|nudge|move <right|left|up|down>|down "
+                   "confirm|up|adv");
 }
 void loop() {
     if (!commandSeen && millis() - lastHeartbeat >= 3000) {
@@ -80,6 +81,28 @@ void loop() {
         }
         if (command == "status") {
             state("status");
+        } else if (command.startsWith("move ")) {
+            // HID relative axes: +x is right, +y is down. Held buttons are preserved, never
+            // changed.
+            const String direction = command.substring(5);
+            int8_t dx = 0, dy = 0;
+            if (direction == "right") {
+                dx = 4;
+            } else if (direction == "left") {
+                dx = -4;
+            } else if (direction == "down") {
+                dy = 4;
+            } else if (direction == "up") {
+                dy = -4;
+            }
+            if (dx == 0 && dy == 0) {
+                Serial.println("BLE,move,error=direction-must-be-right-left-up-down");
+            } else {
+                for (int i = 0; i < 5; ++i) {
+                    send(dx, buttonDown, ("move-" + direction).c_str(), dy);
+                    delay(20);
+                }
+            }
         } else if (command == "bonds") {
             Serial.printf("BLE,bonds,stored=%d\n", NimBLEDevice::getNumBonds());
         } else if (command == "ping") {
@@ -98,7 +121,8 @@ void loop() {
             NimBLEDevice::startAdvertising();
             Serial.println("BLE,adv,restarted=1");
         } else if (command.length()) {
-            Serial.println("BLE,help,commands=help|status|bonds|ping|nudge|down confirm|up|adv");
+            Serial.println("BLE,help,commands=help|status|bonds|ping|nudge|move "
+                           "<right|left|up|down>|down confirm|up|adv");
         }
         command = "";
     }
