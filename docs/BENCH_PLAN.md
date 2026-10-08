@@ -239,3 +239,11 @@ reports while idle (about 100 notifications per second). A BLE link carries far 
 repeated "HID connection or delivery failed" faults and may be linked to the serial stalls (unproven).
 Now the core sends an idle zero report only once (a stop always sends its release) and the adapter
 coalesces movement to one notification per 20 ms; a button change or an all-zero report is sent at once.
+
+### Loop watchdog and reset reason
+
+After the serial link was seen to go silent for good (35 s to 6 min after boot, sensor healthy and 100 Hz
+until the last reply, no fault counted), the loop task watchdog is enabled and the last reset reason is
+printed at boot (`[BOOT] reset reason: ...`) and reported as `reset` in hardware telemetry. A hung control
+loop now reboots the board (the panic text with its backtrace goes to serial) and the reason shows TASK_WDT,
+which separates a firmware lock-up from a USB-serial glitch. Watchdog timeout is the framework default.

@@ -129,6 +129,7 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            map.valid() ? "true" : "false", map.axes[0], map.axes[1], map.axes[2], map.signs[0],
            map.signs[1], map.signs[2], map.accelAxes[0], map.accelAxes[1], map.accelAxes[2],
            map.accelSigns[0], map.accelSigns[1], map.accelSigns[2]);
+    append(buffer, sizeof(buffer), used, ",\"reset\":\"%s\"", bootResetReason);
 #endif
     append(buffer, sizeof(buffer), used, "}\n");
     if (used >= sizeof(buffer)) {

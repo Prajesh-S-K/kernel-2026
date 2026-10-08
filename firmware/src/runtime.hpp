@@ -24,6 +24,7 @@ struct SensorSnapshot {
     double angle[3] = {0, 0, 0}; // degrees, integral of the raw gyro per sensor axis since boot
 };
 extern SensorSnapshot sensorSnapshot;
+extern const char* bootResetReason; // why the chip last restarted (set by main.cpp)
 void initializeRuntime();
 void serviceRuntime();
 void command(const std::string& line, uint32_t now, bool truncated = false);

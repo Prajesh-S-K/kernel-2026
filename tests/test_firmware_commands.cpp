@@ -437,6 +437,7 @@ void hardwareChecks() {
            "no enable pin configured: control stays inhibited");
     expect(has(ack, "\"axes\":{\"valid\":"), "hardware telemetry reports the active axis mapping");
     expect(has(ack, "\"uncalDemo\":{\"active\":false"), "uncalibrated demo is off at boot");
+    expect(has(ack, "\"reset\":\""), "hardware telemetry reports the last reset reason");
     expect(refused(send("handsfree uncal start")), "uncalibrated demo refused without a button");
     expect(refused(send("handsfree uncal sideways")), "bad uncalibrated demo argument refused");
     expect(refused(send("handsfree uncal start extra")), "trailing text refused");

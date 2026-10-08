@@ -22,6 +22,7 @@ bool serialOverflow = false;
 bool pressed(int pin) {
     return pin >= 0 && digitalRead(pin) == LOW;
 }
+const char* bootResetReason = "UNKNOWN";
 void initializeRuntime() {
     Serial.begin(115200);
     Serial.println("[NODX] 0.2.0 pre-hardware; START parameters; ESP32-S3");
