@@ -225,6 +225,25 @@ class Analysis(unittest.TestCase):
         )
         self.assertEqual(status_of(text, "burst list may be truncated"), "WARN")
 
+    def test_the_firmware_sensor_driver_run_is_judged(self):
+        good = (
+            "DIAG,imuinit,begin=1,variant=MPU-6500\nDIAG,imuinit,reg=0x1D,read=1,value=0x03\n"
+            "DIAG,imuinit,seconds=10,polls=4000,validFrames=1000\n"
+            "DIAG,imuinit,accelMagMeanG=0.9840,accelMagStdG=0.0100,gyroMeanDps=-1.2/-0.9/0.2\n"
+        )
+        name = "the firmware's own sensor driver"
+        self.assertEqual(status_of(GOOD + good, name), "PASS")
+        self.assertEqual(status_of(GOOD + good.replace("begin=1", "begin=0"), name), "FAIL")
+        self.assertEqual(
+            status_of(
+                GOOD + good.replace("validFrames=1000", "validFrames=300"), "driver delivers"
+            ),
+            "FAIL",
+        )
+        self.assertEqual(
+            status_of(GOOD + good.replace("0.9840", "0.2000"), "driver-converted"), "FAIL"
+        )
+
     def test_garbage_and_truncated_lines_do_not_crash(self):
         noisy = (
             "boot junk \x00\x01\nDIAG,imu,gyroMeanDps=a/b/c\nDIAG,\nBLE,state\nrst:0x1 (POWERON)\n"

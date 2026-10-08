@@ -50,6 +50,7 @@ def collect(lines):
         "button": {"burstList": [], "toggleList": []},
         "ble": {"states": [], "sends": [], "warnings": []},
         "regs": [],
+        "imuinit": {"regs": {}},
         "raw": {},
         "ignored": 0,
     }
@@ -67,6 +68,11 @@ def collect(lines):
                 data["scan"]["addresses"].append(fields["address"].lower())
             else:
                 data["scan"].update(fields)
+        elif family == "DIAG" and stage == "imuinit":
+            if "reg" in fields:
+                data["imuinit"]["regs"][fields["reg"]] = fields.get("value")
+            else:
+                data["imuinit"].update(fields)
         elif family == "DIAG" and stage == "raw":
             if "summary" in fields or "rangeAccelLsb" in fields or "minAccelLsb" in fields:
                 data["raw"].update(fields)
@@ -330,6 +336,34 @@ def judge(data):
                     "raw frames identical across the dump (a live sensor is not)",
                     "FAIL" if len(set(frames)) == 1 else "PASS",
                     f"{len(frames)} frames, {len(set(frames))} distinct",
+                )
+            )
+    drv = data["imuinit"]
+    if "begin" in drv:
+        out.append(
+            check(
+                "the firmware's own sensor driver accepts the chip and its read-back passes",
+                "PASS" if drv["begin"] == "1" else "FAIL",
+                f"variant={drv.get('variant')} registers={drv['regs']}",
+            )
+        )
+        seconds, valid = number(drv.get("seconds")), number(drv.get("validFrames"))
+        if seconds and valid is not None:
+            rate = valid / seconds
+            out.append(
+                check(
+                    "the driver delivers about 100 valid frames per second (START 80-120)",
+                    "PASS" if 80 <= rate <= 120 else "FAIL",
+                    f"{rate:.1f} frames/s of {drv.get('polls')} polls",
+                )
+            )
+        mag = number(drv.get("accelMagMeanG"))
+        if mag is not None:
+            out.append(
+                check(
+                    "driver-converted accelerometer magnitude about 1 g (START 0.9-1.1)",
+                    "PASS" if 0.9 <= mag <= 1.1 else "FAIL",
+                    f"{mag:.4f} g",
                 )
             )
     raw = data["raw"]

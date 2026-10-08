@@ -75,6 +75,7 @@ qualification; a held switch must release and the user must resume explicitly.
 | Example wait / capture / validation | 6000 / 3000 / 20000 | ms | Helper pacing |
 | Learned neutralRate | clamp(3σ+1.5, 2, 8) | °/s, record bounds 1–10 | Real noise |
 | Learned template | peakMin 0.5×min, peakMax min(240,1.5×max); enter 0.5×peakMin; stroke 0.5×min–2×max; gap max(2×max,150); total 1.5×max | see spec bounds | Whether these margins fit real repeats |
+| IMU registers (both variants) | PWR_MGMT_1 0x01, CONFIG 0x03, SMPLRT_DIV 0x09, GYRO_CONFIG 0x00, ACCEL_CONFIG 0x00, INT_ENABLE 0x01; MPU-6500 only: ACCEL_CONFIG_2 0x03 | register values | START: 100 Hz output, DLPF 41-44 Hz, +-250 dps (131 LSB/dps), +-2 g (16384 LSB/g); every register is read back at init. Whether the filter bandwidth suits head motion and the 6500's accelerometer filter equivalence need bench data |
 | Enable debounce | Maintained: ON stable 30 ms, OFF immediate. Button: press stable 30 ms to enable, first edge to disable, stable 30 ms release before the next press | ms | Real tactile-switch bounce on a scope; whether a one-sample glitch disabling control is acceptable |
 | Enable GPIO | -1 (disabled); candidate GPIO4 (button contact pair to GND, no 3V3/5V) | pin | Board schematic, wiring, continuity test of the button pairs |
 | Dwell in hands-free | existing dwell values; lockout after resume/drag | ms / px | Unwanted-click rate, comfort |

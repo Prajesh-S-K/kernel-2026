@@ -82,6 +82,18 @@ never produce a sample. If the measurement shows that, the fix is made locally i
 regression test and recorded before/after evidence (the diagnostic's own numbers, the same stage re-run on a
 `bench-firmware` telemetry check). Gate: WHO_AM_I 0x68, frames about 100/s, no read errors. Otherwise stop.
 
+### Stage 2b · the firmware's own sensor driver (`imuinit`)
+
+After `imuregs` has captured the as-found state, `imuinit 10` runs `MPU6050Sensor::begin()` (identity, the
+documented register writes, read-back of every one) and then reads frames through the driver for 10 s. The
+analyser judges: begin accepted with a variant, about 100 valid frames/s, accelerometer magnitude about 1 g.
+It writes sensor registers, which is why it comes after the read-only dump. **Written locally, not yet
+flashed or run.**
+
+```bash
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage2b --send imuregs --send "imuinit 10" --seconds 30   # NOT RUN
+```
+
 ## Stage 3 · the enable button (`bench-diag`)
 
 Press and release a few times (a quick tap, a normal press, a long hold) when the prompt line appears:

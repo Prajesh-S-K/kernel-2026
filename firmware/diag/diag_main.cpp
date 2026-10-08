@@ -7,6 +7,7 @@
 // it.
 #include "diag_logic.hpp"
 #include "nodx/handsfree.hpp"
+#include "nodx/sensor.hpp"
 #include <Arduino.h>
 #include <Wire.h>
 #include <cmath>
@@ -306,6 +307,58 @@ void imuRaw(unsigned seconds) {
                   long(lo[1]), long(lo[2]), long(hi[0]), long(hi[1]), long(hi[2]));
 }
 
+// The firmware's OWN sensor driver (MPU6050Sensor: identity, initialisation with read-back, frame
+// conversion) run on the real chip over the same Wire pins. This WRITES the documented
+// configuration registers, so run it after `imuregs` has captured the as-found state.
+class WireBus : public nodx::RegisterBus {
+public:
+    bool write(uint8_t reg, uint8_t value) override {
+        return writeReg(reg, value);
+    }
+    bool read(uint8_t reg, uint8_t* bytes, size_t count) override {
+        return readReg(reg, bytes, count);
+    }
+};
+void imuInit(unsigned seconds) {
+    if (!startWire()) {
+        Serial.println("DIAG,imuinit,error=pins-not-configured-or-wire-failed");
+        return;
+    }
+    WireBus bus;
+    nodx::MPU6050Sensor sensor(bus);
+    const bool ok = sensor.begin();
+    Serial.printf("DIAG,imuinit,begin=%d,variant=%s\n", ok, nodx::name(sensor.variant()));
+    if (!ok) {
+        return;
+    }
+    const uint8_t checked[] = {0x6b, 0x1a, 0x19, 0x1b, 0x1c, 0x1d, 0x38};
+    for (uint8_t reg : checked) {
+        uint8_t value = 0;
+        const bool read = readReg(reg, &value, 1);
+        Serial.printf("DIAG,imuinit,reg=0x%02X,read=%d,value=0x%02X\n", reg, read, value);
+    }
+    RunningStats mag, gyroX, gyroY, gyroZ;
+    unsigned valid = 0, polls = 0;
+    const uint32_t end = millis() + seconds * 1000u;
+    while (int32_t(millis() - end) < 0) {
+        const nodx::MotionSample row = sensor.read(millis());
+        ++polls;
+        if (row.valid) {
+            ++valid;
+            mag.add(std::sqrt(double(row.accel[0]) * row.accel[0] +
+                              double(row.accel[1]) * row.accel[1] +
+                              double(row.accel[2]) * row.accel[2]));
+            gyroX.add(row.gyro[0]);
+            gyroY.add(row.gyro[1]);
+            gyroZ.add(row.gyro[2]);
+        }
+        delay(2);
+    }
+    Serial.printf("DIAG,imuinit,seconds=%u,polls=%u,validFrames=%u\n", seconds, polls, valid);
+    Serial.printf("DIAG,imuinit,accelMagMeanG=%.4f,accelMagStdG=%.4f,gyroMeanDps=%.3f/%.3f/%.3f\n",
+                  mag.mean(), mag.stddev(), gyroX.mean(), gyroY.mean(), gyroZ.mean());
+}
+
 // ---------------------------------------------------------------- stage 3: the enable button
 // Records every level change with microsecond timestamps (bounce), and runs the REAL momentary gate
 // from the firmware so the same rules are seen with the real part: raw pressed vs latched
@@ -404,6 +457,8 @@ void loop() {
                 scan();
             } else if (command == "imuregs") {
                 imuRegisters();
+            } else if (command.startsWith("imuinit")) {
+                imuInit(secondsArg(command, 10));
             } else if (command.startsWith("imuraw")) {
                 imuRaw(secondsArg(command, 20));
             } else if (command.startsWith("imu")) {
