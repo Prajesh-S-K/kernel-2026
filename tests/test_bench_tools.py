@@ -182,6 +182,36 @@ class Analysis(unittest.TestCase):
         chatter = [(1000, 200), (1210, 200)]
         self.assertEqual(status_of(self.burst_log(chatter, 1), name), "PASS")
 
+    def test_toggles_are_placed_against_the_presses_that_caused_them(self):
+        name = "every gate toggle is at a press edge"
+
+        def log(toggle_times):
+            presses = [(5000, 1000), (8000, 1000)]  # held about 1 s, 2 s apart
+            base = self.burst_log(presses, len(toggle_times))
+            lines = []
+            for n, (at, latched) in enumerate(toggle_times, 1):
+                lines.append(f"DIAG,button,gateToggle={n},latched={latched},atMs={at}")
+            return base.replace(
+                "DIAG,button,burst=1,", "\n".join(lines) + "\nDIAG,button,burst=1,", 1
+            )
+
+        self.assertEqual(status_of(log([(5031, 1), (8000, 0)]), name), "PASS")
+        self.assertEqual(
+            status_of(log([(5031, 1), (5600, 0), (8000, 0)]), name), "FAIL", "toggle during a hold"
+        )
+        self.assertEqual(status_of(log([(5031, 1), (6050, 0)]), name), "FAIL", "toggle on release")
+        self.assertEqual(
+            status_of(log([(5001, 1)]), name), "FAIL", "an enable before the debounce window"
+        )
+        self.assertEqual(status_of(log([(7000, 1)]), name), "FAIL", "toggle with no press")
+
+    def test_recorder_overflow_and_truncation_are_reported_explicitly(self):
+        name = "recorder neither overflowed"
+        self.assertEqual(status_of(GOOD, name), "PASS")
+        self.assertEqual(status_of(GOOD.replace("droppedEdges=0", "droppedEdges=4"), name), "FAIL")
+        self.assertEqual(status_of(GOOD.replace("edges=8,", "edges=256,"), name), "FAIL")
+        self.assertEqual(status_of(GOOD.replace("bursts=2,", "bursts=256,"), name), "FAIL")
+
     def test_old_logs_with_a_full_burst_list_warn_that_they_may_be_truncated(self):
         old = "\n".join(
             f"DIAG,button,burst={i},kind={'press' if i % 2 else 'release'},edges=1,spanUs=0"

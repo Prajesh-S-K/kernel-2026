@@ -127,6 +127,44 @@ def simulate_gate(bursts, debounce_us=30000):
     return toggles, presses, ignored
 
 
+def classify_toggles(bursts, toggles):
+    """Where each gate toggle sits relative to the observed presses. Returns a list of
+    (toggle number, latched, kind, offset_ms, press index) with kind one of
+    'at-press-edge' (a disable at the first edge), 'debounced-in-hold' (an enable 28-80 ms into the
+    press), 'during-hold' (later in the same hold), 'on-release' or 'no-press'."""
+    ordered = [b for b in bursts if isinstance(b.get("startUs"), int)]
+    presses = []
+    for index, burst in enumerate(ordered):
+        if burst.get("kind") != "press":
+            continue
+        following = ordered[index + 1] if index + 1 < len(ordered) else None
+        end = (
+            following["startUs"] / 1000.0
+            if following and following.get("kind") == "release"
+            else float("inf")
+        )
+        presses.append((burst["startUs"] / 1000.0, end))
+    result = []
+    for item in toggles:
+        at = number(item.get("atMs"))
+        latched = item.get("latched") == "1"
+        kind, offset, which = "no-press", None, None
+        for i, (start, end) in enumerate(presses):
+            if start - 2 <= at <= end + 80:
+                offset, which = at - start, i + 1
+                if at > end + 2:
+                    kind = "on-release"
+                elif not latched and offset <= 10:
+                    kind = "at-press-edge"
+                elif latched and 28 <= offset <= 80:
+                    kind = "debounced-in-hold"
+                else:
+                    kind = "during-hold"
+                break
+        result.append((int(number(item.get("gateToggle"), 0)), latched, kind, offset, which))
+    return result
+
+
 def check(name, status, detail):
     return {"name": name, "status": status, "detail": detail}
 
@@ -353,7 +391,37 @@ def judge(data):
                 f"dropped={button.get('droppedEdges')}",
             )
         )
+        edges_total = number(button.get("edges"), 0)
+        bursts_total = number(button.get("bursts"), 0)
+        dropped = number(button.get("droppedEdges"), 0)
+        full = edges_total >= 256 or bursts_total >= 256
+        out.append(
+            check(
+                "recorder neither overflowed nor truncated its lists",
+                "FAIL" if dropped or full else "PASS",
+                f"edges={int(edges_total)}/256 dropped={int(dropped)} bursts={int(bursts_total)}/256",
+            )
+        )
         toggles = int(number(button.get("gateToggles"), 0))
+        if (
+            bursts
+            and all(isinstance(b.get("startUs"), int) for b in bursts)
+            and button["toggleList"]
+        ):
+            placed = classify_toggles(bursts, button["toggleList"])
+            wrong = [t for t in placed if t[2] not in ("at-press-edge", "debounced-in-hold")]
+            detail = "; ".join(
+                f"#{n} {'enable' if latched else 'disable'} {kind}"
+                + (f" ({offset:+.1f} ms, press {which})" if offset is not None else "")
+                for n, latched, kind, offset, which in placed
+            )
+            out.append(
+                check(
+                    "every gate toggle is at a press edge (disable) or 30 ms into a hold (enable), none on release or later in a hold",
+                    "FAIL" if wrong else "PASS",
+                    detail or "no toggles",
+                )
+            )
         if bursts and all(isinstance(b.get("startUs"), int) for b in bursts):
             expected, seen, ignored = simulate_gate(bursts)
             out.append(
