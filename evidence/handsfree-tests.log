@@ -106,4 +106,12 @@ PASS after a resume gesture the user must move before the first dwell click
 PASS dwell click is exactly one press and release pair
 PASS staged patterns are discarded by a reboot and never persisted implicitly
 PASS replaying the same samples through two systems gives identical output
-108 passed, 0 failed
+PASS held pointing in a pattern's first-stroke direction opens one bounded rejected candidate
+PASS the suppression window is the same at every pointing speed, the discard grows with speed
+PASS roll pointing in the second pattern's first-stroke direction is suppressed the same way
+PASS directions and speeds that cannot start a pattern never open a candidate
+PASS a slow onset (ramp) is treated as pointing and never opens a candidate
+PASS keyed pointing corpus: every candidate is rejected, bounded, and nothing executes
+PASS deliberate gestures still execute after pointing candidates were rejected
+PASS patterns that both start on roll leave yaw/pitch pointing completely untouched
+116 passed, 0 failed
