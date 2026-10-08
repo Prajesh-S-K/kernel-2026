@@ -32,3 +32,24 @@
   condition changes explicit; host-pointer smoke trials cannot establish adaptation benefit.
 - Formatting/lint tools are pinned development dependencies. Gate stamps bind all source bytes and
   built artifact hashes; packaging refuses dirty/stale inputs. GPIOs and START parameters stay unchanged.
+
+## Hands-free revision (unreleased)
+
+| Decision | Reason / limit |
+|---|---|
+| Hands-free is a separate, versioned, checksummed two-slot record; the 84-byte profile is untouched | Existing profiles stay compatible; mode is never inferred from the profile |
+| Missing record = legacy; corrupt/unsupported/out-of-bounds = CONFIG_INVALID (inhibited) | A damaged setup must not silently fall back to buttons or to an enabled mode |
+| Conversion order: profile (dwell on) first, configuration record last as the single commit point; failures restore the profile | A hands-free setup is never partially enabled; interrupted saves are testable with a power-loss model |
+| Gestures are generic stroke sequences trained per user, matched by a deterministic state machine; no classifier, no ML | Small, auditable, bounded; users choose comfortable patterns |
+| Two commands only: pause/resume and drag toggle | Everything else stays dwell/pointer; fewer patterns to confuse |
+| Patterns must differ and neither may be a prefix of the other | A prefix would fire early inside the longer pattern |
+| A candidate suppresses pointer, scroll and dwell and its movement is discarded; neutral is required before re-arming | Prevents command motion from moving the pointer or replaying; costs up to about one stroke of pointing on a rejection |
+| 2026-10-08 | No recognition threshold or timing is changed after the Lab block showed rejected candidates on keyboard pointing | Measured: candidates open only on sustained pitch+ / roll+ movement of about 20 deg/s or more after 300 ms of stillness, always end `TOO_SLOW` after 310 ms, cost 259-1035 px of movement at 20-60 deg/s, and execute nothing. Raising the entry rate only moves the cost to faster pointing and risks missing gentle gestures; shortening the stroke limit or ending suppression early changes safety-adjacent behaviour. Both need real gyro data first. See EVIDENCE "Pointing and rejected candidates" |
+| Dwell lockout after resume and drag release | A user who is still after a gesture must not get a surprise click |
+| Enable switch: OFF immediate, ON debounced 30 ms, unknown/unconfigured = OFF; ON never resumes | Fail closed; the switch permits, it is not a power switch |
+| `setControlSwitch` is driven every loop pass, not per sensor sample | OFF must release without waiting for a sample |
+| Alternative to a switch only by explicit helper qualification stored in the record | "Disabled switch configuration inhibits hands-free hardware mode" |
+| Legacy physical-switch logic kept as a compatibility mode and test fixture, ignored in hands-free | Existing regressions stay valid |
+| New protocol fields/commands are additive (`protocolRevision` 3, then 4 for the enable-input kind and raw/latched fields) | Existing clients keep working |
+| 2026-10-08 | The enable input is one momentary push button by default (latch, never persisted, disabled at boot, held-at-boot ignored, stable release between presses, disabling press at its first edge, latch cleared by a fault); the maintained switch stays as an explicit stored option in flag bit 2 (clear = maintained) | The user's actual part is a four-pin momentary tactile button. A record written before the button existed keeps its original meaning byte-for-byte and is never reinterpreted; an older firmware reading the new bit fails closed. Disable at the first edge means a glitch can only disable control; a fault clearing the latch keeps the button from silently re-permitting after recovery |
+| Version strings are not changed in this revision | Release/version handling is a separate task |

@@ -638,8 +638,8 @@ int main() {
         require(rig.system.diagnostics.faultCode == FaultCode::Storage, "storage fault missing");
     });
     test("request envelope rejects malformed IDs and truncated commands", [] {
-        for (const std::string& line : {"@0 status", "@-1 status", "@1.5 status",
-                                        "@4294967296 status", "@a status", "@ status", "@1"}) {
+        for (const char* line : {"@0 status", "@-1 status", "@1.5 status", "@4294967296 status",
+                                 "@a status", "@ status", "@1"}) {
             require(!parseEnvelope(line, 80).valid, "invalid ID accepted");
         }
         auto valid = parseEnvelope("@4294967295 status", 80);

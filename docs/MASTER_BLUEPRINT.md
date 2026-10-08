@@ -77,3 +77,43 @@ stationary release through SafetyManager → HIDManager immediately, before stor
 Delivery failure enters Safe State. Recovery requires 20 consecutive valid system checks and neutral
 output delivery, then explicit resume with held-switch release. Invalid inputs/mapping/timing/profile
 skip motion/adaptation math. Physical connection/release behavior still needs host validation.
+
+## Hands-free revision (unreleased; software and simulation only)
+
+Specification: [HANDS_FREE_SPEC](HANDS_FREE_SPEC.md). The frozen pipeline, `SafetyManager → HIDManager`
+ordering, 84-byte profile and bounded output are unchanged. Two interaction modes exist:
+
+* **HANDS_FREE** — dwell selection; one control-enable input permits or inhibits control. By default it is
+  one momentary push button that toggles a never-persisted latch; the maintained switch is an explicit
+  stored option. It does not cut power and never resumes anything. A trained gesture toggles
+  pause/resume and a second toggles drag. No physical selection, pause or calibration button is read.
+* **LEGACY_SWITCH** — the v0.2.0 behaviour (physical switch selection, optional dwell, physical
+  pause/calibration inputs), kept only as an explicitly identified compatibility mode and test fixture.
+
+A third state, **CONFIG_INVALID**, inhibits output when a stored hands-free record is corrupt,
+unsupported or out of bounds. Mode comes only from the separate versioned hands-free record
+(`HandsFreeConfig`, two slots, CRC32); a missing record means legacy, and an existing profile is
+never converted silently. A helper calibrates, trains both gestures (4 repeated examples + a
+validation repeat each) and saves; conversion enables dwell in the profile first and the configuration
+record is the single commit point, so a hands-free setup is never partially enabled.
+
+Safety priority, highest first: inhibit/stop (switch OFF, fault, disconnect, pause, calibration,
+training, profile/config change) → drag release → recognition suppression → dwell click →
+pointer/scroll. Boot, reconnect, fault recovery and switch-ON never resume control; resume succeeds
+only when every safety condition holds (valid profile and configuration, dwell, switch permits, ≥20
+healthy samples, connected, neutral output delivered). `SystemState` gains `TRAINING`.
+
+| Added module / file | Responsibility |
+|---|---|
+| `core/include/nodx/gesture.hpp`, `core/src/gesture.cpp` | `GestureTemplate` bounds and distinctness, deterministic `GestureRecognizer` state machine, `GestureTrainer` |
+| `core/include/nodx/handsfree.hpp`, `core/src/handsfree.cpp` | Hands-free record encode/decode/CRC, two-slot `HandsFreeRepository`, `EnableGate`, status JSON |
+| `core/include/nodx/gesture_script.hpp` | Deterministic synthetic head-motion for simulators and tests (not recorded data) |
+| `System` additions | `setControlSwitch`, `trainStart/Cancel/Accept`, `commitHandsFree`, `useLegacyMode`, gesture arbitration |
+| `ui/handsfree.js`, `ui/handsfree-view.js` | Setup steps, training view-model, recovery guidance and their DOM presentation |
+| `wokwi/handsfree-diagnostic/` | Paste-ready simulator diagnostic: sensor + one switch, no BLE output |
+
+Hardware: one four-pin momentary tactile push button between a proposed GPIO (**GPIO4, START only**) and GND (one contact pair to each; no 3V3/5V; pairs identified by continuity testing). With
+`NODX_ENABLE=-1` (the default in every environment) hands-free control stays inhibited unless setup
+explicitly qualified a switchless configuration. The buzzer remains disconnected (`NODX_BUZZER=-1`).
+Gesture patterns, thresholds and the claim that they separate command from normal movement are
+**unvalidated**; accidental-trigger rate, comfort and suitability require measurement on real users.

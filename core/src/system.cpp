@@ -1,4 +1,5 @@
 #include "nodx/system.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace nodx {
@@ -18,6 +19,8 @@ const char* name(SystemState state) {
         return "PAUSED";
     case SystemState::SafeState:
         return "SAFE_STATE";
+    case SystemState::Training:
+        return "TRAINING";
     }
     return "SAFE_STATE";
 }
@@ -38,11 +41,43 @@ System::System(HIDTransport& transport, ProfileRepository& repository)
         hasProfile_ ? "profile loaded; explicit resume required" : "calibration required";
 }
 
+System::System(HIDTransport& transport, ProfileRepository& repository, HandsFreeRepository& config)
+    : System(transport, repository) {
+    configRepo_ = &config;
+    loadConfig();
+}
+
+void System::loadConfig() {
+    configState_ = configRepo_->load(config_);
+    if (configState_ == ConfigState::Valid) {
+        mode_ = config_.enabled ? InteractionMode::HandsFree : InteractionMode::Legacy;
+    } else {
+        config_ = HandsFreeConfig{};
+        mode_ = configState_ == ConfigState::Missing ? InteractionMode::Legacy
+                                                     : InteractionMode::ConfigInvalid;
+    }
+    stagedSwitchless_ = config_.switchlessQualified;
+    // A stored record keeps the kind it was saved with (a pre-button record is MAINTAINED). Only a
+    // setup with no usable record assumes the push button.
+    stagedKind_ = configState_ == ConfigState::Valid ? config_.enableKind : EnableKind::Momentary;
+    enable_.configure(enablePresent_, config_.switchlessQualified, config_.enableKind);
+    recognizer_.configure(config_.gestures, (1u << gestureCount) - 1);
+    if (mode_ == InteractionMode::ConfigInvalid) {
+        diagnostics_.reason =
+            "hands-free configuration invalid; helper setup or legacy mode needed";
+    } else if (mode_ == InteractionMode::HandsFree) {
+        diagnostics_.reason =
+            hasProfile_ ? "hands-free ready; explicit resume required" : "calibration required";
+    }
+}
+
 void System::resetInteraction(uint32_t now) {
     selection_.reset(lastRaw_, now);
     processor_.reset();
     hid_.reset();
     diagnostics_.motion = {};
+    dragging_ = false;
+    recognizer_.reset(now);
 }
 
 bool System::emitStationary() {
@@ -60,7 +95,11 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
         calibration_.cancel();
         calibration_.reason = description(fault);
     }
+    if (state_ == SystemState::Training) {
+        trainer_.cancel();
+    }
     state_ = SystemState::SafeState;
+    enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
     diagnostics_.reason = description(fault);
@@ -70,6 +109,9 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
 }
 
 void System::stop(SystemState next, uint32_t now) {
+    if (state_ == SystemState::Training && next != SystemState::Training) {
+        trainer_.cancel();
+    }
     state_ = next;
     resetInteraction(now);
     diagnostics_.cursor = next == SystemState::Paused ? "PAUSED" : "WARNING";
@@ -100,7 +142,7 @@ bool System::resume() {
     if (state_ != SystemState::Ready && state_ != SystemState::Paused) {
         return false;
     }
-    if (!hasProfile_ || !profile_.valid() || healthyChecks_ < start::recoverySamples) {
+    if (activationBlocker()) {
         return false;
     }
     if (!emitStationary()) {
@@ -108,6 +150,10 @@ bool System::resume() {
         return false;
     }
     resetInteraction(lastTick_);
+    if (mode_ == InteractionMode::HandsFree) {
+        // A resume gesture leaves the user still; require movement before the first dwell click.
+        selection_.lockAt(x_, y_);
+    }
     state_ = SystemState::Active;
     diagnostics_.faultCode = FaultCode::None;
     diagnostics_.reason = "active";
@@ -131,6 +177,9 @@ void System::pause() {
 bool System::setProfile(const UserProfile& candidate, bool persist) {
     if (!candidate.valid()) {
         return false;
+    }
+    if (persist && mode_ == InteractionMode::HandsFree && !candidate.dwellEnabled) {
+        return false; // hands-free selection is dwell; turning it off needs legacy mode
     }
     stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
     if (state_ == SystemState::SafeState) {
@@ -169,7 +218,11 @@ void System::invalidateProfile() {
 void System::advanceCalibration(const MotionSample& mapped, uint32_t now) {
     calibration_.tick(mapped, now);
     if (calibration_.phase == CalPhase::Save) {
-        if (setProfile(calibration_.candidate)) {
+        UserProfile candidate = calibration_.candidate;
+        if (mode_ == InteractionMode::HandsFree) {
+            candidate.dwellEnabled = true; // new hands-free profiles use dwell selection
+        }
+        if (setProfile(candidate)) {
             calibration_.phase = CalPhase::Complete;
         } else {
             calibration_.phase = CalPhase::Failed;
@@ -182,8 +235,9 @@ void System::advanceCalibration(const MotionSample& mapped, uint32_t now) {
 }
 
 void System::tick(MotionSample raw, uint32_t now, bool pressed) {
+    const bool handsFree = mode_ == InteractionMode::HandsFree;
     ++diagnostics_.ticks;
-    lastRaw_ = pressed;
+    lastRaw_ = pressed && !handsFree; // physical selection is legacy compatibility only
     const uint32_t elapsedMs = uint32_t(now - lastTick_);
     const bool timingValid = !hadTick_ || (elapsedMs > 0 && elapsedMs <= start::timeoutMs);
     const float dtSeconds = hadTick_ ? float(elapsedMs) / 1000.f : float(start::sampleMs) / 1000.f;
@@ -211,19 +265,34 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
 
     const bool inputsValid = fault == FaultCode::None;
+    const MotionSample mapped = axes.apply(raw);
     if (state_ == SystemState::Calibrating && inputsValid) {
-        advanceCalibration(axes.apply(raw), now);
+        advanceCalibration(mapped, now);
     }
+    if (state_ == SystemState::Training && inputsValid) {
+        advanceTraining(mapped, now);
+    }
+    const bool recognizing = handsFree && updateGestures(mapped, now, inputsValid);
 
+    // Defensive: control never stays active while the maintained switch inhibits it.
+    if (handsFree && state_ == SystemState::Active && !enable_.permitted()) {
+        stop(SystemState::Paused, now);
+        diagnostics_.reason = "control switch OFF; explicit resume required";
+    }
     const bool active = state_ == SystemState::Active && inputsValid && hasProfile_;
     Intent intent;
     diagnostics_.motion = {};
     // Invalid input/profile never reaches control math or telemetry numbers.
     if (inputsValid && profile_.valid()) {
-        diagnostics_.motion = processor_.process(axes.apply(raw), profile_, dtSeconds);
+        diagnostics_.motion = processor_.process(mapped, profile_, dtSeconds);
         intent = adaptive_.apply(diagnostics_.motion, profile_, dtSeconds);
     }
-    const bool scrolling = intent.wheel != 0;
+    bool scrolling = intent.wheel != 0;
+    if (recognizing) {
+        // Candidate movement is discarded, never replayed after a rejection.
+        intent = Intent{};
+        scrolling = false;
+    }
     intent = intent_.resolve(intent, active, scrolling);
     x_ += hid_.last.dx;
     y_ += hid_.last.dy;
@@ -232,15 +301,24 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         enterSafe(FaultCode::Calculation, now);
     }
     const bool outputAllowed = active && state_ == SystemState::Active;
-    const Selection selected =
-        selection_.update(pressed, x_, y_, outputAllowed, scrolling, profile_, now);
+    Selection selected;
+    if (!handsFree || !outputAllowed) {
+        selected = selection_.update(lastRaw_, x_, y_, outputAllowed, scrolling, profile_, now);
+    } else if (recognizing || dragging_) {
+        selection_.interrupt(); // no dwell click while recognizing or dragging
+    } else {
+        selected = selection_.update(false, x_, y_, true, scrolling, profile_, now);
+    }
+    if (handsFree && outputAllowed && dragging_) {
+        selected.down = true;
+    }
     const Command command = interaction_.compose(intent, selected);
     // REQUIRED FINAL ORDER: safety gate -> HID manager -> transport.
     const Command safeCommand =
         safety_.gate(command, outputAllowed, inputsValid, hasProfile_ && profile_.valid(),
                      transport_.connected());
-    if (!outputAllowed) {
-        hid_.reset();
+    if (!outputAllowed || recognizing) {
+        hid_.reset(); // no fractional movement survives a suppressed or inactive period
     }
     const bool delivered = hid_.emit(safeCommand);
     if (safety_.calculationFault) {
@@ -265,6 +343,8 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         diagnostics_.cursor = "PAUSED";
     } else if (!outputAllowed) {
         diagnostics_.cursor = "WARNING";
+    } else if (recognizing) {
+        diagnostics_.cursor = "GESTURE";
     } else if (selected.pulse) {
         diagnostics_.cursor = "CLICK";
     } else if (selected.down) {
@@ -279,5 +359,300 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         diagnostics_.cursor = intent.mode;
     }
     feedback_.update(state_, now);
+}
+
+// ------------------------------------------------------------------ hands-free
+const char* System::activationBlocker() const {
+    if (!hasProfile_ || !profile_.valid()) {
+        return "calibrated profile required";
+    }
+    if (mode_ == InteractionMode::ConfigInvalid) {
+        return "hands-free configuration invalid";
+    }
+    if (mode_ == InteractionMode::HandsFree) {
+        if (!profile_.dwellEnabled) {
+            return "dwell selection required in hands-free mode";
+        }
+        if (const char* gate = enable_.blocked()) {
+            return gate;
+        }
+    }
+    if (healthyChecks_ < start::recoverySamples) {
+        return "waiting for healthy sensor samples";
+    }
+    return nullptr;
+}
+
+void System::configureEnableInput(bool present) {
+    enablePresent_ = present;
+    enable_.configure(present, config_.switchlessQualified, config_.enableKind);
+}
+
+void System::setControlSwitch(bool active, uint32_t now) {
+    const bool before = enable_.permitted();
+    enable_.update(active, now);
+    if (mode_ != InteractionMode::HandsFree || !before || enable_.permitted()) {
+        return;
+    }
+    // Permitted -> inhibited. Release now: no further sensor sample is needed.
+    if (state_ == SystemState::Active) {
+        stop(SystemState::Paused, now);
+        diagnostics_.reason =
+            enable_.kind() == EnableKind::Momentary
+                ? "control disabled by the enable button; explicit resume required"
+                : "control switch OFF; explicit resume required";
+    } else {
+        resetInteraction(now);
+        if (!emitStationary()) {
+            enterSafe(FaultCode::Transport, now);
+        }
+    }
+    feedback_.update(state_, now);
+}
+
+bool System::updateGestures(const MotionSample& mapped, uint32_t now, bool inputsValid) {
+    const bool listening = inputsValid && hasProfile_ && enable_.permitted() &&
+                           (state_ == SystemState::Ready || state_ == SystemState::Paused ||
+                            state_ == SystemState::Active);
+    if (!listening) {
+        recognizer_.reset(now);
+        return false;
+    }
+    const Rates rate{mapped.gyro[0] - profile_.bias[0], mapped.gyro[1] - profile_.bias[1],
+                     mapped.gyro[2] - profile_.bias[2]};
+    const GestureEvent event = recognizer_.update(rate, now);
+    if (event.executed) {
+        executeGesture(event.id);
+        return false;
+    }
+    return recognizer_.suppressing();
+}
+
+void System::executeGesture(GestureId id) {
+    if (id == GestureId::PauseResume) {
+        if (state_ == SystemState::Active) {
+            pause();
+        } else if (!resume()) {
+            ++refused_; // a gesture can never override a failed safety condition
+        }
+        return;
+    }
+    if (state_ != SystemState::Active) {
+        ++refused_;
+        return;
+    }
+    if (dragging_) {
+        dragging_ = false; // the release report is composed later in this same tick
+        selection_.lockAt(x_, y_);
+        diagnostics_.reason = "drag released";
+    } else {
+        dragging_ = true;
+        selection_.interrupt();
+        diagnostics_.reason = "drag started";
+    }
+}
+
+GestureTemplate System::effectiveTemplate(unsigned id) const {
+    if (staged_[id]) {
+        return stagedTemplates_[id];
+    }
+    if (configState_ == ConfigState::Valid) {
+        return config_.gestures.templates[id];
+    }
+    return {};
+}
+
+bool System::setupAllowed() const {
+    return configRepo_ && state_ != SystemState::Calibrating && state_ != SystemState::SafeState &&
+           state_ != SystemState::Training;
+}
+
+void System::advanceTraining(const MotionSample& mapped, uint32_t now) {
+    trainer_.tick({mapped.gyro[0] - profile_.bias[0], mapped.gyro[1] - profile_.bias[1],
+                   mapped.gyro[2] - profile_.bias[2]},
+                  now);
+    diagnostics_.reason = trainer_.reason;
+}
+
+bool System::trainStart(GestureId id, uint32_t now) {
+    if (!configRepo_ || !hasProfile_ || !profile_.valid() || state_ == SystemState::SafeState ||
+        state_ == SystemState::Calibrating) {
+        return false;
+    }
+    stop(SystemState::Training, now); // inhibits and releases output immediately
+    if (state_ != SystemState::Training) {
+        return false;
+    }
+    trainer_.begin(id, now, effectiveTemplate(1 - unsigned(id)));
+    diagnostics_.reason = trainer_.reason;
+    return true;
+}
+
+void System::trainCancel() {
+    if (state_ != SystemState::Training) {
+        return;
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ != SystemState::SafeState) {
+        diagnostics_.reason = "training cancelled; prior configuration preserved";
+    }
+}
+
+bool System::trainAccept() {
+    if (state_ != SystemState::Training || trainer_.phase != TrainPhase::Ready ||
+        !trainer_.validated) {
+        return false;
+    }
+    const unsigned id = static_cast<unsigned>(trainer_.id);
+    const GestureTemplate learned = trainer_.candidate;
+    const float neutral = trainer_.neutralRate;
+    stop(SystemState::Ready, lastTick_);
+    if (state_ != SystemState::Ready) {
+        return false;
+    }
+    staged_[id] = true;
+    stagedTemplates_[id] = learned;
+    stagedNeutral_ = std::max(stagedNeutral_, neutral);
+    diagnostics_.reason = "pattern staged, not saved; commit hands-free setup to keep it";
+    return true;
+}
+
+void System::stageSwitchless(bool qualified) {
+    stagedSwitchless_ = qualified;
+}
+void System::stageEnableKind(EnableKind kind) {
+    stagedKind_ = kind;
+}
+
+bool System::commitFailed(const char* reason, bool storage) {
+    if (storage) {
+        diagnostics_.faultCode = FaultCode::Storage;
+    }
+    diagnostics_.reason = reason;
+    return false;
+}
+
+bool System::commitHandsFree() {
+    if (!setupAllowed() || !hasProfile_) {
+        return false;
+    }
+    HandsFreeConfig next;
+    next.enabled = true;
+    next.switchlessQualified = stagedSwitchless_;
+    next.enableKind = stagedKind_;
+    next.gestures.neutralRate = std::max(
+        stagedNeutral_, configState_ == ConfigState::Valid ? config_.gestures.neutralRate : 0.f);
+    for (unsigned id = 0; id < gestureCount; ++id) {
+        next.gestures.templates[id] = effectiveTemplate(id);
+    }
+    if (!next.valid()) {
+        return commitFailed("train both gestures with distinct patterns first", false);
+    }
+    UserProfile saved;
+    if (!repository_.load(saved)) {
+        return commitFailed("save a calibrated profile before hands-free setup", false);
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ == SystemState::SafeState) {
+        return false;
+    }
+    UserProfile converted = saved;
+    converted.dwellEnabled = true;
+    const bool changed = !saved.dwellEnabled;
+    // Order matters: the profile is converted first, the configuration record is the single
+    // commit point. A failure restores the prior profile and leaves the prior record untouched.
+    if (changed && !repository_.save(converted)) {
+        return commitFailed("hands-free setup not saved: profile write failed", true);
+    }
+    if (!configRepo_->save(next)) {
+        if (changed) {
+            repository_.save(saved); // best effort; the in-memory profile is unchanged anyway
+        }
+        return commitFailed("hands-free setup not saved: configuration write failed", true);
+    }
+    profile_ = converted;
+    hasProfile_ = true;
+    config_ = next;
+    configState_ = ConfigState::Valid;
+    mode_ = InteractionMode::HandsFree;
+    staged_ = {};
+    stagedNeutral_ = 0;
+    enable_.setSwitchless(next.switchlessQualified);
+    if (enable_.kind() != next.enableKind) {
+        enable_.setKind(next.enableKind); // a different input kind starts disabled again
+    }
+    recognizer_.configure(next.gestures, (1u << gestureCount) - 1);
+    recognizer_.reset(lastTick_);
+    diagnostics_.faultCode = FaultCode::None;
+    diagnostics_.reason = "hands-free setup saved; explicit resume required";
+    return true;
+}
+
+bool System::useLegacyMode() {
+    if (!setupAllowed()) {
+        return false;
+    }
+    HandsFreeConfig next = configState_ == ConfigState::Valid ? config_ : HandsFreeConfig{};
+    next.enabled = false;
+    if (configState_ != ConfigState::Valid) {
+        next.enableKind = stagedKind_; // no stored record to keep: use what the helper staged
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ == SystemState::SafeState) {
+        return false;
+    }
+    if (!configRepo_->save(next)) {
+        return commitFailed("legacy mode not saved: configuration write failed", true);
+    }
+    config_ = next;
+    configState_ = ConfigState::Valid;
+    mode_ = InteractionMode::Legacy;
+    recognizer_.reset(lastTick_);
+    diagnostics_.faultCode = FaultCode::None;
+    diagnostics_.reason = "legacy compatibility mode saved; explicit resume required";
+    return true;
+}
+
+HandsFreeStatus System::handsFreeStatus() const {
+    HandsFreeStatus s;
+    s.mode = name(mode_);
+    s.config = name(configState_);
+    s.configId = configState_ == ConfigState::Valid ? configId(config_) : 0;
+    s.switchPresent = enable_.present();
+    s.switchOn = enable_.on();
+    s.permitted = enable_.permitted();
+    s.switchless = enable_.switchless();
+    s.switchlessStaged = stagedSwitchless_;
+    s.switchKind = name(enable_.kind());
+    s.switchKindStaged = name(stagedKind_);
+    s.switchPressed = enable_.pressed();
+    s.switchLatched = enable_.kind() == EnableKind::Momentary && enable_.on();
+    s.switchArmed = enable_.armed();
+    s.recognizer = name(recognizer_.state());
+    s.lastGesture = recognizer_.lastGesture < 0
+                        ? "NONE"
+                        : name(static_cast<GestureId>(recognizer_.lastGesture));
+    s.lastReject = name(recognizer_.lastReject);
+    s.candidates = recognizer_.candidates;
+    s.rejected = recognizer_.rejected;
+    s.executed = recognizer_.executed;
+    s.refused = refused_;
+    s.suppressing = recognizer_.suppressing();
+    s.dragging = dragging_;
+    s.trainPhase = name(trainer_.phase);
+    s.trainGesture = trainer_.phase == TrainPhase::Idle ? "NONE" : name(trainer_.id);
+    s.trainReason = trainer_.reason;
+    s.trainAccepted = trainer_.accepted;
+    s.trainRequired = start::trainExamples;
+    s.trainRejects = trainer_.rejects;
+    s.trainValidated = trainer_.validated;
+    for (unsigned id = 0; id < gestureCount; ++id) {
+        s.staged[id] = staged_[id];
+        s.stored[id] =
+            configState_ == ConfigState::Valid && config_.gestures.templates[id].configured();
+    }
+    const char* blocker = activationBlocker();
+    s.blocked = blocker ? blocker : "";
+    return s;
 }
 } // namespace nodx

@@ -1,0 +1,15 @@
+Wokwi diagnostic: do the MPU6050 controls change what the sketch reads?
+Observed in the Wokwi web editor (no sign-in, nothing saved or shared), serial monitor lines
+printed by sketch.ino. Sliders moved by hand in the MPU6050 control panel.
+
+Before (all sliders at their defaults):
+accel g:   0.00   0.00   1.00 | gyro dps:     0.0     0.0     0.0 | 24.0 C | switch ON | ok=15 fail=0
+
+After setting acceleration X = 1.35 g, rotation X = 191 deg/s, rotation Z = -183 deg/s,
+temperature = 68.4 C:
+accel g: 1.35 0.00 1.00 | gyro dps: 191.0 0.0 -183.0 | 68.4 C | switch ON | ok=180 fail=0
+
+Every moved slider is reflected in the matching serial field; the untouched ones stayed at 0 / 1 g.
+Slider value labels in the panel: 1.35 g, 191 deg/s, -183 deg/s, 68.4 C (screenshot:
+wokwi-sensor-controls.jpg). Still NOT verified in simulation: the 30 ms switch debounce timing.
+This is a simulation of an idealised part, not evidence about a real MPU6050 or real wiring.

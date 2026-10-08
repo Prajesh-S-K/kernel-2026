@@ -1,5 +1,6 @@
 import { summarize, csv } from './metrics.js';
 import { freezeContext, invalidates, groupBlocks, comparisonSettings } from './lab.js';
+import { handsFreeOf } from './handsfree.js';
 
 export function createPerformanceLab({
   $,
@@ -59,6 +60,7 @@ export function createPerformanceLab({
     lab.startWall = new Date().toISOString();
     lab.startDevice = getDevice()?.timeMs || 0;
     lab.cancelStart = getDevice()?.cancellations || 0;
+    lab.gestureStart = handsFreeOf(getDevice()).gesture.candidates;
     placeTarget(lab.target);
     $('trialLabel').textContent = `TRIAL ${i + 1} / 12 · ${lab.condition} · ${lab.source}`;
   }
@@ -72,6 +74,8 @@ export function createPerformanceLab({
       inputSource: lab.source,
       deviceSource: lab.context.deviceSource,
       selectionMethod: lab.context.selectionMethod,
+      interactionMode: lab.context.interactionMode,
+      gestureConfigId: lab.context.gestureConfigId,
       blockContext: lab.context,
       targetX: lab.target.x,
       targetY: lab.target.y,
@@ -91,6 +95,8 @@ export function createPerformanceLab({
       deviceStartMs: lab.startDevice,
       deviceEndMs: getDevice()?.timeMs || 0,
       dwellCancellations: (getDevice()?.cancellations || 0) - lab.cancelStart,
+      // Recognition candidates opened during this attempt (each suppresses output while open).
+      gestureInterruptions: handsFreeOf(getDevice()).gesture.candidates - lab.gestureStart,
       profile: structuredClone(lab.profile),
       viewportWidth: lab.context.geometry.width,
       viewportHeight: lab.context.geometry.height,
@@ -153,6 +159,7 @@ export function createPerformanceLab({
         source,
         profile: structuredClone(result.profile),
         context: freezeContext(result, source, condition, geometry()),
+        baseline: { executed: handsFreeOf(result).gesture.executed },
       };
       const box = $('arena').getBoundingClientRect();
       lab.target = { x: box.width / 2, y: box.height / 2, width: 48 };
@@ -212,6 +219,10 @@ export function createPerformanceLab({
         block[0].deviceSource +
         ' / ' +
         block[0].selectionMethod +
+        ' / ' +
+        (block[0].interactionMode === 'HANDS_FREE'
+          ? 'HANDS-FREE ' + block[0].gestureConfigId
+          : 'LEGACY SWITCH') +
         ' / BLOCK ' +
         block[0].blockId.slice(0, 8);
       card.append(header);
@@ -255,7 +266,7 @@ export function createPerformanceLab({
     },
     check(device) {
       if (!lab) return;
-      const reason = invalidates(lab.context, device, geometry());
+      const reason = invalidates(lab.context, device, geometry(), lab.baseline);
       if (reason) abortLab(reason);
     },
     async exportTrials() {

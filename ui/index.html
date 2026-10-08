@@ -27,7 +27,10 @@
               <span>01</span> Setup & calibration <b>↗</b></button
             ><button class="nav" data-view="control">
               <span>02</span> Control studio <b>↗</b></button
-            ><button class="nav" data-view="lab"><span>03</span> Performance lab <b>↗</b></button>
+            ><button class="nav" data-view="lab"><span>03</span> Performance lab <b>↗</b></button
+            ><button class="nav" data-view="handsfree">
+              <span>04</span> Hands-free setup <b>↗</b>
+            </button>
           </nav>
           <div class="device-card">
             <span class="eyebrow">NODX DEVICE</span>
@@ -180,10 +183,13 @@
               <div>
                 <span class="eyebrow">02 / CONTROL STUDIO</span>
                 <h1>Make motion<br /><em>meaningful.</em></h1>
-                <p>WASD to point · Q/E to roll · Space to select · P to pause.</p>
+                <p>
+                  WASD to point · Q/E to roll · dwell clicks automatically · P is the helper pause.
+                </p>
               </div>
-              <button id="resume" class="primary">Resume control ↗</button>
+              <button id="resume" class="primary">Helper: resume control ↗</button>
             </div>
+            <div id="studioChips" class="hf-chips" role="status" aria-live="polite"></div>
             <div class="control-grid">
               <article class="panel">
                 <div class="panel-head">
@@ -232,8 +238,23 @@
                     min="-60"
                     max="60"
                     value="0" /></label
-                ><button id="switch" class="quiet wide">Hold accessible switch</button
-                ><label class="toggle"><input type="checkbox" id="dwell" /> Dwell selection</label
+                ><button id="switch" class="quiet wide">
+                  Hold accessible switch (legacy compatibility mode only)
+                </button>
+                <div id="studioHandsFree" class="hf-group">
+                  <span class="eyebrow">HANDS-FREE · SIMULATED INPUT</span>
+                  <label class="toggle" id="enableSwitchRow"
+                    ><input type="checkbox" id="enableSwitch" /> Maintained enable switch ON</label
+                  ><button id="enableButton" class="quiet wide" hidden>
+                    Hold to press the enable button</button
+                  ><button id="gesturePause" class="quiet wide">
+                    Perform pause / resume gesture</button
+                  ><button id="gestureDrag" class="quiet wide">Perform drag gesture</button>
+                  <p class="caption" id="studioHfNote">
+                    Simulated. A real user performs their own trained pattern.
+                  </p>
+                </div>
+                <label class="toggle"><input type="checkbox" id="dwell" /> Dwell selection</label
                 ><label class="toggle"
                   ><input type="checkbox" id="scroll" checked /> Roll scrolling</label
                 >
@@ -314,6 +335,116 @@
               fatigue, host acceleration and target geometry affect results. Counterbalance
               condition order for real comparisons; these are exploratory trials.
             </p>
+          </section>
+          <section id="handsfree" class="view" hidden>
+            <div class="page-top">
+              <div>
+                <span class="eyebrow">04 / HANDS-FREE SETUP</span>
+                <h1>No selection buttons.<br /><em>Just you.</em></h1>
+                <p>
+                  A helper trains two gestures once. The only physical control is one enable button
+                  that permits or disables control; it never selects, pauses or resumes.
+                </p>
+              </div>
+              <div class="session">
+                <span class="eyebrow">INTERACTION MODE</span
+                ><strong id="hfMode">LEGACY SWITCH MODE</strong
+                ><span>All gesture values are START values, unvalidated.</span>
+              </div>
+            </div>
+            <div id="hfChips" class="hf-chips" role="status" aria-live="polite"></div>
+            <div class="hf-grid">
+              <article class="panel">
+                <div class="panel-head">
+                  <span class="eyebrow">HELPER SETUP</span><span class="tag">HELPER ONLY</span>
+                </div>
+                <ol id="hfSteps" class="hf-steps"></ol>
+                <label class="hf-field"
+                  >Enable input (helper decision)
+                  <select id="hfEnableKind">
+                    <option value="momentary">
+                      Push button: one press permits, the next disables (default)
+                    </option>
+                    <option value="maintained">
+                      Maintained switch: its position is the permission (compatibility)
+                    </option>
+                  </select></label
+                >
+                <p class="caption">
+                  Wire the button between the enable GPIO and GND. Permission is never saved: it is
+                  off after every restart and fault, and permitting never resumes control.
+                </p>
+                <label class="toggle"
+                  ><input type="checkbox" id="hfSwitchless" /> Qualify control without an enable
+                  input (helper decision)</label
+                >
+                <p class="caption">
+                  Only qualify this if no switch or button can be used; control then cannot be
+                  disabled by an input.
+                </p>
+                <div class="actions">
+                  <button id="hfCommit" class="primary">Convert and save setup</button
+                  ><button id="hfHelperResume" class="quiet">Resume control (helper)</button>
+                </div>
+                <hr />
+                <button id="hfLegacy" class="danger">Return to legacy compatibility mode</button>
+                <p class="caption">
+                  Legacy mode keeps the earlier physical-switch behaviour. It never turns on by
+                  itself and hands-free is never turned on silently either.
+                </p>
+              </article>
+              <article class="panel">
+                <div class="panel-head">
+                  <span class="eyebrow">GESTURE TRAINING</span
+                  ><span id="hfTrainTag" class="tag">IDLE</span>
+                </div>
+                <div class="hf-pair">
+                  <label
+                    >Pause / resume pattern (simulated)
+                    <select id="patternPause">
+                      <option value="nod2">Double nod</option>
+                      <option value="tilt2">Double sideways tilt</option>
+                      <option value="turn2">Double turn</option>
+                      <option value="nod3">Triple nod</option>
+                      <option value="tilt3">Triple sideways tilt</option>
+                    </select></label
+                  ><button id="trainPause" class="quiet">Train pause / resume</button
+                  ><label
+                    >Drag pattern (simulated)
+                    <select id="patternDrag">
+                      <option value="nod2">Double nod</option>
+                      <option value="tilt2" selected>Double sideways tilt</option>
+                      <option value="turn2">Double turn</option>
+                      <option value="nod3">Triple nod</option>
+                      <option value="tilt3">Triple sideways tilt</option>
+                    </select></label
+                  ><button id="trainDrag" class="quiet">Train drag</button>
+                </div>
+                <h2 id="hfPhase">No training in progress</h2>
+                <p id="hfReason" role="status" aria-live="polite">Choose a gesture to train.</p>
+                <div class="progress"><div id="hfProgress"></div></div>
+                <div class="progress-label">
+                  <span id="hfProgressText">0 of 4 examples</span>
+                </div>
+                <div class="actions">
+                  <button id="hfExample" class="quiet">Perform example (simulated)</button
+                  ><button id="hfAccept" class="primary">Accept pattern</button
+                  ><button id="hfCancel" class="quiet">Cancel training</button>
+                </div>
+                <p class="caption" id="hfHardwareNote">
+                  Real device: the user performs their own comfortable pattern. The patterns above
+                  only drive the simulators. Learned values are START values until measured.
+                </p>
+              </article>
+              <article class="panel hf-wide">
+                <div class="panel-head">
+                  <span class="eyebrow">STATUS AND RECOVERY</span
+                  ><span id="hfSaveTag" class="tag" hidden>SAVE FAILED</span>
+                </div>
+                <h2 id="hfGuideTitle">Waiting</h2>
+                <ul id="hfGuideLines" class="hf-guide"></ul>
+              </article>
+            </div>
           </section>
           <footer>
             <span id="reason">Initializing shared control engine…</span

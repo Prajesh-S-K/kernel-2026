@@ -129,3 +129,55 @@ flash-support images are labeled separately. This is **not a complete flashing b
 settings, offsets and the Arduino boot_app0 image may also be required. Qualify pins/axes and
 use PlatformIO rebuild/upload, rather than guessing a merged-image flashing command.
 An unpacked archive without Git can run builds/checks; packaging requires a versioned Git checkout.
+
+## Hands-free revision (unreleased)
+
+### Everyday workflow (no physical button)
+
+1. One-time **helper setup** (companion → *Hands-free setup*): calibrate; train the pause/resume
+   gesture (stay still for the rest capture, perform four examples, repeat once to validate, accept);
+   train the drag gesture the same way with a *different, non-prefix* pattern; confirm the enable
+   switch (or explicitly qualify a switchless alternative); *Convert and save setup*. The user, not the
+   helper, chooses comfortable patterns; double nod and double sideways tilt are only examples.
+2. **Daily use**: press the enable button once (this only *permits*; it is never saved, so after a
+   restart or fault press it again), then perform the pause/resume gesture. Pointing follows head motion; dwell clicks automatically after holding still
+   (a click needs meaningful movement before the next one); the drag gesture presses and releases; the
+   pause gesture or the next press of the enable button stops everything at once. After any fault,
+   disconnect or disable, control is READY/PAUSED and needs the resume gesture again.
+3. **Helper-only** actions remain: calibration, training, saving, the helper Pause/Resume buttons and
+   returning to legacy compatibility mode.
+
+### Simulation
+
+`python3 desktop/server.py` shows the *Hands-free setup* view. Native commands (also used by the
+tests): `train start pause|drag`, `train accept|cancel`, `handsfree commit|legacy`,
+`handsfree switchless on|off`, `handsfree enable maintained|momentary`, `enable 0|1` (simulated raw
+enable input: button pressed / switch ON; starts released),
+`gesture <nod|turn|tilt><1-3> [scale]` (400 ms still, pattern, 400 ms still), and an optional ninth
+`step` field `enable`. Replay with `nodx_sim <runtime> --replay samples.csv --hands-free` keeps the stored
+profile/configuration and resumes only by recognised gesture; a ninth CSV column `enable` drives the
+simulated switch (recordings now include it). Labels stay `SIMULATED`, `FIRMWARE_SIMULATED` and
+`HARDWARE`; scripted gestures are synthetic input, never user evidence.
+
+### One-switch bench wiring (START candidates, not approved)
+
+| Connection | Candidate | Note |
+|---|---|---|
+| Control-enable button | GPIO4 → one contact pair of a four-pin momentary tactile button; GND → the other pair (`NODX_ENABLE`, active low, internal pull-up). **No 3V3/5V connection.** | **START only.** Identify the pairs by continuity testing, not appearance. One press permits, the next disables; never saved. Default `-1` in every environment |
+| MPU SDA / SCL | GPIO8 / GPIO9 | Unchanged candidate; pull-ups to 3.3 V |
+| Selection, pause, calibration buttons | none | Not used in hands-free mode |
+| Buzzer | none | Deferred; `NODX_BUZZER=-1` |
+
+With `NODX_ENABLE=-1` the enable input is not configured and hands-free control stays
+inhibited. To bench-test, add `-DNODX_ENABLE=4` (with the SDA/SCL candidates) to a *separate bench
+environment* after the exact board's pins and the switch wiring are checked. Check the real MPU6050
+breakout's VCC arrangement and the exact N16R8 board pin availability from photos or schematics
+first. Compiling proves nothing about the physical board.
+
+### Wokwi diagnostic
+
+[`wokwi/handsfree-diagnostic`](../wokwi/handsfree-diagnostic/README.md): paste `diagram.json` and
+`sketch.ino` into a new ESP32-S3 project at wokwi.com. It shows an ESP32-S3, an MPU6050 on SDA GPIO8 /
+SCL GPIO9 powered from 3V3, and one four-pin momentary pushbutton (GPIO4 and GND on different contact pairs). It prints sensor
+identity, values, the raw button state and the latched permission, and never emits BLE or HID output. The Wokwi wiring is an idealised simulation, **not**
+approved physical wiring.

@@ -2,6 +2,7 @@ import { DeviceClient } from './transport.js';
 import { sourceLabels } from './source.js';
 import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
+import { createHandsFreeView } from './handsfree-view.js';
 const client = new DeviceClient();
 const $ = (id) => document.getElementById(id);
 let device = null,
@@ -41,7 +42,8 @@ async function action(action, extra = {}) {
   try {
     const data = await request({ action, ...extra });
     render(data, false);
-    if (!data.ok) toast('Action refused. Check profile, connection and healthy samples.');
+    if (!data.ok)
+      toast(`Action refused: ${data.reason}. Check profile, connection and healthy samples.`);
     return data;
   } catch (error) {
     toast(error.message);
@@ -88,7 +90,7 @@ function renderCursor() {
     $('cursorText'),
     point,
     space().getBoundingClientRect(),
-    view === 'setup',
+    view === 'setup' || view === 'handsfree',
     host ? 'HOST_POINTER' : device?.cursor || 'WARNING',
     device?.dwellProgress || 0,
   );
@@ -196,6 +198,7 @@ function render(data, applyReports = true) {
     $('studioResult').textContent =
       `Selections: ${selections} · Scroll: ${scrollTotal} · Drag distance: ${dragDistance.toFixed(0)} px`;
   }
+  handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
 }
@@ -261,6 +264,8 @@ const performanceLab = createPerformanceLab({
   download,
   geometry,
 });
+const handsFree = createHandsFreeView({ $, action, toast });
+handsFree.bind();
 document.querySelectorAll('.nav').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
 $('calibrate').onclick = () => action('calibrate');
 $('cancel').onclick = () => action('cancel');
@@ -408,6 +413,7 @@ async function tick() {
       connected: $('ble').checked,
       automatic: true,
       fault: Number($('fault').value),
+      enabled: handsFree.enableInput(device),
     });
     render(result);
   } catch (error) {

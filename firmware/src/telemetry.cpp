@@ -80,7 +80,7 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     const char* source = "HARDWARE";
 #endif
     append(buffer, sizeof(buffer), used,
-           "{\"protocol\":1,\"protocolRevision\":2,\"requestId\":%lu,\"source\":\"%s\",\"ok\":%s,"
+           "{\"protocol\":1,\"protocolRevision\":4,\"requestId\":%lu,\"source\":\"%s\",\"ok\":%s,"
            "\"firmware\":\"0.2.0\",\"timeMs\":%lu,\"state\":\"%s\",\"calibration\":\"%s\","
            "\"reason\":\"%s\",\"faults\":%lu,\"dwell\":\"%s\",\"cancellations\":%lu,\"hasProfile\":"
            "%s,\"connected\":%s,",
@@ -102,11 +102,14 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            "\"bias\":[%.5f,%.5f,%.5f],\"deadzone\":[%.5f,%.5f],\"gain\":[%.5f,%.5f,%.5f,%.5f],"
            "\"alpha\":%.5f,\"precisionThreshold\":%.5f,\"fastThreshold\":%.5f,\"dwellTolerance\":%."
            "5f,\"dwellMs\":%lu,\"scrollThreshold\":%.5f,\"scrollGain\":%.5f,\"dwellEnabled\":%s,"
-           "\"scrollEnabled\":%s}}\n",
+           "\"scrollEnabled\":%s}",
            p.bias[0], p.bias[1], p.bias[2], p.deadzone[0], p.deadzone[1], p.gain[0], p.gain[1],
            p.gain[2], p.gain[3], p.alpha, p.precisionThreshold, p.fastThreshold, p.dwellTolerance,
            (unsigned long)p.dwellMs, p.scrollThreshold, p.scrollGain,
            p.dwellEnabled ? "true" : "false", p.scrollEnabled ? "true" : "false");
+    static char hands[1024]; // static: keeps the loop task stack small
+    const size_t handsLength = handsFreeJson(hands, sizeof(hands), s.handsFreeStatus());
+    append(buffer, sizeof(buffer), used, ",\"handsFree\":%s}\n", handsLength ? hands : "{}");
     if (used >= sizeof(buffer)) {
         return;
     }

@@ -5,6 +5,13 @@ MPU6050Sensor mpu(bus);
 SimulatedSensor simulator;
 BLEHID ble;
 ProfileRepository repository(storage);
+NVSConfigStorage configStorage;
+HandsFreeRepository configRepository(configStorage);
+#ifdef NODX_SIMULATED
+bool simulatedEnable = false; // raw enable input: released
+std::vector<Rates> gestureScript;
+size_t gesturePosition = 0;
+#endif
 System* systemEngine = nullptr;
 DebouncedSwitch pauseSwitch, calSwitch;
 uint32_t lastPoll = 0, lastSample = 0, lastProbe = 0, lastDiagnostic = 0;
@@ -17,9 +24,9 @@ bool pressed(int pin) {
 void initializeRuntime() {
     Serial.begin(115200);
     Serial.println("[NODX] 0.2.0 pre-hardware; START parameters; ESP32-S3");
-    bool storageOK = storage.begin();
+    bool storageOK = storage.begin() && configStorage.begin();
     Serial.println(storageOK ? "[STORAGE] initialized" : "[STORAGE] failed");
-    for (int pin : {NODX_SWITCH, NODX_PAUSE, NODX_CALIBRATE}) {
+    for (int pin : {NODX_SWITCH, NODX_PAUSE, NODX_CALIBRATE, NODX_ENABLE}) {
         if (pin >= 0) {
             pinMode(pin, INPUT_PULLUP);
         }
@@ -35,7 +42,14 @@ void initializeRuntime() {
     bool imuOK = mpu.begin();
     Serial.println(imuOK ? "[IMU] detected" : "[IMU] unavailable; outputs inhibited");
     ble.begin();
-    systemEngine = new System(ble, repository);
+    systemEngine = new System(ble, repository, configRepository);
+    // Hands-free needs the enable input (switch or push button); without NODX_ENABLE control stays
+    // inhibited unless setup qualified an alternative.
+#ifdef NODX_SIMULATED
+    systemEngine->configureEnableInput(true);
+#else
+    systemEngine->configureEnableInput(NODX_ENABLE >= 0);
+#endif
 #ifdef NODX_SIMULATED
     systemEngine->axes.axes = {0, 1, 2};
     systemEngine->axes.accelAxes = {0, 1, 2};
@@ -63,8 +77,17 @@ void serviceRuntime() {
             }
         }
     }
-    bool pauseNow = pauseSwitch.update(pressed(NODX_PAUSE), now);
-    bool calNow = calSwitch.update(pressed(NODX_CALIBRATE), now);
+    // The raw enable input is read on every pass so a disable releases without waiting for a
+    // sample.
+#ifdef NODX_SIMULATED
+    s.setControlSwitch(simulatedEnable, now);
+#else
+    s.setControlSwitch(pressed(NODX_ENABLE), now);
+#endif
+    // Physical pause and calibration buttons exist only in the legacy compatibility mode.
+    const bool legacyControls = s.interaction == InteractionMode::Legacy;
+    bool pauseNow = legacyControls && pauseSwitch.update(pressed(NODX_PAUSE), now);
+    bool calNow = legacyControls && calSwitch.update(pressed(NODX_CALIBRATE), now);
     if (pauseNow && !previousPause) {
         if (s.state == SystemState::Active) {
             s.pause();
@@ -77,6 +100,7 @@ void serviceRuntime() {
     }
     previousPause = pauseNow;
     previousCal = calNow;
+    const bool selectionPressed = legacyControls && pressed(NODX_SWITCH);
     // Poll faster than data-ready cadence; tick only on fresh 100Hz sensor frames.
 #ifdef NODX_SIMULATED
     constexpr uint32_t pollMs = start::sampleMs;
@@ -86,14 +110,23 @@ void serviceRuntime() {
     if (uint32_t(now - lastPoll) >= pollMs) {
         lastPoll = now;
 #ifdef NODX_SIMULATED
-        s.tick(simulator.read(now), now, pressed(NODX_SWITCH));
+        if (gesturePosition < gestureScript.size()) {
+            const Rates& rate = gestureScript[gesturePosition++];
+            simulator.gyro = {rate[0], rate[1], rate[2]};
+            if (gesturePosition == gestureScript.size()) {
+                gestureScript.clear();
+                gesturePosition = 0;
+                simulator.gyro = {0, 0, 0};
+            }
+        }
+        s.tick(simulator.read(now), now, selectionPressed);
 #else
         MotionSample sample = mpu.read(now);
         if (sample.valid) {
             lastSample = now;
-            s.tick(sample, now, pressed(NODX_SWITCH));
+            s.tick(sample, now, selectionPressed);
         } else if (uint32_t(now - lastSample) > start::timeoutMs) {
-            s.tick(sample, now, pressed(NODX_SWITCH));
+            s.tick(sample, now, selectionPressed);
         }
         if (uint32_t(now - lastSample) > start::timeoutMs && uint32_t(now - lastProbe) >= 1000) {
             lastProbe = now;

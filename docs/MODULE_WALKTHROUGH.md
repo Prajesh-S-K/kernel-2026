@@ -13,7 +13,10 @@ then HIDManager. A failed delivery enters Safe State; healthy input alone cannot
 | `selection` | Switch debounce, release qualification, dwell arming/cancel/lockout | Selection and held-switch tests |
 | `profile` | Stable 84-byte encoding, CRC, numeric validation, two-slot repository | Every-byte corruption and torn-write tests |
 | `output` | Final safety gate, output bounds, fractional HID accumulation and pulse release | Safety bounds and immediate stopping tests |
-| `system` | State machine, validated commands, fault/recovery coordination | Recovery and stop-delivery regressions |
+| `system` | State machine, validated commands, fault/recovery coordination; hands-free arbitration | Recovery and stop-delivery regressions |
+| `gesture` | Stroke templates, deterministic recognizer, helper training | `test_handsfree.cpp` recognition and training cases |
+| `handsfree` | Hands-free record + CRC, two-slot repository, enable gate, status JSON | Configuration, interrupted-save and gate cases |
+| `gesture_script` | Synthetic head motion shared by the simulators and tests | Replay determinism and corpus cases |
 | `protocol.hpp` | Bounded ASCII envelope and strict request ID parsing, independent of Arduino | Envelope/truncation regression |
 | `desktop/main.cpp` | POSIX profile storage, synthetic HID, native commands and JSON, raw/replay runner | `test_protocol.py` save/restart/replay |
 | `desktop/transport.py` | Two-second native/serial replies, fragments, correlation, bounded shutdown | Deadline and partial-reply tests |
@@ -26,6 +29,7 @@ then HIDManager. A failed delivery enters Safe State; healthy input alone cannot
 | `ui/transport.js` | Three-second browser deadline, serialized commands and coalesced polls | Hardening JS tests |
 | `ui/app.js` | Setup/control presentation, input events and page coordination | Browser walkthrough |
 | `ui/cursor.js`, `source.js` | Cursor presentation and honest source labels | Source-label tests and browser states |
+| `ui/handsfree.js`, `handsfree-view.js` | Setup steps, training view-model, recovery guidance, live status chips | `tests/handsfree.test.mjs` and the browser walkthrough |
 | `ui/lab.js`, `lab-view.js` | Immutable contexts, block invalidation/grouping, trials and lab presentation | Hardening tests and 12-target browser smoke |
 | `ui/metrics.js` | Pure raw CSV and explicitly nominal metrics | Original five metric tests |
 | `scripts/release.py`, `package.py` | Verified-source/build hashes and clean-source packaging | Dirty/stale/tampered release regression |
@@ -38,10 +42,20 @@ files implement it. Profiles are copied for proposed changes and accepted only b
 
 Install development tools as shown in BUILD_GUIDE. Run `sh scripts/check.sh` after a change.
 Use `sh scripts/release_gate.sh` for a complete release check, including both firmware targets.
-Individual suites: `./build/nodx_tests`, `python3 -m unittest discover -s tests -p 'test_*.py' -v`,
+Individual suites: `./build/nodx_tests`, `./build/nodx_handsfree_tests`, `./build/nodx_firmware_sim_tests` and `./build/nodx_firmware_hw_tests` (the real firmware command path on the host over stubbed Arduino/NVS/BLE headers), `python3 -m unittest discover -s tests -p 'test_*.py' -v`,
 and `node --test tests/*.test.mjs`. Use isolated runtime directories for demos and replay.
 
 Format C++ with `clang-format -i`, Python with `ruff format`, and UI/test JS with
 `ui/node_modules/.bin/prettier --write`. Code uses four-space C++/Python and two-space JS,
 with a 100-character target width. Names should identify meaning and units; guard clauses
 reject invalid work before state changes. Comments explain constraints or decisions.
+
+## Reading the hands-free code
+
+Start with [HANDS_FREE_SPEC](HANDS_FREE_SPEC.md), then `system.hpp` (new commands and
+`handsFreeStatus`), the `tick` order in `system.cpp` (health → gate → recognition → action →
+suppressed composition → SafetyManager → HIDManager), `gesture.cpp` (recognizer, then trainer),
+and `handsfree.cpp` (record, repository, gate). Tests mirror this order in `tests/test_handsfree.cpp`
+(recognition, configuration, training, conflicts, drag, switch and recovery).
+`tests/hf_support.hpp` holds the rigs, including a power-loss storage model. The legacy
+`test_main.cpp` is unchanged and still runs.

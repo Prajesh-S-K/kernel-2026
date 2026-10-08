@@ -41,6 +41,19 @@ void SelectionManager::reset(bool raw, uint32_t now) {
     switch_.reset(raw, now);
     requireRelease_ = raw;
 }
+void SelectionManager::interrupt() {
+    if (dwell == DwellState::Arming || dwell == DwellState::Progress) {
+        ++cancellations;
+        dwell = DwellState::Idle;
+    } else if (dwell == DwellState::Click) {
+        dwell = DwellState::Lockout;
+    }
+}
+void SelectionManager::lockAt(double x, double y) {
+    dwell = DwellState::Lockout;
+    anchorX_ = x;
+    anchorY_ = y;
+}
 float SelectionManager::progress(uint32_t now, const UserProfile& p) const {
     if (dwell != DwellState::Progress) {
         return 0;

@@ -1,0 +1,294 @@
+All checks passed!
+9 files already formatted
+
+> format:check
+> prettier --check "*.js" "*.html" "*.css" "../tests/*.mjs"
+
+Checking formatting...
+All matched files use Prettier code style!
+
+> lint
+> cd .. && ui/node_modules/.bin/eslint --config ui/eslint.config.js ui tests/*.mjs
+
+-- The CXX compiler identification is AppleClang 17.0.0.17000404
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: <project>/build
+[  3%] Building CXX object CMakeFiles/nodx.dir/core/src/calibration.cpp.o
+[ 11%] Building CXX object CMakeFiles/nodx.dir/core/src/motion.cpp.o
+[ 11%] Building CXX object CMakeFiles/nodx.dir/core/src/output.cpp.o
+[ 15%] Building CXX object CMakeFiles/nodx.dir/core/src/selection.cpp.o
+[ 30%] Building CXX object CMakeFiles/nodx.dir/core/src/profile.cpp.o
+[ 30%] Building CXX object CMakeFiles/nodx.dir/core/src/system.cpp.o
+[ 30%] Building CXX object CMakeFiles/nodx.dir/core/src/gesture.cpp.o
+[ 30%] Building CXX object CMakeFiles/nodx.dir/core/src/sensor.cpp.o
+[ 34%] Building CXX object CMakeFiles/nodx.dir/core/src/handsfree.cpp.o
+[ 38%] Linking CXX static library libnodx.a
+[ 38%] Built target nodx
+[ 53%] Building CXX object CMakeFiles/nodx_sim.dir/desktop/main.cpp.o
+[ 53%] Building CXX object CMakeFiles/nodx_handsfree_tests.dir/tests/test_handsfree.cpp.o
+[ 53%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/tests/test_firmware_commands.cpp.o
+[ 53%] Building CXX object CMakeFiles/nodx_tests.dir/tests/test_main.cpp.o
+[ 57%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/runtime.cpp.o
+[ 61%] Linking CXX executable nodx_sim
+[ 61%] Built target nodx_sim
+[ 65%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/tests/test_firmware_commands.cpp.o
+[ 69%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/commands.cpp.o
+[ 73%] Linking CXX executable nodx_tests
+[ 73%] Built target nodx_tests
+[ 76%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/runtime.cpp.o
+[ 80%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/commands.cpp.o
+[ 84%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/telemetry.cpp.o
+[ 88%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/telemetry.cpp.o
+[ 92%] Linking CXX executable nodx_firmware_sim_tests
+[ 92%] Built target nodx_firmware_sim_tests
+[ 96%] Linking CXX executable nodx_firmware_hw_tests
+[ 96%] Built target nodx_firmware_hw_tests
+[100%] Linking CXX executable nodx_handsfree_tests
+[100%] Built target nodx_handsfree_tests
+Test project <project>/build
+    Start 1: control_invariants
+1/4 Test #1: control_invariants ..................   Passed    0.64 sec
+    Start 2: handsfree_invariants
+2/4 Test #2: handsfree_invariants ................   Passed    1.13 sec
+    Start 3: firmware_commands_simulated
+3/4 Test #3: firmware_commands_simulated .........   Passed    0.47 sec
+    Start 4: firmware_commands_hardware_config
+4/4 Test #4: firmware_commands_hardware_config ...   Passed    0.44 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   2.69 sec
+test_native_commands_reject_malformed_input (test_handsfree_protocol.CommandValidation.test_native_commands_reject_malformed_input) ... ok
+test_server_validates_new_actions (test_handsfree_protocol.CommandValidation.test_server_validates_new_actions) ... ok
+test_training_requires_a_profile_and_accept_requires_validation (test_handsfree_protocol.CommandValidation.test_training_requires_a_profile_and_accept_requires_validation) ... ok
+test_fault_drops_the_permission_and_presses_do_not_recover (test_handsfree_protocol.MomentaryEnableButton.test_fault_drops_the_permission_and_presses_do_not_recover) ... ok
+test_holding_the_button_toggles_only_once (test_handsfree_protocol.MomentaryEnableButton.test_holding_the_button_toggles_only_once) ... ok
+test_kind_commands_are_validated (test_handsfree_protocol.MomentaryEnableButton.test_kind_commands_are_validated) ... ok
+test_maintained_configuration_keeps_working_and_is_never_reinterpreted (test_handsfree_protocol.MomentaryEnableButton.test_maintained_configuration_keeps_working_and_is_never_reinterpreted) ... ok
+test_new_setup_assumes_the_button_and_starts_disabled (test_handsfree_protocol.MomentaryEnableButton.test_new_setup_assumes_the_button_and_starts_disabled) ... ok
+test_press_enables_without_resuming_and_the_gesture_resumes (test_handsfree_protocol.MomentaryEnableButton.test_press_enables_without_resuming_and_the_gesture_resumes) ... ok
+test_reboot_resets_permission_and_boot_held_enables_nothing (test_handsfree_protocol.MomentaryEnableButton.test_reboot_resets_permission_and_boot_held_enables_nothing) ... ok
+test_second_press_disables_and_releases_a_drag_at_once (test_handsfree_protocol.MomentaryEnableButton.test_second_press_disables_and_releases_a_drag_at_once) ... ok
+test_gesture_replay_is_reproducible_and_resumes_only_by_gesture (test_handsfree_protocol.ReplayAndTrials.test_gesture_replay_is_reproducible_and_resumes_only_by_gesture) ... ok
+test_replay_rejects_a_bad_enable_flag (test_handsfree_protocol.ReplayAndTrials.test_replay_rejects_a_bad_enable_flag) ... ok
+test_replay_with_the_switch_off_never_activates (test_handsfree_protocol.ReplayAndTrials.test_replay_with_the_switch_off_never_activates) ... ok
+test_trial_endpoint_enforces_interaction_context (test_handsfree_protocol.ReplayAndTrials.test_trial_endpoint_enforces_interaction_context) ... ok
+test_configuration_write_failure_restores_the_profile (test_handsfree_protocol.SaveFailureAndRecovery.test_configuration_write_failure_restores_the_profile) ... ok
+test_corrupt_and_oversized_configuration_inhibit_until_helper_repair (test_handsfree_protocol.SaveFailureAndRecovery.test_corrupt_and_oversized_configuration_inhibit_until_helper_repair) ... ok
+test_failed_replacement_keeps_the_prior_configuration (test_handsfree_protocol.SaveFailureAndRecovery.test_failed_replacement_keeps_the_prior_configuration) ... ok
+test_fault_recovery_never_resumes_hands_free_control (test_handsfree_protocol.SaveFailureAndRecovery.test_fault_recovery_never_resumes_hands_free_control) ... ok
+test_profile_write_failure_is_reported_and_nothing_changes (test_handsfree_protocol.SaveFailureAndRecovery.test_profile_write_failure_is_reported_and_nothing_changes) ... ok
+test_conversion_is_explicit (test_handsfree_protocol.SetupAndDailyWorkflow.test_conversion_is_explicit) ... ok
+test_dwell_click_works_while_hands_free (test_handsfree_protocol.SetupAndDailyWorkflow.test_dwell_click_works_while_hands_free) ... ok
+test_existing_clients_and_commands_still_work (test_handsfree_protocol.SetupAndDailyWorkflow.test_existing_clients_and_commands_still_work) ... ok
+test_helper_setup_then_daily_use_needs_no_buttons (test_handsfree_protocol.SetupAndDailyWorkflow.test_helper_setup_then_daily_use_needs_no_buttons) ... ok
+test_telemetry_is_finite_valid_json_in_every_state (test_handsfree_protocol.SetupAndDailyWorkflow.test_telemetry_is_finite_valid_json_in_every_state) ... ok
+test_repeated_transport_failure_keeps_output_inhibited (test_handsfree_protocol.SwitchAndTransport.test_repeated_transport_failure_keeps_output_inhibited) ... ok
+test_serial_adapter_passes_new_commands_and_still_refuses_native_only (test_handsfree_protocol.SwitchAndTransport.test_serial_adapter_passes_new_commands_and_still_refuses_native_only) ... ok
+test_step_enable_field_drives_the_switch (test_handsfree_protocol.SwitchAndTransport.test_step_enable_field_drives_the_switch) ... ok
+test_switch_off_releases_immediately_and_on_never_resumes (test_handsfree_protocol.SwitchAndTransport.test_switch_off_releases_immediately_and_on_never_resumes) ... ok
+test_missing_serial_acknowledgement_deadline (test_protocol.DeadlineTests.test_missing_serial_acknowledgement_deadline) ... ok
+test_native_timeout_dead_process_and_malformed_reply (test_protocol.DeadlineTests.test_native_timeout_dead_process_and_malformed_reply) ... ok
+test_reply_json_rejects_nonfinite_values_and_invalid_ids (test_protocol.DeadlineTests.test_reply_json_rejects_nonfinite_values_and_invalid_ids) ... ok
+test_api_rejects_nonfinite_and_out_of_range (test_protocol.ProtocolTests.test_api_rejects_nonfinite_and_out_of_range) ... ok
+test_baseline_never_overwrites_saved_adaptive (test_protocol.ProtocolTests.test_baseline_never_overwrites_saved_adaptive) ... ok
+test_corrupt_both_slots_rejects_and_recalibration_repairs (test_protocol.ProtocolTests.test_corrupt_both_slots_rejects_and_recalibration_repairs) ... ok
+test_end_to_end_calibration_saved_reloaded_after_restart (test_protocol.ProtocolTests.test_end_to_end_calibration_saved_reloaded_after_restart) ... ok
+test_fault_recovery_needs_resume (test_protocol.ProtocolTests.test_fault_recovery_needs_resume) ... ok
+test_nan_replay_enters_safe_and_stays_ready_after_recovery (test_protocol.ProtocolTests.test_nan_replay_enters_safe_and_stays_ready_after_recovery) ... ok
+test_native_protocol_refuses_unknown_or_oversized_batch (test_protocol.ProtocolTests.test_native_protocol_refuses_unknown_or_oversized_batch) ... ok
+test_oversized_profile_file_is_rejected_without_loading (test_protocol.ProtocolTests.test_oversized_profile_file_is_rejected_without_loading) ... ok
+test_partial_serial_acknowledgement (test_protocol.ProtocolTests.test_partial_serial_acknowledgement) ... ok
+test_pause_report_without_step_and_finite_invalid_profile_telemetry (test_protocol.ProtocolTests.test_pause_report_without_step_and_finite_invalid_profile_telemetry) ... ok
+test_recording_can_be_replayed (test_protocol.ProtocolTests.test_recording_can_be_replayed) ... ok
+test_serial_adapter_correlates_ack_not_unsolicited_telemetry (test_protocol.ProtocolTests.test_serial_adapter_correlates_ack_not_unsolicited_telemetry) ... ok
+test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption (test_protocol.ProtocolTests.test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption) ... ok
+test_strict_counts_booleans_and_trailing_native_fields (test_protocol.ProtocolTests.test_strict_counts_booleans_and_trailing_native_fields) ... ok
+test_temporary_settings_preserve_saved_profile (test_protocol.ProtocolTests.test_temporary_settings_preserve_saved_profile) ... ok
+test_dirty_stale_and_hash_mismatch_are_rejected (test_release.ReleaseTests.test_dirty_stale_and_hash_mismatch_are_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 48 tests in 2.104s
+
+OK
+TAP version 13
+# Subtest: a device without hands-free telemetry is legacy and keeps its old identity
+ok 1 - a device without hands-free telemetry is legacy and keeps its old identity
+  ---
+  duration_ms: 1.305083
+  ...
+# Subtest: identity freezes the configuration only in hands-free mode
+ok 2 - identity freezes the configuration only in hands-free mode
+  ---
+  duration_ms: 0.130458
+  ...
+# Subtest: setup steps follow the helper workflow and mark the next step
+ok 3 - setup steps follow the helper workflow and mark the next step
+  ---
+  duration_ms: 0.370042
+  ...
+# Subtest: an unconfigured switch is never presented as ready
+ok 4 - an unconfigured switch is never presented as ready
+  ---
+  duration_ms: 0.245583
+  ...
+# Subtest: training view reports examples, retry, validation and accept rules
+ok 5 - training view reports examples, retry, validation and accept rules
+  ---
+  duration_ms: 0.201541
+  ...
+# Subtest: simulated patterns offered to the helper are distinct and non-empty
+ok 6 - simulated patterns offered to the helper are distinct and non-empty
+  ---
+  duration_ms: 0.12825
+  ...
+# Subtest: recovery guidance names the cause and never promises automatic resume
+ok 7 - recovery guidance names the cause and never promises automatic resume
+  ---
+  duration_ms: 0.576583
+  ...
+# Subtest: a failed save stays visible as an error with the earlier setup kept
+ok 8 - a failed save stays visible as an error with the earlier setup kept
+  ---
+  duration_ms: 0.07325
+  ...
+# Subtest: hands-free blocks freeze mode and configuration identity with dwell selection
+ok 9 - hands-free blocks freeze mode and configuration identity with dwell selection
+  ---
+  duration_ms: 0.487958
+  ...
+# Subtest: configuration, mode and gesture changes invalidate an active block
+ok 10 - configuration, mode and gesture changes invalidate an active block
+  ---
+  duration_ms: 0.448708
+  ...
+# Subtest: legacy and hands-free results are never pooled into one block
+ok 11 - legacy and hands-free results are never pooled into one block
+  ---
+  duration_ms: 0.619208
+  ...
+# Subtest: raw export keeps interaction identity, gesture interruptions and abort reasons
+ok 12 - raw export keeps interaction identity, gesture interruptions and abort reasons
+  ---
+  duration_ms: 0.225583
+  ...
+# Subtest: setup commands are queued, never coalesced like polls
+ok 13 - setup commands are queued, never coalesced like polls
+  ---
+  duration_ms: 1.323334
+  ...
+# Subtest: the Lab logs interaction identity, gesture interruptions and the abort reason
+ok 14 - the Lab logs interaction identity, gesture interruptions and the abort reason
+  ---
+  duration_ms: 8.511875
+  ...
+# Subtest: older engines and maintained records read as a maintained switch, never a button
+ok 15 - older engines and maintained records read as a maintained switch, never a button
+  ---
+  duration_ms: 0.092584
+  ...
+# Subtest: the raw button state and the latched permission are labelled separately
+ok 16 - the raw button state and the latched permission are labelled separately
+  ---
+  duration_ms: 0.072917
+  ...
+# Subtest: button guidance: disabled explains press, never-resume, and loss on restart or fault
+ok 17 - button guidance: disabled explains press, never-resume, and loss on restart or fault
+  ---
+  duration_ms: 0.080208
+  ...
+# Subtest: active guidance tells the user the button disables control at once
+ok 18 - active guidance tells the user the button disables control at once
+  ---
+  duration_ms: 0.042041
+  ...
+# Subtest: the setup step names the input kind and flags an unsaved change of kind
+ok 19 - the setup step names the input kind and flags an unsaved change of kind
+  ---
+  duration_ms: 0.095833
+  ...
+# Subtest: a Lab block freezes the gesture configuration whose identity includes the input kind
+ok 20 - a Lab block freezes the gesture configuration whose identity includes the input kind
+  ---
+  duration_ms: 0.061667
+  ...
+# Subtest: frozen block captures profile source selection and geometry
+ok 21 - frozen block captures profile source selection and geometry
+  ---
+  duration_ms: 1.366333
+  ...
+# Subtest: blocks are separate and comparison settings preserve profile
+ok 22 - blocks are separate and comparison settings preserve profile
+  ---
+  duration_ms: 0.4015
+  ...
+# Subtest: desktop and firmware simulation labels never claim live readings
+ok 23 - desktop and firmware simulation labels never claim live readings
+  ---
+  duration_ms: 0.184875
+  ...
+# Subtest: polls coalesce and trial persistence runs outside the command queue
+ok 24 - polls coalesce and trial persistence runs outside the command queue
+  ---
+  duration_ms: 1.189084
+  ...
+# Subtest: malformed acknowledgement and persistence failure are visible
+ok 25 - malformed acknowledgement and persistence failure are visible
+  ---
+  duration_ms: 0.301666
+  ...
+# Subtest: browser timeout aborts a stalled request
+ok 26 - browser timeout aborts a stalled request
+  ---
+  duration_ms: 5.525334
+  ...
+# Subtest: reused block IDs cannot pool different profiles or device sources
+ok 27 - reused block IDs cannot pool different profiles or device sources
+  ---
+  duration_ms: 0.195167
+  ...
+# Subtest: Lab applies matched temporary settings, freezes trials and retains persistence failures
+ok 28 - Lab applies matched temporary settings, freezes trials and retains persistence failures
+  ---
+  duration_ms: 5.19175
+  ...
+# Subtest: empty trials never invent metrics
+ok 29 - empty trials never invent metrics
+  ---
+  duration_ms: 1.047875
+  ...
+# Subtest: misses affect accuracy and time but not nominal successful rate
+ok 30 - misses affect accuracy and time but not nominal successful rate
+  ---
+  duration_ms: 0.105917
+  ...
+# Subtest: aborted trials are retained raw but excluded from metrics
+ok 31 - aborted trials are retained raw but excluded from metrics
+  ---
+  duration_ms: 0.166834
+  ...
+# Subtest: aggregate uses summed ID over summed time, not average trial rate
+ok 32 - aggregate uses summed ID over summed time, not average trial rate
+  ---
+  duration_ms: 0.05975
+  ...
+# Subtest: CSV quotes nested profile and multiline text
+ok 33 - CSV quotes nested profile and multiline text
+  ---
+  duration_ms: 0.143917
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 82.633583

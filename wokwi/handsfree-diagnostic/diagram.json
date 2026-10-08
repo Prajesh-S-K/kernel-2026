@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "author": "NodX Adapt diagnostic",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 330, "attrs": {} },
+    { "type": "wokwi-mpu6050", "id": "imu", "top": 20, "left": 0, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn1",
+      "top": 300,
+      "left": 40,
+      "attrs": { "color": "green", "label": "ENABLE", "key": "e" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "imu:VCC", "esp:3V3.1", "red", [] ],
+    [ "imu:GND", "esp:GND.1", "black", [] ],
+    [ "imu:SDA", "esp:8", "green", [] ],
+    [ "imu:SCL", "esp:9", "blue", [] ],
+    [ "imu:AD0", "esp:GND.1", "black", [] ],
+    [ "btn1:1.l", "esp:4", "orange", [] ],
+    [ "btn1:2.l", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,100 @@
+Pointing versus recognition candidates: measurements (SYNTHETIC input, learned templates)
+==========================================================================================
+Produced by a one-off harness built on tests/hf_support.hpp (not committed; the regression cases in
+tests/test_handsfree.cpp, section J, pin the same behaviour). A hands-free system trained with
+pause = double nod (nod2) and drag = double tilt (tilt2) at scale 1.0 is driven with held single-axis
+movement: 600 ms rest, the movement, 600 ms rest. "base" is the same input on a legacy-mode system
+(same default profile, plain resume), which has no recognizer to suppress anything; "discarded" is the
+pointer movement the hands-free system never sent. The numbers are mathematical input, not recorded
+heads: they show the mechanism and its bound, not how often real users would hit it.
+
+template 0: strokes=4 first=(pitch,+1) enter=16.8 peak=[33.6,100.8] stroke=[75,300]ms gapMax=150 totalMax=1035 neutral=2.0
+template 1: strokes=4 first=(roll,+1) enter=16.8 peak=[33.6,100.8] stroke=[75,300]ms gapMax=150 totalMax=1035 neutral=2.0
+
+held single-axis movement, 1000 ms, 600 ms rest around it
+axis   deg/s | cand rej exec | suppressed_ms | out_dx out_dy | base_dx base_dy | discarded_px | rejectReason
+yaw       +5 |   0   0    0 |             0 |    119      0 |     119       0 |            0 | NONE
+yaw      +10 |   0   0    0 |             0 |    319      0 |     319       0 |            0 | NONE
+yaw      +15 |   0   0    0 |             0 |    560      0 |     560       0 |            0 | NONE
+yaw      +20 |   0   0    0 |             0 |    850      0 |     850       0 |            0 | NONE
+yaw      +30 |   0   0    0 |             0 |   1576      0 |    1576       0 |            0 | NONE
+yaw      +40 |   0   0    0 |             0 |   2338      0 |    2338       0 |            0 | NONE
+yaw      +60 |   0   0    0 |             0 |   3543      0 |    3543       0 |            0 | NONE
+yaw       -5 |   0   0    0 |             0 |   -119      0 |    -119       0 |            0 | NONE
+yaw      -10 |   0   0    0 |             0 |   -319      0 |    -319       0 |            0 | NONE
+yaw      -15 |   0   0    0 |             0 |   -560      0 |    -560       0 |            0 | NONE
+yaw      -20 |   0   0    0 |             0 |   -850      0 |    -850       0 |            0 | NONE
+yaw      -30 |   0   0    0 |             0 |  -1576      0 |   -1576       0 |            0 | NONE
+yaw      -40 |   0   0    0 |             0 |  -2338      0 |   -2338       0 |            0 | NONE
+yaw      -60 |   0   0    0 |             0 |  -3543      0 |   -3543       0 |            0 | NONE
+pitch     +5 |   0   0    0 |             0 |      0    119 |       0     119 |            0 | NONE
+pitch    +10 |   0   0    0 |             0 |      0    319 |       0     319 |            0 | NONE
+pitch    +15 |   0   0    0 |             0 |      0    560 |       0     560 |            0 | NONE
+pitch    +20 |   1   1    0 |           310 |      0    591 |       0     850 |          259 | TOO_SLOW
+pitch    +30 |   1   1    0 |           310 |      0   1108 |       0    1576 |          468 | TOO_SLOW
+pitch    +40 |   1   1    0 |           310 |      0   1658 |       0    2338 |          680 | TOO_SLOW
+pitch    +60 |   1   1    0 |           310 |      0   2508 |       0    3543 |         1035 | TOO_SLOW
+pitch     -5 |   0   0    0 |             0 |      0   -119 |       0    -119 |            0 | NONE
+pitch    -10 |   0   0    0 |             0 |      0   -319 |       0    -319 |            0 | NONE
+pitch    -15 |   0   0    0 |             0 |      0   -560 |       0    -560 |            0 | NONE
+pitch    -20 |   0   0    0 |             0 |      0   -850 |       0    -850 |            0 | NONE
+pitch    -30 |   0   0    0 |             0 |      0  -1576 |       0   -1576 |            0 | NONE
+pitch    -40 |   0   0    0 |             0 |      0  -2338 |       0   -2338 |            0 | NONE
+pitch    -60 |   0   0    0 |             0 |      0  -3543 |       0   -3543 |            0 | NONE
+roll      +5 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     +10 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     +15 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     +20 |   1   1    0 |           310 |      0      0 |       0       0 |            0 | TOO_SLOW
+roll     +30 |   1   1    0 |           310 |      0      0 |       0       0 |            0 | TOO_SLOW
+roll     +40 |   1   1    0 |           310 |      0      0 |       0       0 |            0 | TOO_SLOW
+roll     +60 |   1   1    0 |           310 |      0      0 |       0       0 |            0 | TOO_SLOW
+roll      -5 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -10 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -15 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -20 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -30 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -40 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+roll     -60 |   0   0    0 |             0 |      0      0 |       0       0 |            0 | NONE
+
+RAMP: pitch+ onset ramped from rest to target over rampMs, then held 1000ms
+target rampMs | cand rej exec | suppressed_ms | discarded_px  rejectReason
+   20      0 |   1   1    0 |           310 |       258  TOO_SLOW
+   20     50 |   1   1    0 |           310 |       260  TOO_SLOW
+   20    100 |   1   1    0 |           310 |       261  TOO_SLOW
+   20    150 |   1   1    0 |           310 |       261  TOO_SLOW
+   20    200 |   1   1    0 |           310 |       261  TOO_SLOW
+   20    300 |   1   1    0 |           310 |       260  TOO_SLOW
+   20    500 |   0   0    0 |             0 |         0  NONE
+   30      0 |   1   1    0 |           310 |       468  TOO_SLOW
+   30     50 |   1   1    0 |           310 |       464  TOO_SLOW
+   30    100 |   1   1    0 |           310 |       459  TOO_SLOW
+   30    150 |   1   1    0 |           310 |       452  TOO_SLOW
+   30    200 |   1   1    0 |           310 |       444  TOO_SLOW
+   30    300 |   1   1    0 |           310 |       417  TOO_SLOW
+   30    500 |   0   0    0 |             0 |         0  NONE
+   40      0 |   1   1    0 |           310 |       680  TOO_SLOW
+   40     50 |   1   1    0 |           310 |       673  TOO_SLOW
+   40    100 |   1   1    0 |           310 |       668  TOO_SLOW
+   40    150 |   1   1    0 |           310 |       643  TOO_SLOW
+   40    200 |   1   1    0 |           310 |       617  TOO_SLOW
+   40    300 |   1   1    0 |           310 |       563  TOO_SLOW
+   40    500 |   1   1    0 |           310 |       476  TOO_SLOW
+   60      0 |   1   1    0 |           310 |      1035  TOO_SLOW
+   60     50 |   1   1    0 |           310 |      1024  TOO_SLOW
+   60    100 |   1   1    0 |           310 |       965  TOO_SLOW
+   60    150 |   1   1    0 |           310 |       934  TOO_SLOW
+   60    200 |   1   1    0 |           310 |       873  TOO_SLOW
+   60    300 |   1   1    0 |           310 |       781  TOO_SLOW
+   60    500 |   1   1    0 |           310 |       606  TOO_SLOW
+
+LAB-LIKE: 300 keyed holds @20 deg/s, yaw/pitch, 200-2000 ms holds, 100-1050 ms rests
+candidates=57 rejected=57 executed=0 suppressed_ms=17050 (avg 57 per hold)
+pitch+ holds=69 of which candidate=57; discarded 14229 px of 271848 px (5.2%)
+
+PATTERN LOOK-ALIKES (executed counts)
+deliberate nod2 scale 0.5 -> executed=1 cand=1 rej=0
+deliberate nod2 scale 0.7 -> executed=1 cand=1 rej=0
+deliberate nod2 scale 1.0 -> executed=1 cand=1 rej=0
+deliberate nod2 scale 1.5 -> executed=1 cand=1 rej=0
+nod1 (one nod) scale 0.7 -> executed=0 cand=1 rej=1
+nod1 (one nod) scale 1.0 -> executed=0 cand=1 rej=1

@@ -25,6 +25,12 @@
 #ifndef NODX_BUZZER
 #define NODX_BUZZER -1
 #endif
+// Control-enable input to GND (active = LOW): a momentary push button (default setup) or a
+// maintained switch, as stored in the hands-free configuration. Disabled by default: hands-free
+// control then stays inhibited unless setup explicitly qualified a switchless configuration.
+#ifndef NODX_ENABLE
+#define NODX_ENABLE -1
+#endif
 
 using namespace nodx;
 class NVSStorage : public ProfileStorage {
@@ -47,6 +53,34 @@ public:
     bool write(unsigned slot, const std::vector<uint8_t>& bytes) override {
         return prefs_.putBytes(slot ? "profile1" : "profile0", bytes.data(), bytes.size()) ==
                bytes.size();
+    }
+
+private:
+    Preferences prefs_;
+};
+// Hands-free configuration record slots. Separate namespace from the 84-byte profile slots.
+class NVSConfigStorage : public ConfigStorage {
+public:
+    bool begin() {
+        return prefs_.begin("nodx-hf", false);
+    }
+    std::vector<uint8_t> read(unsigned slot) override {
+        const char* key = slot ? "hf1" : "hf0";
+        const size_t size = prefs_.getBytesLength(key);
+        if (size == 0) {
+            return {};
+        }
+        if (size > 512) {
+            return {0xff}; // reported as a corrupt record, never silently ignored
+        }
+        std::vector<uint8_t> bytes(size);
+        if (prefs_.getBytes(key, bytes.data(), size) != size) {
+            return {0xff};
+        }
+        return bytes;
+    }
+    bool write(unsigned slot, const std::vector<uint8_t>& bytes) override {
+        return prefs_.putBytes(slot ? "hf1" : "hf0", bytes.data(), bytes.size()) == bytes.size();
     }
 
 private:
