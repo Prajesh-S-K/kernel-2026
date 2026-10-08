@@ -548,36 +548,70 @@ def synth(
 
 class AxisAnalysis(unittest.TestCase):
     def test_the_mapping_is_recovered_from_a_guided_capture(self):
-        result = AXES.analyze(AXES.samples_from_lines(synth()))
+        # Synthetic truth: z up-axis is NOT vertical here (vertical is z with rest -0.98, i.e. pointing down),
+        # so a LEFT turn is a NEGATIVE z rate by the right-hand rule; the first yaw lobe (+) was therefore a RIGHT turn.
+        declared = {"yaw": "right", "pitch": "up", "roll": "right"}
+        result = AXES.analyze(AXES.samples_from_lines(synth()), declared)
         self.assertTrue(result["ok"], result["problems"])
         self.assertEqual(result["gyroAxes"], [2, 0, 1])
-        # yaw left was +, pitch up was -, roll right was +: mapped yaw-left and pitch-up must be negative
-        self.assertEqual(result["gyroSigns"], [-1, 1, 1])
+        # left = raw -, so yaw sign +1; pitch up first lobe - so sign +1; right first lobe + so roll sign +1
+        self.assertEqual(result["gyroSigns"], [1, 1, 1])
         self.assertEqual(result["accelAxes"], [1, 0, 2])  # forward, lateral, vertical
         self.assertEqual(result["accelSigns"], [1, 1, -1])  # vertical axis reads -1 g at rest
+        self.assertTrue(any("agrees" in c for c in result["physicsChecks"]))
         self.assertIn("-DNODX_GYRO_AXES=2,0,1", AXES.flags(result))
         self.assertIn("-DNODX_ACCEL_SIGNS=1,1,-1", AXES.flags(result))
+
+    def test_no_direction_is_assumed_without_the_operators_answer(self):
+        result = AXES.analyze(AXES.samples_from_lines(synth()))
+        self.assertFalse(result["ok"])
+        self.assertIn("first direction is needed", "; ".join(result["problems"]))
+        self.assertEqual(AXES.flags(result), "")
+        # The answer decides the signs: the same data with the opposite declared yaw flips the sign
+        # (and the physics cross-check then reports the contradiction).
+        wrong = AXES.analyze(
+            AXES.samples_from_lines(synth()), {"yaw": "left", "pitch": "up", "roll": "right"}
+        )
+        self.assertFalse(wrong["ok"])
+        self.assertIn("contradicts", "; ".join(wrong["problems"]))
 
     def test_signs_follow_the_measured_directions_not_the_defaults(self):
         flipped = synth(
             yaw_first=-1, pitch_first=1, roll_first=-1, lateral_dir=-1, rest=(0.0, 0.0, 0.98)
         )
-        result = AXES.analyze(AXES.samples_from_lines(flipped))
+        declared = {"yaw": "right", "pitch": "down", "roll": "left"}
+        result = AXES.analyze(AXES.samples_from_lines(flipped), declared)
         self.assertTrue(result["ok"], result["problems"])
-        self.assertEqual(result["gyroSigns"], [1, -1, -1])
+        # z points UP (+0.98): a LEFT turn is a +z rate, so the first yaw lobe (-) was a RIGHT turn and the
+        # yaw sign is -1; pitch first lobe + was DOWN (up raw -), sign +1; roll first lobe - was LEFT (right raw +), sign +1.
+        self.assertEqual(result["gyroSigns"], [-1, 1, 1])
         self.assertEqual(result["accelSigns"][2], 1)
+        # A different physical layout: gravity on x, yaw about x, pitch about y, roll about z.
         other = AXES.analyze(
-            AXES.samples_from_lines(synth(yaw_axis=0, pitch_axis=1, roll_axis=2, lateral=1))
+            AXES.samples_from_lines(
+                synth(yaw_axis=0, pitch_axis=1, roll_axis=2, lateral=1, rest=(-0.98, 0.0, 0.0))
+            ),
+            {"yaw": "right", "pitch": "up", "roll": "right"},
         )
         self.assertTrue(other["ok"], other["problems"])
         self.assertEqual(other["gyroAxes"], [0, 1, 2])
+        # A yaw about an axis that is not the gravity axis is refused (the board was not level).
+        tilted = AXES.analyze(
+            AXES.samples_from_lines(synth(yaw_axis=0, pitch_axis=1, roll_axis=2, lateral=1)),
+            {"yaw": "right", "pitch": "up", "roll": "right"},
+        )
+        self.assertFalse(tilted["ok"])
+        self.assertIn("not level", "; ".join(tilted["problems"]))
 
     def test_an_unreliable_capture_is_refused_with_the_reason(self):
         lines = synth()
         short = AXES.analyze(AXES.samples_from_lines(lines[:60]))
         self.assertFalse(short["ok"])
         self.assertEqual(AXES.flags(short), "")
-        same_axis = AXES.analyze(AXES.samples_from_lines(synth(pitch_axis=2)))
+        same_axis = AXES.analyze(
+            AXES.samples_from_lines(synth(pitch_axis=2)),
+            {"yaw": "right", "pitch": "up", "roll": "right"},
+        )
         self.assertFalse(same_axis["ok"])
         self.assertIn("different gyro axes", "; ".join(same_axis["problems"]))
         self.assertFalse(AXES.analyze([])["ok"])
@@ -594,10 +628,10 @@ class AxisAnalysis(unittest.TestCase):
                 offset += 200  # stretch every hold by 200 ms per still sample
             previous = angle
             stretched.append((t + offset, angle, accel))
-        result = AXES.analyze(stretched)
+        result = AXES.analyze(stretched, {"yaw": "right", "pitch": "up", "roll": "right"})
         self.assertTrue(result["ok"], result["problems"])
         self.assertEqual(result["gyroAxes"], [2, 0, 1])
-        self.assertEqual(result["gyroSigns"], [-1, 1, 1])
+        self.assertEqual(result["gyroSigns"], [1, 1, 1])
 
     def test_lines_without_a_sensor_block_are_ignored(self):
         mixed = [

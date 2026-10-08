@@ -117,14 +117,21 @@ def rest_accel(rows, count=8):
     return [sum(r[2][a] for r in head) / len(head) for a in range(3)]
 
 
-def analyze(rows):
+DIRECTIONS = {"yaw": ("left", "right"), "pitch": ("up", "down"), "roll": ("right", "left")}
+
+
+def analyze(rows, declared=None):
     """Returns a dict with `ok`, `problems`, the three movement descriptions and the recommended mapping.
 
     The operator's pace varies, so movements are not matched by fixed timing: every burst of activity that
     swept at least MIN_SPAN_DEG is classified by its dominant sensor axis, and the FIRST burst seen on each
     axis is that movement's first lobe. Exactly three different axes must appear, in the guided order yaw,
-    pitch, roll. The caller must still confirm which direction was performed first in each movement."""
+    pitch, roll. `declared` is what the OPERATOR says they did first in each movement, for example
+    {"yaw": "right", "pitch": "down", "roll": "left"}; no direction is assumed, and without it the capture
+    is analysed but no signs are derived. Physics is then used as a cross-check: with the vertical axis known
+    from gravity, the right-hand rule says which sign a LEFT turn must have on that axis."""
     problems = []
+    declared = declared or {}
     if len(rows) < 20:
         return {"ok": False, "problems": ["too few telemetry samples with a seen sensor block"]}
     bursts = []
@@ -155,8 +162,25 @@ def analyze(rows):
     axes = order
     if problems:
         return {"ok": False, "problems": problems, "yaw": yaw, "pitch": pitch, "roll": roll}
-    # Gyro signs: yaw LEFT negative, pitch UP negative, roll RIGHT positive after mapping.
-    gyro_signs = [-yaw["first_sign"], -pitch["first_sign"], roll["first_sign"]]
+    missing = [
+        name for name in ("yaw", "pitch", "roll") if declared.get(name) not in DIRECTIONS[name]
+    ]
+    if missing:
+        return {
+            "ok": False,
+            "problems": [f"the operator's first direction is needed for: {', '.join(missing)}"],
+            "yaw": yaw,
+            "pitch": pitch,
+            "roll": roll,
+            "gyroAxes": axes,
+            "firstSigns": [yaw["first_sign"], pitch["first_sign"], roll["first_sign"]],
+        }
+    # What the FIRST lobe was, in the firmware's terms: raw sign of LEFT, UP and RIGHT on each axis.
+    left_raw = yaw["first_sign"] if declared["yaw"] == "left" else -yaw["first_sign"]
+    up_raw = pitch["first_sign"] if declared["pitch"] == "up" else -pitch["first_sign"]
+    right_raw = roll["first_sign"] if declared["roll"] == "right" else -roll["first_sign"]
+    # Firmware conventions: mapped yaw negative for LEFT, mapped pitch negative for UP, mapped roll positive for RIGHT.
+    gyro_signs = [-left_raw, -up_raw, right_raw]
     # Accelerometer: mapped[2] = vertical (reads +1 g at rest), mapped[1] = lateral (+ for a right tilt).
     rest = rest_accel(rows)
     vertical = max(range(3), key=lambda a: abs(rest[a]))
@@ -166,16 +190,34 @@ def analyze(rows):
     forward = [a for a in range(3) if a not in (vertical, lateral)][0]
     first, last = spans[2]
     start_lateral = rows[first][2][lateral]
-    # Direction the lateral accel axis moves during the FIRST lobe (a tilt to the right).
-    lateral_move = 0.0
+    first_lobe_move = 0.0
     for i in range(first, last + 1):
         delta = rows[i][2][lateral] - start_lateral
         if abs(delta) > 0.08:
-            lateral_move = delta
+            first_lobe_move = delta
             break
-    lateral_sign = 1 if lateral_move > 0 else -1
-    if lateral_move == 0:
+    if first_lobe_move == 0:
         problems.append("the lateral accelerometer axis did not move enough during the roll")
+    right_move = first_lobe_move if declared["roll"] == "right" else -first_lobe_move
+    lateral_sign = 1 if right_move > 0 else -1
+    # Physics cross-check, independent of the operator: a LEFT turn is counter-clockwise seen from above, a
+    # positive rotation about the UP direction. The gravity axis reads +1 g when it points up, so its raw
+    # gyro rate for a LEFT turn has the sign of that reading.
+    checks = []
+    if yaw["axis"] != vertical:
+        problems.append(
+            f"the yaw rotation was about axis {yaw['axis']} but gravity is on axis {vertical}: the board was not level for the yaw"
+        )
+    else:
+        expected_left_raw = vertical_sign
+        agree = expected_left_raw == left_raw
+        checks.append(
+            f"yaw: right-hand rule predicts a raw LEFT sign of {expected_left_raw:+d}; measured with your answer {left_raw:+d}: {'agrees' if agree else 'CONFLICT'}"
+        )
+        if not agree:
+            problems.append(
+                "the declared yaw direction contradicts the gravity/right-hand-rule check"
+            )
     return {
         "ok": not problems,
         "problems": problems,
@@ -187,6 +229,7 @@ def analyze(rows):
         "accelAxes": [forward, lateral, vertical],
         "accelSigns": [1, lateral_sign, vertical_sign],
         "restAccel": rest,
+        "physicsChecks": checks,
         "burstsUsed": len(bursts),
     }
 
@@ -203,20 +246,26 @@ def flags(result):
 
 
 def main(argv):
-    if len(argv) != 2:
+    if len(argv) < 2:
         print(
-            "usage: bench_axes.py LOG (telemetry JSON lines from the real firmware)",
+            "usage: bench_axes.py LOG [yaw=left|right] [pitch=up|down] [roll=right|left]\n"
+            "  LOG: telemetry JSON lines from the real firmware; the = values are what the operator\n"
+            "  says they did FIRST in each movement (nothing is assumed).",
             file=sys.stderr,
         )
         return 2
+    declared = {}
+    for item in argv[2:]:
+        name, _, value = item.partition("=")
+        declared[name] = value
     rows = samples_from_lines(Path(argv[1]).read_text(errors="replace").splitlines())
-    result = analyze(rows)
+    result = analyze(rows, declared)
     names = ["x", "y", "z"]
     print(f"{len(rows)} usable telemetry samples")
     for key, label in (
-        ("yaw", "YAW (left first)"),
-        ("pitch", "PITCH (up first)"),
-        ("roll", "ROLL (right first)"),
+        ("yaw", "YAW"),
+        ("pitch", "PITCH"),
+        ("roll", "ROLL"),
     ):
         if key in result:
             item = result[key]
@@ -229,8 +278,14 @@ def main(argv):
         print(
             f"accel axes (mapped 0,1,2) = {result['accelAxes']}  signs = {result['accelSigns']}  rest = {[round(v, 3) for v in result['restAccel']]}"
         )
+        for line in result.get("physicsChecks", []):
+            print("check:", line)
         print("flags:", flags(result))
         return 0
+    for line in result.get("physicsChecks", []):
+        print("check:", line)
+    for line in result.get("physicsChecks", []):
+        print("check:", line)
     print("NOT RELIABLE:", "; ".join(result["problems"]))
     return 1
 
