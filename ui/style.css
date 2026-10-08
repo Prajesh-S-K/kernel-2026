@@ -1247,3 +1247,34 @@ hr {
   padding-left: 18px;
   line-height: 1.7;
 }
+
+.uncal-dwell {
+  margin: 14px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.uncal-bar {
+  height: 8px;
+  background: #1a2a32;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+.uncal-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--cyan);
+}
+.uncal-dwell input[type='number'] {
+  width: 90px;
+  background: #0b1217;
+  color: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px;
+}
+.uncal-dwell small {
+  color: var(--muted);
+  display: block;
+}

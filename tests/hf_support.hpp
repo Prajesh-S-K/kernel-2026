@@ -22,13 +22,15 @@ inline void near(float a, float b, float eps = .001f) {
 class TestHID : public HIDTransport {
 public:
     bool online = true, fail = false;
+    bool failRelease = false; // fail only the report that releases a pressed button
     std::vector<Report> reports;
     bool connected() const override {
         return online;
     }
     bool send(const Report& r) override {
+        const bool releasing = !r.down && !reports.empty() && reports.back().down;
         reports.push_back(r);
-        return !fail;
+        return !fail && !(failRelease && releasing);
     }
 };
 inline std::vector<Rates> script(const std::string& name, float scale = 1.f) {

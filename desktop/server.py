@@ -92,6 +92,19 @@ def command_for(data):
             return "handsfree demo " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "uncal":
             return "handsfree uncal " + ("start" if required_boolean(data, "enabled") else "stop")
+        if operation == "uncaldwell":
+            return "handsfree uncal dwell " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "uncaldwellset":
+            ms, tolerance = data.get("ms"), data.get("tolerance")
+            if type(ms) is not int or not 500 <= ms <= 5000:
+                raise ValueError("Dwell duration must be 500 to 5000 ms")
+            if (
+                type(tolerance) not in (int, float)
+                or isinstance(tolerance, bool)
+                or not 2 <= tolerance <= 50
+            ):
+                raise ValueError("Dwell tolerance must be 2 to 50")
+            return f"handsfree uncal dwell set {ms} {float(tolerance):.1f}"
         if operation == "enable" and data.get("kind") in ("maintained", "momentary"):
             return f"handsfree enable {data['kind']}"
         raise ValueError("Invalid hands-free request")

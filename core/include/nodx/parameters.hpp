@@ -48,5 +48,10 @@ constexpr float uncalDemoGain = 12.f;       // pixels per degree, all four direc
 constexpr float uncalDemoDeadzone = 2.5f;   // deg/s; above the measured idle bias of the bench MPU
 constexpr float uncalDemoAlpha = .3f;       // filter, dimensionless
 constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
+// Dwell clicking in the uncalibrated demo (explicitly enabled, RAM only, adjustable). The distance unit
+// is accumulated OUTGOING HID movement; host pointer acceleration means it is not verified screen
+// pixels. The dwell duration is the progress phase; the selection manager's 250 ms arming precedes it.
+constexpr uint32_t uncalDwellMs = 1200;
+constexpr float uncalDwellTolerance = 8.f;
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

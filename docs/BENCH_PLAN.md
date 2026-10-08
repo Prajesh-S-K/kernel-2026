@@ -247,3 +247,29 @@ until the last reply, no fault counted), the loop task watchdog is enabled and t
 printed at boot (`[BOOT] reset reason: ...`) and reported as `reset` in hardware telemetry. A hung control
 loop now reboots the board (the panic text with its backtrace goes to serial) and the reason shows TASK_WDT,
 which separates a firmware lock-up from a USB-serial glitch. Watchdog timeout is the framework default.
+
+## Uncalibrated demo: dwell clicking (attended)
+
+Optional, explicitly enabled, off at every start of the demo. No motion calibration or gesture training is
+needed, and sensor health, the safety gate and the HID manager are unchanged. Reuses `SelectionManager`:
+250 ms arming, then 1200 ms progress, then one primary click (press, then release), then a lockout until the
+pointer has moved more than 1.5 x the tolerance (12 units at the default 8). Staying still never repeats the
+click; a deliberate move away re-arms it. If the release is not delivered the system enters the existing
+fault/recovery path and the demo and dwell stay off until you restart them.
+
+Cancelled by: movement beyond the tolerance, pause, the enable button, an invalid or stale sensor sample, BLE
+disconnect or delivery failure, Stop demo, starting a calibration. Reconnecting never restarts anything.
+Drag, double-click, right-click and scrolling stay disabled. The trained pause/resume gesture is NOT offered:
+gesture training and recognition both require a valid saved motion profile, which this demo does not have.
+
+Short attended demonstration (harmless target only, for example an empty text editor or a button that just
+counts clicks):
+1. Reload the companion; wait until the demo panel says Ready. Click "Start uncalibrated pointer demo"
+   (movement only; banner "UNCALIBRATED DEMO — LIVE SENSOR"). Confirm left/right/up/down as before.
+2. Park the pointer over the harmless target and keep the board still.
+3. Tick "Enable dwell clicking" (banner becomes "UNCALIBRATED DEMO — DWELL CLICK"). Watch the progress bar fill
+   (about 1.5 s including arming); expect exactly one click on the target and "Clicks this run: 1".
+4. Stay still for 10 s: no second click (status says it is locked out).
+5. Move the board clearly away and back to the target, then hold still: one more click (rearmed).
+6. Untick the box or click "Stop demo" (or press the enable button): clicking stops at once.
+Do not test drag, held buttons or disconnects with the button held.

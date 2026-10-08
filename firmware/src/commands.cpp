@@ -114,11 +114,29 @@ void command(const std::string& line, uint32_t now, bool truncated) {
                  system.setDemoMovementOnly(value == "on");
         } else if (verb == "uncal") {
             input >> value;
-            ok = (value == "start" || value == "stop") && (input >> std::ws).eof();
-            if (ok && value == "start") {
-                ok = system.startUncalibratedDemo(now);
-            } else if (ok) {
-                system.stopUncalibratedDemo("demo stopped by the user; explicit restart required");
+            if (value == "dwell") {
+                // dwell on|off  |  dwell set <ms> <tolerance>   (RAM only, demo must be running)
+                std::string action;
+                input >> action;
+                if (action == "on" || action == "off") {
+                    ok = (input >> std::ws).eof() &&
+                         system.setUncalibratedDwell(action == "on", now);
+                } else if (action == "set") {
+                    unsigned long dwellMs = 0;
+                    float tolerance = 0;
+                    ok = bool(input >> dwellMs >> tolerance) && (input >> std::ws).eof() &&
+                         system.setUncalibratedDwellSettings(uint32_t(dwellMs), tolerance);
+                } else {
+                    ok = false;
+                }
+            } else {
+                ok = (value == "start" || value == "stop") && (input >> std::ws).eof();
+                if (ok && value == "start") {
+                    ok = system.startUncalibratedDemo(now);
+                } else if (ok) {
+                    system.stopUncalibratedDemo(
+                        "demo stopped by the user; explicit restart required");
+                }
             }
         } else if (verb == "enable") {
             input >> value;

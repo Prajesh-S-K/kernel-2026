@@ -135,6 +135,10 @@ struct HandsFreeStatus {
     const char* uncalBlocked = "";
     const char* profileState = "MISSING";
     float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;
+    bool uncalDwellEnabled = false;
+    uint32_t uncalDwellMs = 0, uncalClicks = 0;
+    float uncalDwellTolerance = 0, uncalDwellProgress = 0;
+    const char* uncalDwellState = "IDLE";
 };
 // Writes one JSON object (no trailing newline). Returns the length, or 0 if it does not fit.
 size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& status);

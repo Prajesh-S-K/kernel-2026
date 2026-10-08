@@ -139,7 +139,7 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
               << name(s.calibration.phase) << "\",\"calibrationReason\":\"" << s.calibration.reason
               << "\",\"calibrationProgress\":" << s.calibration.progress(now) << ",\"calibrationCueMs\":" << s.calibration.cueRemainingMs(now) << ",\"dwell\":\""
               << name(s.selection.dwell)
-              << "\",\"dwellProgress\":" << s.selection.progress(now, s.profile)
+              << "\",\"dwellProgress\":" << s.dwellProgress(now)
               << ",\"cancellations\":" << s.selection.cancellations << ",\"faults\":" << d.faults
               << ",\"stability\":" << d.motion.stability << ",\"motion\":[" << d.motion.x << ','
               << d.motion.y << ',' << d.motion.roll
@@ -450,12 +450,28 @@ int main(int argc, char** argv) {
                          sys.setDemoMovementOnly(value == "on");
                 } else if (verb == "uncal") {
                     cmd >> value;
-                    ok = (value == "start" || value == "stop") && (cmd >> std::ws).eof();
-                    if (ok && value == "start") {
-                        ok = sys.startUncalibratedDemo(now);
-                    } else if (ok) {
-                        sys.stopUncalibratedDemo(
-                            "demo stopped by the user; explicit restart required");
+                    if (value == "dwell") {
+                        std::string action;
+                        cmd >> action;
+                        if (action == "on" || action == "off") {
+                            ok = (cmd >> std::ws).eof() &&
+                                 sys.setUncalibratedDwell(action == "on", now);
+                        } else if (action == "set") {
+                            unsigned long dwellMs = 0;
+                            float tolerance = 0;
+                            ok = bool(cmd >> dwellMs >> tolerance) && (cmd >> std::ws).eof() &&
+                                 sys.setUncalibratedDwellSettings(uint32_t(dwellMs), tolerance);
+                        } else {
+                            ok = false;
+                        }
+                    } else {
+                        ok = (value == "start" || value == "stop") && (cmd >> std::ws).eof();
+                        if (ok && value == "start") {
+                            ok = sys.startUncalibratedDemo(now);
+                        } else if (ok) {
+                            sys.stopUncalibratedDemo(
+                                "demo stopped by the user; explicit restart required");
+                        }
                     }
                 } else if (verb == "enable") {
                     cmd >> value;

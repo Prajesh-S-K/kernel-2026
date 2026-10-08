@@ -3,7 +3,14 @@ import { sourceLabels } from './source.js';
 import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
-import { BANNER, ROTATION_GUIDE, mappingLines, pauseOnBlur, uncalView } from './uncal.js';
+import {
+  BANNER,
+  DWELL_NOTE,
+  ROTATION_GUIDE,
+  mappingLines,
+  pauseOnBlur,
+  uncalView,
+} from './uncal.js';
 const client = new DeviceClient();
 const $ = (id) => document.getElementById(id);
 let device = null,
@@ -406,7 +413,8 @@ function renderUncal(data) {
   const view = uncalView(data);
   $('uncalPanel').hidden = !view.hardware;
   $('uncalBanner').hidden = !view.active;
-  document.title = view.active ? `${BANNER} · NodX Adapt` : baseTitle;
+  $('uncalBannerText').textContent = view.banner || BANNER;
+  document.title = view.active ? `${view.banner} · NodX Adapt` : baseTitle;
   if (!view.hardware) return;
   $('uncalTag').textContent = view.active ? 'ACTIVE' : 'OFF';
   $('uncalStatus').textContent = view.status;
@@ -414,6 +422,17 @@ function renderUncal(data) {
   $('uncalStart').disabled = !view.canStart;
   $('uncalStop').disabled = !view.active;
   $('uncalStopBanner').disabled = !view.active;
+  $('uncalDwell').disabled = !view.canEnableDwell;
+  $('uncalDwell').checked = view.dwellOn;
+  $('uncalDwellBar').style.width = `${Math.round(view.u.dwell.progress * 100)}%`;
+  $('uncalDwellStatus').textContent = view.dwellStatus;
+  $('uncalDwellNote').textContent = DWELL_NOTE;
+  $('uncalClicks').textContent = view.dwellOn ? `Clicks this run: ${view.u.dwell.clicks}` : '';
+  for (const [id, value] of [
+    ['uncalDwellMs', view.u.dwell.ms],
+    ['uncalDwellTol', view.u.dwell.tolerance],
+  ])
+    if (document.activeElement !== $(id) && value) $(id).value = value;
   $('uncalRotations').replaceChildren(
     ...ROTATION_GUIDE.map((line) => Object.assign(document.createElement('li'), { textContent: line })),
   );
@@ -425,6 +444,14 @@ function renderUncal(data) {
     `at most ${view.u.maxStep} px per report.`;
 }
 const baseTitle = document.title;
+$('uncalDwell').onchange = () =>
+  action('handsfree', { op: 'uncaldwell', enabled: $('uncalDwell').checked });
+$('uncalDwellApply').onclick = () =>
+  action('handsfree', {
+    op: 'uncaldwellset',
+    ms: Number($('uncalDwellMs').value),
+    tolerance: Number($('uncalDwellTol').value),
+  });
 $('reconnect').onclick = async () => {
   try {
     const result = await request({ action: 'reconnect' });

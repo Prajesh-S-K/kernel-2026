@@ -316,7 +316,9 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         "\"rejects\":%u,\"validated\":%s,\"reason\":\"%s\"},"
         "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\","
         "\"uncalDemo\":{\"active\":%s,\"blocked\":\"%s\","
-        "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f}}",
+        "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f,"
+        "\"dwell\":{\"enabled\":%s,\"ms\":%lu,\"tolerance\":%.1f,\"state\":\"%s\",\"progress\":%.3f,"
+        "\"clicks\":%lu}}}",
         s.mode, s.config, static_cast<unsigned long>(s.configId),
         s.switchPresent ? "true" : "false", s.switchOn ? "true" : "false",
         s.permitted ? "true" : "false", s.switchless ? "true" : "false",
@@ -331,7 +333,9 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.staged[0] ? "true" : "false", s.staged[1] ? "true" : "false",
         s.stored[0] ? "true" : "false", s.stored[1] ? "true" : "false", s.blocked,
         s.uncalActive ? "true" : "false", s.uncalBlocked, s.profileState, s.uncalGain,
-        s.uncalDeadzone, s.uncalMaxStep);
+        s.uncalDeadzone, s.uncalMaxStep, s.uncalDwellEnabled ? "true" : "false",
+        static_cast<unsigned long>(s.uncalDwellMs), s.uncalDwellTolerance, s.uncalDwellState,
+        s.uncalDwellProgress, static_cast<unsigned long>(s.uncalClicks));
     return (written > 0 && size_t(written) < capacity) ? size_t(written) : 0;
 }
 } // namespace nodx

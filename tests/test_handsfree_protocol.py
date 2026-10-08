@@ -243,6 +243,34 @@ class CommandValidation(HandsFreeCase):
         with self.assertRaises(ValueError):
             SERVER.command_for({"action": "handsfree", "op": "uncal"})
         self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": True}),
+            "handsfree uncal dwell on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": False}),
+            "handsfree uncal dwell off",
+        )
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "handsfree", "op": "uncaldwellset", "ms": 1200, "tolerance": 8}
+            ),
+            "handsfree uncal dwell set 1200 8.0",
+        )
+        for bad in (
+            {"ms": 400, "tolerance": 8},
+            {"ms": 6000, "tolerance": 8},
+            {"ms": 1200.5, "tolerance": 8},
+            {"ms": 1200, "tolerance": 1},
+            {"ms": 1200, "tolerance": 51},
+            {"ms": 1200, "tolerance": True},
+            {"ms": "1200", "tolerance": 8},
+            {"ms": 1200},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for({"action": "handsfree", "op": "uncaldwellset", **bad})
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell"})
+        self.assertEqual(
             SERVER.command_for({"action": "gesture", "name": "tilt2"}), "gesture tilt2 1"
         )
         self.assertEqual(

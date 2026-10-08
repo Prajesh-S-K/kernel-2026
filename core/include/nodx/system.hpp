@@ -89,7 +89,17 @@ public:
         return uncal_;
     }
     const char* uncalibratedDemoBlocker() const; // nullptr when a start would be accepted
+    // Optional dwell clicking inside the running uncalibrated demo: off by default, accepted only
+    // while the demo is active, cleared by every stop. One primary-button click per completed
+    // dwell; no drag, double-click, right-click or scrolling. Settings are RAM only.
+    bool setUncalibratedDwell(bool on, uint32_t now);
+    bool setUncalibratedDwellSettings(uint32_t dwellMs, float tolerance);
+    bool uncalibratedDwell() const {
+        return uncal_ && uncalDwell_;
+    }
+    float dwellProgress(uint32_t now) const; // progress of the profile that is actually in use
     ProfileState profileState() const;
+    UserProfile uncalibratedDemoProfile() const; // validated demo configuration (RAM only)
     HandsFreeStatus handsFreeStatus() const;
     const char* activationBlocker() const; // nullptr when resume would be allowed
 
@@ -139,6 +149,10 @@ private:
     bool dragging_ = false;
     bool demoMovementOnly_ = false;
     bool uncal_ = false;
+    bool uncalDwell_ = false;
+    uint32_t uncalDwellMs_ = start::uncalDwellMs;
+    float uncalDwellTolerance_ = start::uncalDwellTolerance;
+    uint32_t uncalClicks_ = 0;
     bool profileInvalidated_ = false;
     UserProfile uncalProfile_;
     bool uncalPrevPress_ = false; // the button only STOPS the demo (rising edge); it is not required

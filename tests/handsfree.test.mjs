@@ -701,7 +701,7 @@ test("the movement-only demo is shown in guidance and defaults to off for older 
   assert.doesNotMatch(off.lines.join(" "), /MOVEMENT-ONLY/);
 });
 
-import { BANNER, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUIDE } from "../ui/uncal.js";
+import { BANNER, BANNER_DWELL, DWELL_NOTE, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUIDE } from "../ui/uncal.js";
 const hw = (uncal, extra = {}) => ({
   source: "HARDWARE",
   connected: true,
@@ -743,4 +743,22 @@ test("uncalibrated demo: keeps focus-loss pause for everything except the active
   assert.equal(pauseOnBlur(hw({ active: true })), false);
   assert.equal(labBlocked(hw({ active: true })), true);
   assert.equal(labBlocked(hw({})), false);
+});
+
+test("uncalibrated demo: dwell label, progress and the pixel caveat", () => {
+  const off = uncalView(hw({ active: true }));
+  assert.equal(off.banner, BANNER);
+  assert.equal(off.dwellOn, false);
+  assert.equal(off.canEnableDwell, true);
+  assert.match(off.dwellStatus, /Movement only/);
+  const on = uncalView(hw({ active: true, dwell: { enabled: true, ms: 1200, tolerance: 8, state: "PROGRESS", progress: 0.5, clicks: 2 } }));
+  assert.equal(on.banner, BANNER_DWELL);
+  assert.equal(BANNER_DWELL, "UNCALIBRATED DEMO — DWELL CLICK");
+  assert.match(on.dwellStatus, /50%/);
+  assert.equal(on.u.dwell.clicks, 2);
+  assert.match(uncalView(hw({ active: true, dwell: { enabled: true, state: "LOCKOUT", progress: 0 } })).dwellStatus, /away/);
+  assert.equal(uncalView(hw({ active: false })).canEnableDwell, false);
+  assert.equal(uncalView(hw({ active: false, dwell: { enabled: true } })).dwellOn, false);
+  assert.equal(uncalView(hw({ active: true, dwell: { enabled: true, progress: 7 } })).u.dwell.progress, 1);
+  assert.match(DWELL_NOTE, /NOT verified screen pixels/);
 });

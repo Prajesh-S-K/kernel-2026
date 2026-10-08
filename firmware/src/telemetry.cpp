@@ -95,7 +95,7 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            "5f,%.5f,%.5f],\"reports\":[],\"profile\":{\"schema\":1,",
            name(s.diagnostics.faultCode), s.diagnostics.cursor, s.calibration.reason,
            s.calibration.progress(now), (unsigned long)s.calibration.cueRemainingMs(now),
-           s.selection.progress(now, s.profile),
+           s.dwellProgress(now),
            s.diagnostics.motion.stability, s.diagnostics.motion.x, s.diagnostics.motion.y,
            s.diagnostics.motion.roll);
     auto& p = s.profile;

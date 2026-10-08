@@ -2826,6 +2826,277 @@ int main() {
                 "active status");
     });
 
+    // ------------------------------------------------ N: dwell clicking in the uncalibrated demo
+    // Explicitly enabled, RAM only, one primary-button click per completed dwell. The normal
+    // SelectionManager -> SafetyManager -> HIDManager path; no drag, no scroll, no profile needed.
+    auto dwellStart = [=](HF& h) {
+        require(h.s().startUncalibratedDemo(h.now), "demo start refused");
+        h.quiet(300);
+        require(!h.s().uncalibratedDwell(), "dwell must be off after a start");
+    };
+    auto dwellOn = [](HF& h) {
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell enable refused");
+    };
+    test("dwell demo: movement-only is the default and never clicks", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(6000);
+        require(clicksSince(h, mark) == 0, "a click without dwell being enabled");
+        require(!h.s().handsFreeStatus().uncalDwellEnabled, "status");
+    });
+    test("dwell demo: enabling needs a running demo and is cleared by every stop", [=] {
+        HF h = uncalRig();
+        require(!h.s().setUncalibratedDwell(true, h.now), "enabled without a running demo");
+        dwellStart(h);
+        dwellOn(h);
+        h.s().stopUncalibratedDemo("test");
+        require(!h.s().uncalibratedDwell(), "dwell survived the stop");
+        dwellStart(h); // a restart is movement-only again
+        require(!h.s().uncalibratedDwell(), "dwell carried into the restart");
+    });
+    test("dwell demo: exactly one primary click per completed dwell, release always sent", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        float peak = 0;
+        for (unsigned i = 0; i < 300; ++i) { // 3 s: 250 ms arming + 1200 ms dwell fits
+            h.tick();
+            peak = std::max(peak, h.s().handsFreeStatus().uncalDwellProgress);
+        }
+        require(peak > .9f, "progress was never shown");
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not the last report");
+        bool pressed = false;
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            if (r.down) {
+                ++downs;
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click report");
+            }
+            pressed = pressed || r.down;
+        }
+        require(pressed && downs == 1, "one press report expected");
+        require(h.s().handsFreeStatus().uncalClicks == 1, "click counter");
+    });
+    test("dwell demo: staying still never repeats the click", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(15000);
+        require(clicksSince(h, mark) == 1, "repeated clicks while stationary");
+    });
+    test("dwell demo: a small movement does not rearm, a deliberate one does", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(2200);
+        require(clicksSince(h, mark) == 1, "first click");
+        // A nudge inside the lockout radius (1.5 x tolerance) must not rearm.
+        h.run(hold(0, 8, 100));
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 1, "a tiny movement rearmed the dwell");
+        // A deliberate move well outside the radius, then stillness, clicks once more.
+        h.run(hold(0, 70, 600));
+        h.quiet(3000);
+        require(clicksSince(h, mark) == 2, "deliberate movement did not rearm exactly once");
+    });
+    test("dwell demo: excessive movement cancels a running dwell", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900); // inside progress
+        require(h.s().handsFreeStatus().uncalDwellProgress > 0, "dwell not running");
+        const uint32_t before = h.s().selection.cancellations;
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 90, 300));
+        require(h.s().selection.cancellations > before, "movement did not cancel the dwell");
+        require(clicksSince(h, mark) == 0, "click during movement");
+        h.quiet(600);
+        require(clicksSince(h, mark) == 0, "click without a fresh full dwell");
+    });
+    test("dwell demo: a failed release inhibits output and enters recovery", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.transport.failRelease = true;
+        for (unsigned i = 0; i < 300 && h.s().state == SystemState::Active; ++i) {
+            h.tick();
+        }
+        require(h.s().state == SystemState::SafeState, "release failure did not fault");
+        require(!h.s().uncalibratedDemo() && !h.s().uncalibratedDwell(), "demo survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down && h.transport.reports[i].dx == 0,
+                    "output continued after the release failure");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        dwellStart(h);
+        require(!h.s().uncalibratedDwell(), "explicit restart is movement-only first");
+    });
+    test("dwell demo: button, pause, calibration and demo stop each cancel the dwell", [=] {
+        for (int how = 0; how < 4; ++how) {
+            HF h = uncalRig();
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(900);
+            require(h.s().handsFreeStatus().uncalDwellProgress > 0, "dwell not running");
+            const size_t mark = h.transport.reports.size();
+            if (how == 0) {
+                h.sw = true;
+                h.tick(); // physical button: stop at the press edge
+                h.sw = false;
+            } else if (how == 1) {
+                h.s().pause();
+            } else if (how == 2) {
+                h.s().calibrate(h.now);
+            } else {
+                h.s().stopUncalibratedDemo("test");
+            }
+            require(!h.s().uncalibratedDemo() && !h.s().uncalibratedDwell(), "demo still on");
+            require(h.s().handsFreeStatus().uncalDwellProgress == 0, "progress not reset");
+            h.quiet(3000);
+            require(clicksSince(h, mark) == 0, "click after the dwell was cancelled");
+        }
+    });
+    test("dwell demo: invalid samples cancel the dwell and nothing clicks", [=] {
+        for (int kind = 0; kind < 3; ++kind) {
+            HF h = uncalRig();
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(900);
+            const size_t mark = h.transport.reports.size();
+            h.now += 10;
+            MotionSample bad{h.now, {0, 0, 0}, {0, 0, 1}, true};
+            if (kind == 0) {
+                bad.gyro = {NAN, 0, 0};
+            } else if (kind == 1) {
+                bad.valid = false;
+            } else {
+                bad.timestampMs = h.now - 400;
+            }
+            h.s().tick(bad, h.now, false);
+            require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDwell(),
+                    "fault did not stop the dwell");
+            h.quiet(3000);
+            require(clicksSince(h, mark) == 0, "click after an invalid sample");
+        }
+    });
+    test("dwell demo: disconnect and reconnect reset progress and need an explicit restart", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900);
+        const size_t mark = h.transport.reports.size();
+        h.transport.online = false;
+        h.quiet(100);
+        require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDwell(), "not stopped");
+        require(h.s().handsFreeStatus().uncalDwellProgress == 0, "progress survived");
+        h.transport.online = true;
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 0, "click around a disconnect");
+        require(!h.s().uncalibratedDemo(), "reconnect restarted the demo");
+        dwellStart(h);
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 0, "restart clicked before dwell was re-enabled");
+    });
+    test("dwell demo: works with a missing or failed calibration and a corrupt profile", [=] {
+        {
+            HF h = uncalRig(); // missing profile
+            dwellStart(h);
+            dwellOn(h);
+            const size_t mark = h.transport.reports.size();
+            h.quiet(2500);
+            require(clicksSince(h, mark) == 1 && !h.s().hasProfile, "missing profile");
+        }
+        {
+            HF h = uncalRig();
+            h.s().calibrate(h.now);
+            for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+                h.run(hold(0, 40, 100));
+            }
+            require(h.s().calibration.phase == CalPhase::Failed, "precondition");
+            h.quiet(400);
+            dwellStart(h);
+            dwellOn(h);
+            const size_t mark = h.transport.reports.size();
+            h.quiet(2500);
+            require(clicksSince(h, mark) == 1, "failed calibration");
+            require(h.s().calibration.phase == CalPhase::Failed, "calibration result changed");
+        }
+        {
+            HF h(false, EnableKind::Momentary);
+            h.sw = false;
+            require(h.repo.save(UserProfile{}), "save");
+            h.profileStorage.slots[0][20] ^= 0x55;
+            h.profileStorage.slots[1] = h.profileStorage.slots[0];
+            const auto kept = h.profileStorage.slots[0];
+            h.boot();
+            h.quiet(400);
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(2500);
+            require(h.s().profileState() == ProfileState::Corrupt, "corruption hidden");
+            require(h.profileStorage.slots[0] == kept, "corrupt record rewritten");
+        }
+    });
+    test("dwell demo: no drag, double click, right click or scrolling can come out", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(2, -90, 1500)); // roll far past the scroll threshold
+        h.quiet(4000);
+        h.run(hold(0, 60, 400));
+        h.quiet(4000);
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            require(r.wheel == 0, "scroll report");
+            if (r.down) {
+                ++downs;
+                require(i + 1 < h.transport.reports.size() && !h.transport.reports[i + 1].down,
+                        "a held button (drag) or double press");
+            }
+        }
+        require(downs >= 1, "expected at least one dwell click");
+        require(clicksSince(h, mark) == downs, "click accounting");
+    });
+    test("dwell demo: settings are validated, RAM only, and restart a running dwell", [=] {
+        HF h = uncalRig();
+        require(!h.s().setUncalibratedDwellSettings(400, 8) &&
+                    !h.s().setUncalibratedDwellSettings(6000, 8) &&
+                    !h.s().setUncalibratedDwellSettings(1200, 1) &&
+                    !h.s().setUncalibratedDwellSettings(1200, NAN),
+                "an out-of-range setting was accepted");
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900);
+        require(h.s().setUncalibratedDwellSettings(2000, 12), "valid setting refused");
+        require(h.s().handsFreeStatus().uncalDwellMs == 2000 &&
+                    h.s().handsFreeStatus().uncalDwellTolerance == 12,
+                "settings not reported");
+        require(h.s().handsFreeStatus().uncalDwellProgress == 0, "dwell not restarted");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                "settings were saved");
+        const size_t mark = h.transport.reports.size();
+        h.quiet(1800);
+        require(clicksSince(h, mark) == 0, "clicked before the longer dwell completed");
+        h.quiet(1200);
+        require(clicksSince(h, mark) == 1, "no click after the longer dwell");
+        HF fresh = uncalRig();
+        require(fresh.s().handsFreeStatus().uncalDwellMs == start::uncalDwellMs &&
+                    fresh.s().handsFreeStatus().uncalDwellTolerance == start::uncalDwellTolerance,
+                "defaults are the named START values");
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

@@ -101,6 +101,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     }
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
+    uncalDwell_ = false;
     enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
@@ -112,6 +113,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
 
 void System::stop(SystemState next, uint32_t now) {
     uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
+    uncalDwell_ = false; // dwell clicking never outlives the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
         trainer_.cancel();
     }
@@ -317,7 +319,13 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
     const bool outputAllowed = active && state_ == SystemState::Active;
     Selection selected;
-    if (movementOnly && outputAllowed) {
+    const bool dwellClicking = uncal_ && uncalDwell_ && !demoMovementOnly_;
+    if (dwellClicking && outputAllowed) {
+        // Explicitly enabled dwell in the uncalibrated demo: the normal selection manager with the
+        // demo profile. No raw switch, no scrolling; hold/drag can never come out of it.
+        selected = selection_.update(false, x_, y_, true, false, control, now);
+        selected.down = false;
+    } else if (movementOnly && outputAllowed) {
         selection_.interrupt(); // movement-only demo: no dwell click, no selection, no drag
     } else if (!handsFree || !outputAllowed) {
         selected = selection_.update(lastRaw_, x_, y_, outputAllowed, scrolling, profile_, now);
@@ -332,7 +340,8 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     Command command = interaction_.compose(intent, selected);
     if (movementOnly) {
         const float limit = uncal_ ? start::uncalDemoMaxStep : start::demoMaxStep;
-        command.down = command.pulse = false;
+        command.down = false;
+        command.pulse = command.pulse && dwellClicking;
         command.wheel = 0;
         command.dx = std::clamp(command.dx, -limit, limit);
         command.dy = std::clamp(command.dy, -limit, limit);
@@ -344,6 +353,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         hid_.reset(); // no fractional movement survives a suppressed or inactive period
     }
     const bool delivered = hid_.emit(safeCommand);
+    if (dwellClicking && safeCommand.pulse) {
+        ++uncalClicks_;
+    }
     if (safety_.calculationFault) {
         enterSafe(FaultCode::Calculation, now);
         emitStationary();
@@ -668,13 +680,15 @@ ProfileState System::profileState() const {
                : ProfileState::Missing;
 }
 
-static UserProfile uncalibratedDemoProfile() {
+UserProfile System::uncalibratedDemoProfile() const {
     UserProfile demo; // bias 0: no rest measurement exists, so the deadzone must cover idle bias
     demo.deadzone = {start::uncalDemoDeadzone, start::uncalDemoDeadzone};
     demo.gain = {start::uncalDemoGain, start::uncalDemoGain, start::uncalDemoGain,
                  start::uncalDemoGain};
     demo.alpha = start::uncalDemoAlpha;
-    demo.dwellEnabled = false;
+    demo.dwellEnabled = uncalDwell_; // movement-only unless dwell clicking was explicitly enabled
+    demo.dwellMs = uncalDwellMs_;
+    demo.dwellTolerance = uncalDwellTolerance_;
     demo.scrollEnabled = false;
     return demo;
 }
@@ -712,6 +726,7 @@ bool System::startUncalibratedDemo(uint32_t now) {
         diagnostics_.reason = blocker;
         return false;
     }
+    uncalDwell_ = false; // every start is movement-only until dwell is enabled again
     uncalProfile_ = uncalibratedDemoProfile();
     if (!emitStationary()) {
         enterSafe(FaultCode::Transport, now);
@@ -720,6 +735,7 @@ bool System::startUncalibratedDemo(uint32_t now) {
     resetInteraction(now);
     state_ = SystemState::Active;
     uncal_ = true; // after resetInteraction(); never persisted, never reported as calibration
+    uncalClicks_ = 0;
     diagnostics_.faultCode = FaultCode::None;
     diagnostics_.reason = "uncalibrated demo active; movement only";
     return true;
@@ -734,6 +750,41 @@ void System::stopUncalibratedDemo(const char* reason) {
         diagnostics_.reason = reason;
     }
     feedback_.update(state_, lastTick_);
+}
+
+bool System::setUncalibratedDwell(bool on, uint32_t now) {
+    if (!uncal_) {
+        return false; // movement-only demo is the default; dwell needs a running demo
+    }
+    if (on == uncalDwell_) {
+        return true;
+    }
+    uncalDwell_ = on;
+    uncalProfile_ = uncalibratedDemoProfile();
+    selection_.reset(false, now); // fresh dwell: progress 0, nothing carried over
+    diagnostics_.reason = on ? "uncalibrated demo: dwell clicking enabled"
+                             : "uncalibrated demo: movement only";
+    return true;
+}
+
+bool System::setUncalibratedDwellSettings(uint32_t dwellMs, float tolerance) {
+    UserProfile candidate;
+    candidate.dwellMs = dwellMs;
+    candidate.dwellTolerance = tolerance;
+    if (!std::isfinite(tolerance) || !candidate.valid()) {
+        return false; // bounds are the profile's own: 500-5000 ms, tolerance 2-50
+    }
+    uncalDwellMs_ = dwellMs;
+    uncalDwellTolerance_ = tolerance;
+    uncalProfile_ = uncalibratedDemoProfile();
+    if (uncal_) {
+        selection_.reset(false, lastTick_); // a changed threshold restarts the dwell
+    }
+    return true;
+}
+
+float System::dwellProgress(uint32_t now) const {
+    return selection_.progress(now, uncal_ ? uncalProfile_ : profile_);
 }
 
 HandsFreeStatus System::handsFreeStatus() const {
@@ -785,6 +836,12 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.uncalGain = shown.gain[0];
     s.uncalDeadzone = shown.deadzone[0];
     s.uncalMaxStep = start::uncalDemoMaxStep;
+    s.uncalDwellEnabled = uncal_ && uncalDwell_;
+    s.uncalDwellMs = uncalDwellMs_;
+    s.uncalDwellTolerance = uncalDwellTolerance_;
+    s.uncalClicks = uncalClicks_;
+    s.uncalDwellState = uncal_ && uncalDwell_ ? name(selection_.dwell) : "IDLE";
+    s.uncalDwellProgress = uncal_ && uncalDwell_ ? selection_.progress(lastTick_, uncalProfile_) : 0.f;
     return s;
 }
 } // namespace nodx

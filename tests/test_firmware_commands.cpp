@@ -441,6 +441,14 @@ void hardwareChecks() {
     expect(refused(send("handsfree uncal start")), "uncalibrated demo refused without a button");
     expect(refused(send("handsfree uncal sideways")), "bad uncalibrated demo argument refused");
     expect(refused(send("handsfree uncal start extra")), "trailing text refused");
+    expect(refused(send("handsfree uncal dwell on")), "dwell needs a running demo");
+    expect(refused(send("handsfree uncal dwell sideways")), "bad dwell action refused");
+    expect(refused(send("handsfree uncal dwell set 400 8")), "dwell below 500 ms refused");
+    expect(refused(send("handsfree uncal dwell set 1200 1")), "tolerance below 2 refused");
+    expect(refused(send("handsfree uncal dwell set 1200")), "missing tolerance refused");
+    expect(refused(send("handsfree uncal dwell set 1200 8 9")), "trailing value refused");
+    expect(ok(send("handsfree uncal dwell set 1500 10")), "valid dwell settings accepted");
+    expect(has(status(), "\"ms\":1500,\"tolerance\":10.0"), "settings reported");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

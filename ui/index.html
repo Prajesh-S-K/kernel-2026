@@ -21,7 +21,7 @@
         </div>
       </header>
       <div id="uncalBanner" class="uncal-banner" role="alert" hidden>
-        <strong>UNCALIBRATED DEMO — LIVE SENSOR</strong>
+        <strong id="uncalBannerText">UNCALIBRATED DEMO — LIVE SENSOR</strong>
         <span>Movement only. Not a calibration. Nothing is saved.</span>
         <button id="uncalStopBanner" class="uncal-stop">Stop demo</button>
       </div>
@@ -113,6 +113,21 @@
               <div class="uncal-actions">
                 <button id="uncalStart" class="primary">Start uncalibrated pointer demo</button>
                 <button id="uncalStop" class="uncal-stop">Stop demo</button>
+              </div>
+              <div class="uncal-dwell">
+                <label
+                  ><input type="checkbox" id="uncalDwell" disabled /> Enable dwell clicking
+                  (temporary, off by default)</label
+                >
+                <div class="uncal-bar"><i id="uncalDwellBar"></i></div>
+                <p id="uncalDwellStatus" class="uncal-note"></p>
+                <div class="uncal-actions">
+                  <label>Dwell (ms) <input type="number" id="uncalDwellMs" min="500" max="5000" step="100" value="1200" /></label>
+                  <label>Tolerance <input type="number" id="uncalDwellTol" min="2" max="50" step="1" value="8" /></label>
+                  <button id="uncalDwellApply" class="quiet">Apply</button>
+                  <span id="uncalClicks" class="uncal-note"></span>
+                </div>
+                <small id="uncalDwellNote"></small>
               </div>
               <div class="uncal-grid">
                 <div>

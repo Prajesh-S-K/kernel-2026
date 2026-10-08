@@ -2,6 +2,7 @@
 // The demo is a bench aid: real sensor, conservative RAM-only settings, movement only. It is never a
 // calibration, is never saved and never starts by itself.
 export const BANNER = 'UNCALIBRATED DEMO — LIVE SENSOR';
+export const BANNER_DWELL = 'UNCALIBRATED DEMO — DWELL CLICK';
 const AXIS = ['X', 'Y', 'Z'];
 const SIGN = (value) => (value < 0 ? '−' : '+');
 
@@ -15,6 +16,14 @@ export function uncalOf(device) {
     gain: Number(raw?.gain) || 0,
     deadzone: Number(raw?.deadzone) || 0,
     maxStep: Number(raw?.maxStep) || 0,
+    dwell: {
+      enabled: raw?.dwell?.enabled === true,
+      ms: Number(raw?.dwell?.ms) || 0,
+      tolerance: Number(raw?.dwell?.tolerance) || 0,
+      state: typeof raw?.dwell?.state === 'string' ? raw.dwell.state : 'IDLE',
+      progress: Math.min(1, Math.max(0, Number(raw?.dwell?.progress) || 0)),
+      clicks: Number(raw?.dwell?.clicks) || 0,
+    },
   };
 }
 // The demo exists only on a live hardware device; a simulator never offers it.
@@ -34,7 +43,30 @@ export function uncalView(device) {
       : u.profileState === 'VALID'
         ? 'A saved profile exists; the demo does not use it.'
         : 'No saved profile. This is not a calibration and nothing is saved.';
-  return { hardware, active, canStart, status, calibration, banner: active ? BANNER : '', u };
+  const dwellOn = active && u.dwell.enabled;
+  const dwellStatus = !active
+    ? 'Dwell clicking needs the demo running.'
+    : !dwellOn
+      ? 'Movement only: no clicks. Enable dwell clicking to demonstrate a click.'
+      : u.dwell.state === 'LOCKOUT'
+        ? 'Clicked. Move deliberately away before the next click can arm.'
+        : u.dwell.state === 'PROGRESS'
+          ? `Dwelling: ${Math.round(u.dwell.progress * 100)}%`
+          : u.dwell.state === 'ARMING'
+            ? 'Arming: hold still.'
+            : 'Dwell armed: hold still on the target.';
+  return {
+    hardware,
+    active,
+    canStart,
+    status,
+    calibration,
+    banner: active ? (dwellOn ? BANNER_DWELL : BANNER) : '',
+    dwellOn,
+    canEnableDwell: active,
+    dwellStatus,
+    u,
+  };
 }
 // What each board rotation does to the pointer, taken from the mapping the firmware reports. The
 // mounting orientation is measured on the bench (scripts/bench_axes.py), never guessed from the
@@ -61,6 +93,10 @@ export const ROTATION_GUIDE = [
   'Tilt the front end DOWN → pointer moves down.',
   'Sideways roll does nothing in this demo (no scrolling).',
 ];
+export const DWELL_NOTE =
+  'Dwell time and tolerance are temporary START values held in memory only. Distance is measured in ' +
+  'accumulated outgoing HID movement units; the Mac applies pointer acceleration, so these are NOT ' +
+  'verified screen pixels. The first dwell also includes a short arming delay.';
 // The simulator-only "pause when the window loses focus" rule must not end a hardware bench demo
 // just because you look at another window; the physical button and Stop demo remain in force.
 export function pauseOnBlur(device) {
