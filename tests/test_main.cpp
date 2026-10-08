@@ -474,14 +474,17 @@ int main() {
         require(!a.valid() && !a.apply(s).valid, "bad mapping");
     });
     test("MPU register conversion handles signed raw readings", [] {
+        // The register file remembers writes: begin() now reads every configuration register back.
         class Bus : public RegisterBus {
         public:
-            bool write(uint8_t, uint8_t) override {
+            uint8_t written[256] = {};
+            bool write(uint8_t reg, uint8_t value) override {
+                written[reg] = value;
                 return true;
             }
             bool read(uint8_t r, uint8_t* b, size_t n) override {
                 for (size_t i = 0; i < n; ++i) {
-                    b[i] = 0;
+                    b[i] = written[(r + i) & 0xff];
                 }
                 if (r == 0x75) {
                     b[0] = 0x68;

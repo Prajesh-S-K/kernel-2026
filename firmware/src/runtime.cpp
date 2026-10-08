@@ -40,7 +40,8 @@ void initializeRuntime() {
         Wire.setTimeOut(20);
     }
     bool imuOK = mpu.begin();
-    Serial.println(imuOK ? "[IMU] detected" : "[IMU] unavailable; outputs inhibited");
+    Serial.println(imuOK ? (std::string("[IMU] detected ") + nodx::name(mpu.variant())).c_str()
+                         : "[IMU] unavailable; outputs inhibited");
     ble.begin();
     systemEngine = new System(ble, repository, configRepository);
     // Hands-free needs the enable input (switch or push button); without NODX_ENABLE control stays

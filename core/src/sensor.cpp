@@ -28,14 +28,95 @@ MotionSample ReplaySensor::read(uint32_t now) {
     }
     return samples_[next_++];
 }
+const char* name(ImuVariant variant) {
+    switch (variant) {
+    case ImuVariant::Mpu6050:
+        return "MPU-6050";
+    case ImuVariant::Mpu6500:
+        return "MPU-6500";
+    case ImuVariant::Unknown:
+        break;
+    }
+    return "UNKNOWN";
+}
+ImuVariant identifyImu(uint8_t whoAmI) {
+    switch (whoAmI) {
+    case 0x68:
+        return ImuVariant::Mpu6050;
+    case 0x70:
+        return ImuVariant::Mpu6500;
+    default:
+        return ImuVariant::Unknown;
+    }
+}
+float imuTemperatureC(ImuVariant variant, int16_t raw) {
+    switch (variant) {
+    case ImuVariant::Mpu6050:
+        return float(raw) / 340.f + 36.53f;
+    case ImuVariant::Mpu6500:
+        return float(raw) / 333.87f + 21.f;
+    case ImuVariant::Unknown:
+        break;
+    }
+    return std::numeric_limits<float>::quiet_NaN();
+}
 bool MPU6050Sensor::begin() {
+    ready_ = false;
+    variant_ = ImuVariant::Unknown;
     uint8_t who = 0;
-    ready_ = bus_.read(0x75, &who, 1) && who == 0x68 && bus_.write(0x6b, 0x01) // wake, PLL gyro X
-             && bus_.write(0x1a, 0x03)                                         // DLPF START
-             && bus_.write(0x19, 0x09)  // 1kHz / (9+1) = 100Hz START
-             && bus_.write(0x1b, 0x00)  // ±250 deg/s
-             && bus_.write(0x1c, 0x00); // ±2g
-    return ready_;
+    if (!bus_.read(0x75, &who, 1)) {
+        return false;
+    }
+    const ImuVariant found = identifyImu(who);
+    if (found == ImuVariant::Unknown) {
+        return false; // an unrecognised part is never configured or trusted
+    }
+    // START configuration, identical in effect on both variants (values checked against the
+    // register maps; every register is read back below):
+    //  0x6B PWR_MGMT_1   0x01  SLEEP clear, CLKSEL=1 (auto: PLL if ready). 6050 resets to 0x40
+    //  (asleep),
+    //                          6500 resets to 0x01.
+    //  0x1A CONFIG       0x03  DLPF_CFG=3 (gyro 41/42 Hz, 1 kHz internal rate; on the 6500 this
+    //  needs
+    //                          GYRO_CONFIG FCHOICE_B=00, which 0x00 below keeps).
+    //  0x19 SMPLRT_DIV   0x09  1 kHz / (1+9) = 100 Hz.
+    //  0x1B GYRO_CONFIG  0x00  FS_SEL=0, +-250 deg/s, 131 LSB/(deg/s), FCHOICE_B=00.
+    //  0x1C ACCEL_CONFIG 0x00  AFS_SEL=0, +-2 g, 16384 LSB/g.
+    //  0x1D ACCEL_CONFIG2 0x03 (6500 only; reserved on the 6050) ACCEL_FCHOICE_B=0, A_DLPF_CFG=3
+    //                          (41 Hz): the accelerometer filter the 6050's CONFIG=3 already
+    //                          applies.
+    //  0x38 INT_ENABLE   0x01  data-ready source enabled, because this driver gates reads on
+    //  INT_STATUS
+    //                          bit 0 (the 6050 map lists INT_STATUS as the status of ENABLED
+    //                          sources).
+    struct Setting {
+        uint8_t reg, value;
+    };
+    const Setting common[] = {{0x6b, 0x01}, {0x1a, 0x03}, {0x19, 0x09},
+                              {0x1b, 0x00}, {0x1c, 0x00}, {0x38, 0x01}};
+    const Setting accelFilter{0x1d, 0x03};
+    std::array<Setting, 7> plan{};
+    size_t count = 0;
+    for (const Setting& setting : common) {
+        plan[count++] = setting;
+    }
+    if (found == ImuVariant::Mpu6500) {
+        plan[count++] = accelFilter;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (!bus_.write(plan[i].reg, plan[i].value)) {
+            return false;
+        }
+    }
+    for (size_t i = 0; i < count; ++i) {
+        uint8_t readBack = 0xff;
+        if (!bus_.read(plan[i].reg, &readBack, 1) || readBack != plan[i].value) {
+            return false;
+        }
+    }
+    variant_ = found;
+    ready_ = true;
+    return true;
 }
 MotionSample MPU6050Sensor::read(uint32_t now) {
     MotionSample s{now, {}, {0, 0, 1}, false};
