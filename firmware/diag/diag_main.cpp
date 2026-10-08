@@ -80,6 +80,12 @@ void info() {
                   ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH);
 #ifdef ARDUINO_USB_CDC_ON_BOOT
     Serial.printf("DIAG,info,usbCdcOnBoot=%d\n", int(ARDUINO_USB_CDC_ON_BOOT));
+#else
+    Serial.println("DIAG,info,usbCdcOnBoot=not-set,warning=Serial-is-UART0-not-USB");
+#endif
+#ifdef ARDUINO_USB_MODE
+    Serial.printf("DIAG,info,usbMode=%d,note=1-is-hardware-CDC-JTAG-serial\n",
+                  int(ARDUINO_USB_MODE));
 #endif
     Serial.printf("DIAG,info,pinSda=%d,pinScl=%d,pinEnable=%d,buzzer=disabled,ble=not-compiled\n",
                   int(NODX_SDA), int(NODX_SCL), int(NODX_ENABLE));
@@ -269,9 +275,15 @@ unsigned secondsArg(const String& line, unsigned fallback) {
     return value >= 1 && value <= 120 ? unsigned(value) : fallback;
 }
 String command;
+bool commandSeen = false;
+uint32_t lastHeartbeat = 0;
 } // namespace
 
 void setup() {
+    // Native USB CDC: size the TX buffer before begin() so a burst of result lines is not cut
+    // short. The baud rate is ignored by the USB port. Output printed before the host opens the
+    // port is lost, so the idle heartbeat below repeats the banner until the first command arrives.
+    Serial.setTxBufferSize(4096);
     Serial.begin(115200);
     delay(1500);
     Serial.println("DIAG,banner,name=NodX-bench-diagnostic,stage=1,ble=none,hid=none,flash=none");
@@ -279,10 +291,18 @@ void setup() {
     help();
 }
 void loop() {
+    if (!commandSeen && millis() - lastHeartbeat >= 3000) {
+        lastHeartbeat = millis();
+        Serial.printf("DIAG,idle,atMs=%lu,waiting-for-command=help|info|scan|imu|button|all\n",
+                      static_cast<unsigned long>(millis()));
+    }
     while (Serial.available()) {
         const char c = char(Serial.read());
         if (c == '\n' || c == '\r') {
             command.trim();
+            if (command.length()) {
+                commandSeen = true;
+            }
             if (command == "info") {
                 info();
             } else if (command == "scan") {

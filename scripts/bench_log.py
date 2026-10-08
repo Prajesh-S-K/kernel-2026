@@ -23,6 +23,10 @@ EVIDENCE = ROOT / "hardware-evidence"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_analyze  # noqa: E402
 
+# Only a plain serial device name is accepted as --port; the port is never guessed.
+PORT_NAME = re.compile(
+    r"^(/dev/(cu|tty)\.[A-Za-z0-9._-]+|/dev/ttyACM\d+|/dev/ttyUSB\d+|COM\d{1,3})$"
+)
 SAFE_COMMAND = re.compile(
     r"^(help|info|scan|all|status|ping|nudge|up|adv|down confirm|imu( \d{1,3})?|button( \d{1,3})?)$"
 )
@@ -67,6 +71,8 @@ def run_session(
                     text = line.decode(errors="replace").rstrip("\r")
                     handle.write(f"{wall():%H:%M:%S.%f} {text}\n")
                     lines.append(text)
+                    if echo:
+                        echo(text)
             else:
                 sleep(0.01)
         handle.flush()
@@ -92,6 +98,8 @@ def main(argv=None):
         return 0
     if not args.port:
         parser.error("--port is required (or use --analyze); this tool never guesses a port")
+    if not PORT_NAME.fullmatch(args.port):
+        parser.error(f"refusing --port {args.port!r}: not a plain serial device name")
     for command in args.send:
         if not SAFE_COMMAND.fullmatch(command):
             parser.error(f"refusing unexpected command {command!r}")
@@ -105,7 +113,15 @@ def main(argv=None):
 
     class Link:
         def __init__(self):
-            self.port = serial.Serial(args.port, args.baud, timeout=0.05)
+            # DTR/RTS are set LOW before the port is opened: on the ESP32-S3 native USB port, DTR/RTS
+            # edges can reset the chip, and a diagnostic must not reboot the board by being watched.
+            self.port = serial.Serial()
+            self.port.port = args.port
+            self.port.baudrate = args.baud
+            self.port.timeout = 0.05
+            self.port.dtr = False
+            self.port.rts = False
+            self.port.open()
 
         def read(self):
             return self.port.read(512)
@@ -114,7 +130,9 @@ def main(argv=None):
             self.port.write(data)
 
     out_dir = session_dir(args.label)
-    text = run_session(Link(), args.send, args.seconds, out_dir)
+    text = run_session(
+        Link(), args.send, args.seconds, out_dir, echo=lambda t: print(t, flush=True)
+    )
     result = bench_analyze.analyze_text(text)
     (out_dir / "summary.txt").write_text(result["report"] + "\n")
     (out_dir / "summary.json").write_text(json.dumps(result, indent=1))

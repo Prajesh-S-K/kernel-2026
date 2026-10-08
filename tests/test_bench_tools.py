@@ -21,6 +21,7 @@ def load(name):
 
 ANALYZE = load("bench_analyze")
 LOG = load("bench_log")
+PORT = load("bench_port")
 
 INFO = """DIAG,info,chip=ESP32-S3,revision=2,cores=2,cpuMHz=240
 DIAG,info,flashBytes=16777216,flashMHz=80,flashMode=2,psramBytes=8388608,freeHeap=300000
@@ -166,6 +167,16 @@ class Logger(unittest.TestCase):
         self.assertIn("DIAG,scan,address=0x68", text)
         self.assertEqual(status_of(text + INFO, "MPU6050 answers"), "PASS")
 
+    def test_lines_can_be_echoed_live_for_the_operator(self):
+        clock = Clock()
+        shown = []
+        link = FakeLink([b"DIAG,button,prompt=press-and-release-the-button-now,seconds=20\n"])
+        with tempfile.TemporaryDirectory() as tmp:
+            LOG.run_session(
+                link, [], 2, Path(tmp) / "s", clock=clock, sleep=clock.sleep, echo=shown.append
+            )
+        self.assertEqual(shown, ["DIAG,button,prompt=press-and-release-the-button-now,seconds=20"])
+
     def test_only_short_diagnostic_commands_are_accepted(self):
         for ok in ("info", "scan", "imu 10", "button 20", "down confirm", "up", "nudge"):
             self.assertTrue(LOG.SAFE_COMMAND.fullmatch(ok), ok)
@@ -181,7 +192,7 @@ class Logger(unittest.TestCase):
         refused = run("--label", "x")
         self.assertEqual(refused.returncode, 2)
         self.assertIn("--port is required", refused.stderr)
-        refused = run("--port", "COM-NONE", "--send", "rm -rf /")
+        refused = run("--port", "/dev/cu.usbmodem999", "--send", "rm -rf /")
         self.assertEqual(refused.returncode, 2)
         self.assertIn("refusing unexpected command", refused.stderr)
         with tempfile.TemporaryDirectory() as tmp:
@@ -197,6 +208,77 @@ class Logger(unittest.TestCase):
         self.assertNotIn("/", target.name[15:])
         ignored = subprocess.run(["git", "check-ignore", "-q", str(target)], cwd=ROOT)
         self.assertEqual(ignored.returncode, 0, "hardware-evidence/ must be git-ignored")
+
+
+IOREG_ONE = """+-o Root  <class IORegistryEntry, id 0x100000100>
+  +-o USB JTAG/serial debug unit@00100000  <class IOUSBHostDevice, id 0x100032adc>
+  |   {
+  |     "kUSBProductString" = "USB JTAG/serial debug unit"
+  |     "idVendor" = 12346
+  |     "idProduct" = 4097
+  |   }
+  +-o Some Keyboard@00200000  <class IOUSBHostDevice, id 0x100032ade>
+  |   {
+  |     "kUSBProductString" = "Keyboard"
+  |     "idVendor" = 1452
+  |     "idProduct" = 800
+  |   }
+"""
+LSOF_HELD = """COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+screen   4242 me    5u   CHR    9,6      0t0  613 /dev/cu.usbmodem101
+"""
+
+
+class PortIdentification(unittest.TestCase):
+    def test_only_the_espressif_native_usb_device_is_recognised(self):
+        devices = PORT.parse_ioreg(IOREG_ONE)
+        self.assertEqual(devices, [{"product": "USB JTAG/serial debug unit"}])
+        self.assertEqual(PORT.parse_ioreg(IOREG_ONE.replace("12346", "1452")), [])
+        self.assertEqual(PORT.parse_ioreg(""), [])
+
+    def test_holders_are_the_process_names_not_the_header(self):
+        self.assertEqual(PORT.holders(LSOF_HELD), ["screen"])
+        self.assertEqual(PORT.holders(""), [])
+        self.assertEqual(PORT.holders("COMMAND PID USER\n"), [])
+
+    def test_ready_only_with_one_device_one_free_port_and_the_expected_name(self):
+        device = [{"product": "x"}]
+        port = "/dev/cu.usbmodem101"
+        self.assertTrue(PORT.verdict(device, [port], {port: []}, port)[0])
+        self.assertFalse(PORT.verdict([], [port], {port: []})[0])
+        self.assertFalse(PORT.verdict(device * 2, [port], {port: []})[0])
+        self.assertFalse(PORT.verdict(device, [], {})[0])
+        self.assertFalse(PORT.verdict(device, [port, "/dev/cu.usbmodem2101"], {})[0])
+        occupied = PORT.verdict(device, [port], {port: ["screen"]})
+        self.assertFalse(occupied[0])
+        self.assertIn("screen", occupied[1])
+        moved = PORT.verdict(device, ["/dev/cu.usbmodem2101"], {"/dev/cu.usbmodem2101": []}, port)
+        self.assertFalse(moved[0], "the port changed and must be re-identified")
+
+    def test_only_plain_serial_device_names_are_accepted_as_a_port(self):
+        for ok in ("/dev/cu.usbmodem101", "/dev/tty.usbmodem2101", "/dev/ttyACM0", "COM7"):
+            self.assertTrue(LOG.PORT_NAME.fullmatch(ok), ok)
+        for bad in (
+            "/dev/disk0",
+            "/etc/passwd",
+            "../cu.x",
+            "/dev/cu.",
+            "usbmodem101",
+            "/dev/cu.a b",
+        ):
+            self.assertFalse(LOG.PORT_NAME.fullmatch(bad), bad)
+        refused = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "bench_log.py"), "--port", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("not a plain serial device name", refused.stderr)
+
+    def test_the_logger_opens_the_port_with_dtr_and_rts_low(self):
+        source = (ROOT / "scripts" / "bench_log.py").read_text()
+        self.assertLess(source.index("self.port.dtr = False"), source.index("self.port.open()"))
+        self.assertLess(source.index("self.port.rts = False"), source.index("self.port.open()"))
 
 
 if __name__ == "__main__":
