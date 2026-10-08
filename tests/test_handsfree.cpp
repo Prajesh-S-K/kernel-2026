@@ -4223,6 +4223,110 @@ int main() {
         }
     });
 
+    test("quick gesture: movements outside the designated direction keep pointing normally, unsuppressed", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        auto movedAndStatus = [&](const std::function<void()>& move) {
+            const size_t mark = h.transport.reports.size();
+            const uint32_t suppressedBefore = h.s().quickStatus(h.now).suppressedMs;
+            const uint32_t candidatesBefore = h.s().quickStatus(h.now).candidates;
+            move();
+            float moved = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                moved += std::abs(float(h.transport.reports[i].dx)) + std::abs(float(h.transport.reports[i].dy));
+            }
+            const QuickStatus st = h.s().quickStatus(h.now);
+            require(st.suppressedMs == suppressedBefore && st.candidates == candidatesBefore,
+                    "the pointer was suppressed for a movement outside the designated direction");
+            return moved;
+        };
+        // ordinary pointing: yaw, pitch and diagonals
+        require(movedAndStatus([&] { h.run(hold(0, 60, 500)); h.quiet(500); }) > 20.f, "yaw did not point");
+        require(movedAndStatus([&] { h.run(hold(1, 60, 500)); h.quiet(500); }) > 20.f, "pitch did not point");
+        // the OPPOSITE tilt (with some yaw so the pointer would move) must not freeze the pointer
+        Tilt opposite;
+        opposite.dir = {.3f, 0, -.95f};
+        opposite.excursionDeg = 20.f;
+        require(movedAndStatus([&] { doQuick(h, opposite, 500); }) > 5.f,
+                "the opposite tilt was not treated as normal pointing");
+        // a perpendicular tilt (about the pitch axis)
+        Tilt perpendicular;
+        perpendicular.dir = {.2f, .97f, 0};
+        require(movedAndStatus([&] { doQuick(h, perpendicular, 500); }) > 5.f,
+                "a perpendicular movement was not treated as normal pointing");
+        require(h.s().quickStatus(h.now).clicks == 0, "a click from non-designated movement");
+        // while the designated tilt still works afterwards
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 700);
+        require(clicksSince(h, mark) == 1, "the designated gesture stopped working");
+    });
+    test("quick gesture: deviation after the candidate began cancels it; pointing resumes, nothing replays", [=] {
+        auto run = [&](bool quick) {
+            HF h = quickSession();
+            if (quick) {
+                require(h.s().setQuickGesture(true, h.now), "enable");
+            }
+            h.quiet(800);
+            Tilt drifting;
+            const size_t mark = h.transport.reports.size();
+            // an aligned start, then a strong sideways drift (a pointing move) that never returns
+            for (unsigned t = 0; t <= 900; t += 10) {
+                auto b = tiltRate(drifting, float(t));
+                if (t >= 100) {
+                    b[0] += 30.f; // a strong yaw: the user starts pointing instead
+                }
+                rawTick(h, mountIdentity, b);
+            }
+            h.quiet(300);
+            float moved = 0, biggest = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                const float step = std::abs(float(h.transport.reports[i].dx));
+                moved += step;
+                biggest = std::max(biggest, step);
+            }
+            return std::array<float, 4>{moved, biggest, float(clicksSince(h, mark)),
+                                        float(h.s().quickStatus(h.now).rejected)};
+        };
+        const auto control = run(false), gated = run(true);
+        require(gated[2] == 0, "clicked after a deviating gesture");
+        require(gated[3] >= 1, "the candidate should have been rejected");
+        require(gated[0] > 5.f, "pointing must resume after the cancel");
+        require(gated[0] <= control[0] + 1.f, "frozen movement was replayed");
+        require(gated[1] <= start::uncalDemoMaxStep, "a jump after the cancel");
+        require(gated[0] < control[0], "the frozen part of the movement must be discarded");
+    });
+    test("quick gesture: the designated direction changes only through another practice", [=] {
+        HF h = quickSession();
+        const QuickStatus first = h.s().quickStatus(h.now);
+        require(first.designated && std::abs(first.direction[2]) > .9f, "direction not reported");
+        require(h.s().setQuickSettings(1.f, .35f, 45.f) &&
+                    std::abs(h.s().quickStatus(h.now).directionToleranceDeg - 45.f) < .01f,
+                "the angular tolerance is a validated setting");
+        require(!h.s().setQuickSettings(1.f, .35f, 5.f) && !h.s().setQuickSettings(1.f, .35f, 75.f),
+                "an out-of-range angle was accepted");
+        const auto kept = h.s().quickStatus(h.now).direction;
+        require(h.s().quickStatus(h.now).direction == kept, "settings must not change the direction");
+        h.s().stopUncalibratedDemo("test");
+        // practise a DIFFERENT direction (a tilt with a large yaw-free component along axis 1 is a
+        // pointing move, so use another out-of-plane direction)
+        require(quickPractice(h, mountIdentity, false, [](unsigned) {
+                    Tilt g;
+                    g.dir = {.5f, .3f, -.81f};
+                    return g;
+                }) && h.s().quickPracticeAccept(),
+                "second practice");
+        const QuickStatus second = h.s().quickStatus(h.now);
+        require(second.designated && second.direction[2] < -.6f && first.direction[2] > .6f,
+                "the new practice must replace the designated direction (and its sign)");
+        h.s().quickClear();
+        require(!h.s().quickStatus(h.now).designated, "forgetting must clear the designated direction");
+        char buffer[quickJsonCapacity];
+        quickJson(buffer, sizeof buffer, second);
+        require(std::strstr(buffer, "\"designated\":true") && std::strstr(buffer, "\"direction\":["),
+                "direction fields");
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

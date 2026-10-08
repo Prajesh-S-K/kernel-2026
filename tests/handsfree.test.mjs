@@ -898,7 +898,7 @@ test("guided setup: a mounting warning explains head tilt versus a remount", () 
   assert.equal(mappingView(mapDev({ mountingWarning: true })).mountingNote, "");
 });
 
-import { quickView, quickOf, QUICK_LABEL } from "../ui/quick.js";
+import { quickView, quickOf, QUICK_LABEL, directionText } from "../ui/quick.js";
 const quickDev = (q, extra = {}) => ({ source: "HARDWARE", connected: true, mapping: { learnedValid: false }, quick: { phase: "IDLE", cue: "NONE", cueMs: 0, progress: 0, reason: "idle", practice: { excursion: 0, residual: 0, cross: 0, planeShare: 0 }, ready: false, enabled: false, frame: "FALLBACK", state: "OFF", suppressing: false, accepted: 0, rejected: 0, candidates: 0, clicks: 0, suppressedMs: 0, lastReject: "NONE", last: { excursion: 0, residual: 0, durationMs: 0 }, sensitivity: 1, returnTolerance: 0.35, blocked: "", ...q }, ...extra });
 test("quick gesture: hardware only, off by default, enabling is explicit", () => {
   assert.equal(quickView({ source: "SIMULATED", quick: {} }).hardware, false);
@@ -917,7 +917,8 @@ test("quick gesture: practice cues, retry and preview states", () => {
   assert.equal(quickView(quickDev({ phase: "REST", cue: "HOLD_STILL" })).big, "HOLD STILL");
   const countdown = quickView(quickDev({ phase: "TILT", cue: "COUNTDOWN", cueMs: 2100 }));
   assert.equal(countdown.big, "3");
-  assert.match(countdown.instruction, /tilt sideways/);
+  assert.match(countdown.instruction, /designated direction/);
+  assert.match(countdown.instruction, /right shoulder/);
   assert.equal(quickView(quickDev({ phase: "TILT", cue: "GO" })).big, "GO");
   const retry = quickView(quickDev({ phase: "TILT", cue: "COUNTDOWN", cueMs: 900, reason: "that tilt was too small: tilt further, then come back" }));
   assert.match(retry.instruction, /Last attempt: that tilt was too small/);
@@ -943,4 +944,23 @@ test("quick gesture: statistics and the experimental banner", () => {
   assert.equal(QUICK_LABEL, "EXPERIMENTAL QUICK GESTURE CLICK");
   assert.equal(quickOf({ quick: { ready: "yes", progress: 9 } }).ready, false);
   assert.equal(quickOf({ quick: { progress: 9 } }).progress, 1);
+});
+
+test("quick gesture: the designated direction and tolerance are shown, and only a practice changes them", () => {
+  assert.match(quickView(quickDev({})).directionLine, /No direction designated yet/);
+  const right = quickView(quickDev({ ready: true, designated: true, direction: [0.12, -0.05, 0.99], directionTolerance: 30 }));
+  assert.match(right.directionLine, /\(\+0\.12, −0\.05, \+0\.99\)/);
+  assert.match(right.directionLine, /mostly roll \(side tilt\), toward the right shoulder/);
+  assert.match(right.directionLine, /±30°/);
+  assert.match(right.directionLine, /opposite and other directions keep pointing normally/);
+  assert.match(right.directionLine, /Changing it needs another practice/);
+  const left = directionText(quickOf(quickDev({ designated: true, direction: [0.05, 0.1, -0.99] })));
+  assert.match(left, /toward the left shoulder/);
+  assert.match(directionText(quickOf(quickDev({ designated: true, direction: [0.9, 0, 0.2] }))), /mostly horizontal \(turn\), to the right/);
+  assert.equal(quickOf(quickDev({ direction: [1, 2] })).direction.length, 2);
+  assert.deepEqual(quickOf(quickDev({ direction: "bad" })).direction, [0, 0, 0]);
+  assert.equal(quickOf(quickDev({ directionTolerance: 45 })).directionTolerance, 45);
+  // a preview shows the direction before it is accepted
+  const preview = quickView(quickDev({ phase: "PREVIEW", designated: true, direction: [0, 0, 1] }));
+  assert.match(preview.directionLine, /\+1\.00/);
 });

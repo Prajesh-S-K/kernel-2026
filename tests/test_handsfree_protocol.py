@@ -302,6 +302,29 @@ class CommandValidation(HandsFreeCase):
             self.assertEqual(
                 SERVER.command_for({"action": "quick", "op": operation}), f"quick {operation}"
             )
+        self.assertEqual(
+            SERVER.command_for(
+                {
+                    "action": "quick",
+                    "op": "set",
+                    "sensitivity": 1,
+                    "returnTolerance": 0.3,
+                    "directionTolerance": 45,
+                }
+            ),
+            "quick set 1.00 0.30 45",
+        )
+        for angle in (9, 61, True, "30", float("nan")):
+            with self.assertRaises(ValueError, msg=str(angle)):
+                SERVER.command_for(
+                    {
+                        "action": "quick",
+                        "op": "set",
+                        "sensitivity": 1,
+                        "returnTolerance": 0.3,
+                        "directionTolerance": angle,
+                    }
+                )
         for bad in (
             {"action": "quick"},
             {"action": "quick", "op": "practice"},

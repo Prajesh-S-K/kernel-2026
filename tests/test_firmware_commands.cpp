@@ -194,7 +194,7 @@ void reboot() {
     pump(300);
 }
 void playGesture(const char* pattern) {
-    const std::string ack = send(std::string("gesture ") + pattern, 80);
+    const std::string ack = send(std::string("gesture ") + pattern, 250);
     expect(ok(ack), "gesture accepted for playback");
     pump(1500); // 400 ms neutral + strokes + 400 ms neutral, then recognition
 }
@@ -486,7 +486,12 @@ void hardwareChecks() {
            "invalid quick settings refused");
     expect(ok(send("quick set 1.5 0.25")) && has(status(), "\"sensitivity\":1.50,\"returnTolerance\":0.25"),
            "valid quick settings accepted and reported");
-    expect(ok(send("quick set 1 0.35")), "defaults restored");
+    expect(ok(send("quick set 1.2 0.3 40")) && has(status(), "\"directionTolerance\":40"),
+           "the direction tolerance is a validated setting");
+    expect(refused(send("quick set 1 0.3 5")) && refused(send("quick set 1 0.3 75")) &&
+               refused(send("quick set 1 0.3 40 1")),
+           "an out-of-range direction tolerance is refused");
+    expect(ok(send("quick set 1 0.35 30")), "defaults restored");
     expect(ok(send("quick cancel")) && ok(send("quick clear")) && ok(send("quick retry")) &&
                ok(send("quick enable off")),
            "cancel, clear, retry and disable are always accepted");

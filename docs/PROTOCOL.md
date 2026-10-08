@@ -76,7 +76,7 @@ encoding are unchanged; old clients ignore the new object.
 | `quick practice fallback\|configured` | `{"action":"quick","op":"practice","frame":"fallback"}` | EXPERIMENTAL quick tilt-and-return click, step 1: guided practice (stillness, one tilt, preview). Needs no saved profile; ends a running session first; the practice is RAM only and bound to the frame it was done in |
 | `quick retry\|cancel\|accept\|clear` | `{"action":"quick","op":"accept"}` | `retry` captures another tilt from the preview; `accept` (only in the preview) keeps the practice in memory; `clear` forgets it |
 | `quick enable on\|off` | `{"action":"quick","op":"enable","enabled":bool}` | Enable the quick gesture click while a session runs (refused otherwise or for a practice of the other frame). Turns dwell and the trained gesture OFF, and enabling either of them turns it off. Off at every start; cleared by every stop, fault, disconnect, calibration or practice start |
-| `quick set <sensitivity> <tolerance>` | `{"action":"quick","op":"set","sensitivity":1.0,"returnTolerance":0.35}` | Validated settings (0.5-2.0, 0.15-0.6); RAM only; restarts a running recognizer's neutral period |
+| `quick set <sensitivity> <tolerance> [<angle>]` | `{"action":"quick","op":"set","sensitivity":1.0,"returnTolerance":0.35,"directionTolerance":30}` | Validated settings (0.5-2.0, 0.15-0.6, optional direction tolerance 10-60 degrees); RAM only; restarts a running recognizer's neutral period. The designated direction is NOT a setting: only a practice changes it |
 | `control start\|stop` | `{"action":"control","op":"start"}` | Configured control with the learned mapping: healthy sensor, valid mapping, BLE and the physical enable-button permission (unchanged product-mode behaviour; never automatic), plus a valid learned mapping and no gross re-orientation (gravity direction within 75 degrees of the taught one). Movement only. `stop` is always accepted |
 | `handsfree uncal dwell on\|off` | `{"action":"handsfree","op":"uncaldwell","enabled":bool}` | Explicitly enable dwell clicking inside the RUNNING uncalibrated demo (refused when the demo is not running). Off at every start; cleared by every stop. One primary-button click per completed dwell; no drag, double-click, right-click or scrolling |
 | `handsfree uncal dwell set <ms> <tolerance>` | `{"action":"handsfree","op":"uncaldwellset","ms":int,"tolerance":number}` | Temporary dwell settings, RAM only, validated (500-5000 ms, tolerance 2-50). A running dwell restarts. Reported in `handsFree.uncalDemo.dwell` `{enabled, ms, tolerance, state, progress, clicks}`; `dwellProgress` (top level) follows the profile in use |
@@ -144,7 +144,7 @@ and `mountingWarning` (above 35 degrees).
 
 Status frames carry `quick` `{phase, cue, cueMs, progress, reason, practice{excursion,residual,cross,planeShare},
 ready, enabled, frame, state, suppressing, accepted, rejected, candidates, clicks, suppressedMs, lastReject,
-last{excursion,residual,durationMs}, sensitivity, returnTolerance, blocked}`. `state` is OFF, NEUTRAL, READY,
+last{excursion,residual,durationMs}, sensitivity, returnTolerance, blocked}`. `designated` and `direction` `[x,y,z]` report the practised direction (signed, unit, control frame; shown in the companion) and `directionTolerance` its angular tolerance in degrees. `state` is OFF, NEUTRAL, READY,
 OUTWARD, RETURN or SETTLING (the last three pause the pointer); `lastReject` is NONE, TOO_SMALL, CROSS_AXIS,
 NO_RETURN, NOT_BACK_TO_START, TIMEOUT or INVALID_SAMPLE.
 

@@ -152,9 +152,14 @@ void command(const std::string& line, uint32_t now, bool truncated) {
             ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
                  system.setQuickGesture(value == "on", now);
         } else if (verb == "set") {
-            float sensitivity = 0, tolerance = 0;
-            ok = bool(input >> sensitivity >> tolerance) && (input >> std::ws).eof() &&
-                 system.setQuickSettings(sensitivity, tolerance);
+            float sensitivity = 0, tolerance = 0, angle = 0;
+            ok = bool(input >> sensitivity >> tolerance);
+            if (ok && !(input >> std::ws).eof()) {
+                ok = bool(input >> angle) && (input >> std::ws).eof() &&
+                     system.setQuickSettings(sensitivity, tolerance, angle);
+            } else if (ok) {
+                ok = system.setQuickSettings(sensitivity, tolerance);
+            }
         } else if (verb == "retry" || verb == "cancel" || verb == "accept" || verb == "clear") {
             ok = (input >> std::ws).eof();
             if (ok && verb == "retry") {

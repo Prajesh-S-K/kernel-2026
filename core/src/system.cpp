@@ -1056,9 +1056,15 @@ bool System::quickPracticeAccept() {
 void System::quickClear() {
     quickEnabled_ = false;
     quickReady_ = false;
+    if (!quickPractice_.active()) {
+        quickPractice_ = QuickPractice{}; // forget the designated direction and the old preview
+    }
 }
 bool System::setQuickSettings(float sensitivity, float returnTolerance) {
-    const QuickSettings candidate{sensitivity, returnTolerance};
+    return setQuickSettings(sensitivity, returnTolerance, quickSettings_.directionToleranceDeg);
+}
+bool System::setQuickSettings(float sensitivity, float returnTolerance, float directionToleranceDeg) {
+    const QuickSettings candidate{sensitivity, returnTolerance, directionToleranceDeg};
     if (!candidate.valid()) {
         return false;
     }
@@ -1091,11 +1097,20 @@ bool System::setQuickGesture(bool on, uint32_t now) {
 }
 QuickStatus System::quickStatus(uint32_t now) const {
     QuickStatus st = quickPractice_.status(now);
+    if (st.phase != QuickPhase::Preview) {
+        st.designated = false; // only a live preview or an accepted practice designates a direction
+        st.direction = {};
+    }
     st.ready = quickReady_;
     st.enabled = uncal_ && quickEnabled_;
     st.configuredFrame = quickReady_ ? quickConfiguredFrame_ : quickTrainingConfigured_;
     st.sensitivity = quickSettings_.sensitivity;
     st.returnTolerance = quickSettings_.returnTolerance;
+    st.directionToleranceDeg = quickSettings_.directionToleranceDeg;
+    if (quickReady_) {
+        st.direction = quickProfile_.direction; // the designated direction, signed, 3-D
+        st.designated = true;
+    }
     if (st.enabled) {
         st.suppressing = quickRec_.suppressing();
         st.accepted = quickRec_.accepted;

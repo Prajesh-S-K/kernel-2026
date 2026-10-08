@@ -407,3 +407,21 @@ upload): (1) capture the practice while practising; (2) 10 s captures of normal 
 gestures at noted times; (4) replay all of it, report hits, misses, false clicks and suppression time as
 HARDWARE results, separately from the synthetic ones, and only then consider tuning the EXPERIMENTAL START
 values (which are never tuned on the same recordings used to report them).
+
+## Quick gesture: the designated direction
+
+The practice defines ONE designated direction. Demonstrate the direction you want (for example tilting your
+head toward your right shoulder) and return; the firmware stores the outward direction as a SIGNED unit
+three-dimensional gyro vector in the control frame, so it follows the sensor's fixed mounting. The companion
+shows it (components and a plain-words reading) together with its angular tolerance. A candidate may only start
+when the movement exceeds the noise-qualified threshold, points within the validated tolerance (default 30
+degrees, 10-60) of the designated direction AND has the right sign. The opposite direction, perpendicular
+movements and ordinary pointing never start a candidate, so they keep pointing normally with no suppression.
+Once a candidate has started the pointer is frozen; excessive deviation from the direction cancels it at once
+(no click, the frozen movement discarded, pointing resumes); otherwise the opposite return stroke and a
+settled return near the start within the one-second window are required. The direction can only be changed
+by another practice capture (the tolerance and sensitivity are separate validated settings).
+
+A practice whose direction lies mostly inside the pointing plane (turning left/right or nodding) is refused
+with an explanation, because it could not be told apart from pointing; the head-to-shoulder tilt is the
+intended kind of direction.

@@ -17,7 +17,8 @@ Vec3 scaled(const Vec3& a, float k) {
 } // namespace
 
 bool QuickSettings::valid() const {
-    return between(sensitivity, .5f, 2.f) && between(returnTolerance, .15f, .6f);
+    return between(sensitivity, .5f, 2.f) && between(returnTolerance, .15f, .6f) &&
+           between(directionToleranceDeg, 10.f, 60.f);
 }
 bool QuickProfile::valid() const {
     return between(norm(direction), .99f, 1.01f) && between(sigma, .01f, 10.f) &&
@@ -58,6 +59,9 @@ void QuickRecognizer::configure(const QuickProfile& profile, const QuickSettings
     profile_ = profile;
     settings_ = settings;
     th_ = deriveThresholds(profile, settings);
+    const float tolerance = std::clamp(settings.directionToleranceDeg, 10.f, 60.f) * 3.14159265f / 180.f;
+    cosTolerance_ = std::cos(tolerance);
+    crossRatio_ = std::tan(tolerance);
     accepted = rejected = candidates = suppressedMs = 0;
     lastReject = QuickReject::None;
     lastExcursionDeg = lastResidualDeg = lastDurationMs = lastCrossDeg = 0;
@@ -98,8 +102,6 @@ QuickRecognizer::Event QuickRecognizer::update(const Vec3& frame, uint32_t now) 
     const Vec3 r = minus(frame, profile_.bias);
     const float rate = norm(r);
     const float along = dot(r, profile_.direction);
-    const Vec3 perp = minus(r, scaled(profile_.direction, along));
-    const float q = norm(perp);
     const uint32_t gap = uint32_t(now - lastMs_);
     lastMs_ = now;
     const float dt = float(gap) / 1000.f;
@@ -129,7 +131,9 @@ QuickRecognizer::Event QuickRecognizer::update(const Vec3& frame, uint32_t now) 
         }
         break;
     case State::Armed:
-        if (along > th_.enterRate && q <= start::quickCrossRatio * along) {
+        // Only the designated direction, with the right sign, within the angular tolerance. The
+        // opposite direction and perpendicular movements never open a candidate.
+        if (along > th_.enterRate && along >= cosTolerance_ * rate) {
             state_ = State::Outward; // candidate detected: pointer output is frozen from here
             onsetMs_ = now;
             theta_ = {};
@@ -181,7 +185,7 @@ QuickRecognizer::Event QuickRecognizer::update(const Vec3& frame, uint32_t now) 
                     const float residual = norm(theta_);
                     if (maxAlong_ < th_.minExcursionDeg) {
                         finishCandidate(event, false, QuickReject::TooSmall, now);
-                    } else if (maxCross_ > start::quickCrossAngleRatio * maxAlong_) {
+                    } else if (maxCross_ > crossRatio_ * maxAlong_) {
                         finishCandidate(event, false, QuickReject::CrossAxis, now);
                     } else if (residual > settings_.returnTolerance * maxAlong_) {
                         finishCandidate(event, false, QuickReject::Residual, now);
@@ -193,8 +197,12 @@ QuickRecognizer::Event QuickRecognizer::update(const Vec3& frame, uint32_t now) 
                 calmSince_ = 0;
                 state_ = State::Return;
             }
-        } else if (maxCross_ > start::quickCrossAngleRatio * std::max(maxAlong_, 1.f) &&
-                   maxCross_ > 2.f * th_.minExcursionDeg) {
+        }
+        // Excessive deviation cancels the candidate at once (outward or return stroke): no click,
+        // and the frozen movement is discarded, never replayed.
+        if (state_ != State::Neutral && state_ != State::Settling &&
+            maxCross_ > crossRatio_ * std::max(maxAlong_, th_.minExcursionDeg) &&
+            maxCross_ > .5f * th_.minExcursionDeg) {
             finishCandidate(event, false, QuickReject::CrossAxis, now);
         }
         break;
@@ -470,6 +478,7 @@ QuickStatus QuickPractice::status(uint32_t now) const {
     st.reason = reason_;
     st.sensitivity = settings_.sensitivity;
     st.returnTolerance = settings_.returnTolerance;
+    st.directionToleranceDeg = settings_.directionToleranceDeg;
     auto left = [&](uint32_t total) {
         const uint32_t spent = uint32_t(now - subStart_);
         return spent >= total ? 0u : total - spent;
@@ -496,6 +505,8 @@ QuickStatus QuickPractice::status(uint32_t now) const {
         st.cue = QuickCue::Preview;
         st.progress = 1.f;
         st.practiceDeg = profile_.practiceDeg;
+        st.direction = profile_.direction;
+        st.designated = true;
         st.practiceResidualDeg = residualDeg_;
         st.practiceCrossDeg = crossDeg_;
         st.planeShare = planeShare_;
@@ -525,7 +536,8 @@ size_t quickJson(char* out, size_t capacity, const QuickStatus& s) {
         "\"ready\":%s,\"enabled\":%s,\"frame\":\"%s\",\"state\":\"%s\",\"suppressing\":%s,"
         "\"accepted\":%lu,\"rejected\":%lu,\"candidates\":%lu,\"clicks\":%lu,"
         "\"suppressedMs\":%lu,\"lastReject\":\"%s\",\"last\":{\"excursion\":%.1f,\"residual\":%.1f,"
-        "\"durationMs\":%.0f},\"sensitivity\":%.2f,\"returnTolerance\":%.2f,\"blocked\":\"%s\"}",
+        "\"durationMs\":%.0f},\"sensitivity\":%.2f,\"returnTolerance\":%.2f,"
+        "\"directionTolerance\":%.0f,\"designated\":%s,\"direction\":[%.3f,%.3f,%.3f],\"blocked\":\"%s\"}",
         name(s.phase), name(s.cue), static_cast<unsigned long>(s.cueMs), s.progress, s.reason,
         s.practiceDeg, s.practiceResidualDeg, s.practiceCrossDeg, s.planeShare,
         s.ready ? "true" : "false", s.enabled ? "true" : "false",
@@ -533,7 +545,9 @@ size_t quickJson(char* out, size_t capacity, const QuickStatus& s) {
         static_cast<unsigned long>(s.accepted), static_cast<unsigned long>(s.rejected),
         static_cast<unsigned long>(s.candidates), static_cast<unsigned long>(s.clicks),
         static_cast<unsigned long>(s.suppressedMs), s.lastReject, s.lastExcursionDeg,
-        s.lastResidualDeg, s.lastDurationMs, s.sensitivity, s.returnTolerance, s.blocked);
+        s.lastResidualDeg, s.lastDurationMs, s.sensitivity, s.returnTolerance,
+        s.directionToleranceDeg, s.designated ? "true" : "false", s.direction[0], s.direction[1],
+        s.direction[2], s.blocked);
     return written > 0 && size_t(written) < capacity ? size_t(written) : 0;
 }
 } // namespace nodx

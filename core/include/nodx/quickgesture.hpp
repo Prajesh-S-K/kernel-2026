@@ -12,6 +12,9 @@ namespace nodx {
 struct QuickSettings {
     float sensitivity = start::quickSensitivity;         // 0.5 (stricter) .. 2.0 (more sensitive)
     float returnTolerance = start::quickReturnTolerance; // final residual / excursion
+    // A candidate may only start while the rotation points within this angle of the designated
+    // direction (and with the right sign); more deviation than tan(angle) of the excursion cancels it.
+    float directionToleranceDeg = start::quickDirectionToleranceDeg; // validated 10 .. 60
     bool valid() const;
 };
 
@@ -68,6 +71,7 @@ private:
     QuickProfile profile_;
     QuickSettings settings_;
     QuickThresholds th_{};
+    float cosTolerance_ = .866f, crossRatio_ = .577f;
     State state_ = State::Neutral;
     uint32_t lastMs_ = 0, onsetMs_ = 0, calmSince_ = 0, nextAllowedMs_ = 0;
     Vec3 theta_{};
@@ -94,7 +98,9 @@ struct QuickStatus {
     uint32_t accepted = 0, rejected = 0, candidates = 0, clicks = 0, suppressedMs = 0;
     const char* lastReject = "NONE";
     float lastExcursionDeg = 0, lastResidualDeg = 0, lastDurationMs = 0;
-    float sensitivity = 1.f, returnTolerance = .35f;
+    float sensitivity = 1.f, returnTolerance = .35f, directionToleranceDeg = 30.f;
+    Vec3 direction{0, 0, 0}; // the designated (signed, unit) gyro direction; zero when none
+    bool designated = false;
     const char* blocked = "";
 };
 size_t quickJson(char* out, size_t capacity, const QuickStatus& status);

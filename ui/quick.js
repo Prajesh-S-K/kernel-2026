@@ -42,6 +42,9 @@ export function quickOf(device) {
       residual: num(q?.last?.residual),
       durationMs: num(q?.last?.durationMs),
     },
+    designated: q?.designated === true,
+    direction: Array.isArray(q?.direction) ? q.direction.slice(0, 3).map(num) : [0, 0, 0],
+    directionTolerance: num(q?.directionTolerance) || 30,
     sensitivity: num(q?.sensitivity) || 1,
     returnTolerance: num(q?.returnTolerance) || 0.35,
     blocked: typeof q?.blocked === 'string' ? q.blocked : '',
@@ -57,6 +60,23 @@ const STATE_TEXT = {
   SETTLING: 'Settling — pointer paused',
 };
 
+const AXES = [
+  ['horizontal (turn)', 'to the right', 'to the left'],
+  ['vertical (nod)', 'down', 'up'],
+  ['roll (side tilt)', 'toward the right shoulder', 'toward the left shoulder'],
+];
+// The designated direction as the companion shows it: the signed unit vector in the control frame and
+// a plain-words reading of its dominant axis. In the default mapping the third axis is the head roll.
+export function directionText(q) {
+  if (!q.designated) return 'No direction designated yet: practise the gesture to set it.';
+  const d = q.direction;
+  const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
+  const lead = d.reduce((best, v, i) => (Math.abs(v) > Math.abs(d[best]) ? i : best), 0);
+  const [name, positive, negative] = AXES[lead];
+  const words = `mostly ${name}, ${d[lead] >= 0 ? positive : negative}`;
+  return `Designated direction (${fmt(d[0])}, ${fmt(d[1])}, ${fmt(d[2])}) in the control frame: ${words}. Only this direction, with this sign and within ±${q.directionTolerance.toFixed(0)}°, can start a click; the opposite and other directions keep pointing normally. Changing it needs another practice.`;
+}
+
 export function quickView(device) {
   const q = quickOf(device);
   const hardware = device?.source === 'HARDWARE' && q.reported;
@@ -64,19 +84,19 @@ export function quickView(device) {
   const seconds = Math.ceil(q.cueMs / 1000);
   let title = 'Quick gesture click is off';
   let instruction =
-    'EXPERIMENTAL. Practise one comfortable sideways tilt and return (about a second). It is off until you enable it.';
+    'EXPERIMENTAL. Choose ONE direction (for example tilting your head toward your right shoulder) and practise it once, with the return (about a second). Only that direction, with that sign, can click. It is off until you enable it.';
   let big = '';
   if (practising && q.phase === 'REST') {
     title = 'Step 1: hold still';
     instruction = 'Hold the assembly completely still so the sensor noise can be measured.';
     big = 'HOLD STILL';
   } else if (practising && q.phase === 'TILT') {
-    title = 'Step 2: one tilt and return';
+    title = 'Step 2: demonstrate your direction, then return';
     if (q.cue === 'COUNTDOWN') {
-      instruction = 'Get ready. When it says GO: tilt sideways, then come straight back to the start, in about a second.';
+      instruction = 'Get ready. When it says GO: demonstrate your designated direction (for example tilt your head toward your right shoulder), then come straight back to the start, in about a second.';
       big = String(Math.max(1, seconds));
     } else if (q.cue === 'GO') {
-      instruction = 'Now: tilt sideways, then return to the start.';
+      instruction = 'Now: your designated direction, then return to the start.';
       big = 'GO';
     } else {
       instruction = `Recording. ${q.reason}`;
@@ -116,6 +136,7 @@ export function quickView(device) {
     big,
     stats,
     practiceLine,
+    directionLine: directionText(q),
     progress: q.progress,
     enabled: q.enabled,
     ready: q.ready,

@@ -148,7 +148,15 @@ def command_for(data):
                     raise ValueError(f"{label} must be a number")
                 if not low <= value <= high:
                     raise ValueError(f"{label} must be {low} to {high}")
-            return f"quick set {float(sensitivity):.2f} {float(tolerance):.2f}"
+            command = f"quick set {float(sensitivity):.2f} {float(tolerance):.2f}"
+            angle = data.get("directionTolerance")
+            if angle is not None:
+                if type(angle) not in (int, float) or isinstance(angle, bool):
+                    raise ValueError("Direction tolerance must be a number")
+                if not 10 <= angle <= 60:
+                    raise ValueError("Direction tolerance must be 10 to 60 degrees")
+                command += f" {float(angle):.0f}"
+            return command
         raise ValueError("Invalid quick gesture request")
     if action == "click":
         operation = data.get("op")

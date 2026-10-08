@@ -503,9 +503,14 @@ int main(int argc, char** argv) {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setQuickGesture(value == "on", now);
                 } else if (verb == "set") {
-                    float sensitivity = 0, tolerance = 0;
-                    ok = bool(cmd >> sensitivity >> tolerance) && (cmd >> std::ws).eof() &&
-                         sys.setQuickSettings(sensitivity, tolerance);
+                    float sensitivity = 0, tolerance = 0, angle = 0;
+                    ok = bool(cmd >> sensitivity >> tolerance);
+                    if (ok && !(cmd >> std::ws).eof()) {
+                        ok = bool(cmd >> angle) && (cmd >> std::ws).eof() &&
+                             sys.setQuickSettings(sensitivity, tolerance, angle);
+                    } else if (ok) {
+                        ok = sys.setQuickSettings(sensitivity, tolerance);
+                    }
                 } else if (verb == "retry" || verb == "cancel" || verb == "accept" ||
                            verb == "clear") {
                     ok = (cmd >> std::ws).eof();

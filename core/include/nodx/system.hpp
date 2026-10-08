@@ -150,6 +150,7 @@ public:
     void quickClear();
     bool setQuickGesture(bool on, uint32_t now);
     bool setQuickSettings(float sensitivity, float returnTolerance);
+    bool setQuickSettings(float sensitivity, float returnTolerance, float directionToleranceDeg);
     const char* quickBlocker() const;
     QuickStatus quickStatus(uint32_t now) const;
     bool quickGestureEnabled() const {

@@ -426,6 +426,7 @@ function renderQuick(data) {
   $('quickBar').style.width = `${Math.round(view.progress * 100)}%`;
   $('quickInstruction').textContent = view.instruction;
   $('quickPracticeLine').textContent = view.practiceLine;
+  $('quickDirection').textContent = view.directionLine;
   $('quickPracticeFallback').disabled = !view.canPracticeFallback;
   $('quickPracticeConfigured').disabled = !view.canPracticeConfigured;
   $('quickAccept').disabled = !view.canAccept;
@@ -437,6 +438,7 @@ function renderQuick(data) {
   for (const [id, value] of [
     ['quickSens', view.q.sensitivity],
     ['quickTol', view.q.returnTolerance],
+    ['quickAngle', view.q.directionTolerance],
   ])
     if (document.activeElement !== $(id)) $(id).value = value;
   $('quickStats').textContent = view.stats;
@@ -572,6 +574,7 @@ $('quickApply').onclick = () =>
     op: 'set',
     sensitivity: Number($('quickSens').value),
     returnTolerance: Number($('quickTol').value),
+    directionTolerance: Number($('quickAngle').value),
   });
 for (const [id, extra] of [
   ['clickTrainFallback', { op: 'train', frame: 'fallback' }],

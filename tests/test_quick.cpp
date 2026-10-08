@@ -3,6 +3,7 @@
 #include "nodx/quickgesture.hpp"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <random>
 #include <stdexcept>
@@ -514,6 +515,150 @@ int main() {
         std::printf("INFO synthetic: 5.5 degree tilt: %u clicks at sensitivity 2.0, %u at 0.5\n",
                     clicksAt(2.f), clicksAt(.5f));
         require(clicksAt(.5f) == 0, "strict sensitivity must not take it");
+    });
+
+    // ------------------------------------------------ the designated direction (signed, 3-D)
+    // d is the practised outward direction; rotated(phi) tilts it by phi degrees toward a perpendicular.
+    auto perpendicularTo = [](const Vec3& d) {
+        Vec3 helper = std::abs(d[0]) < .8f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+        Vec3 p{helper[0] - dot(helper, d) * d[0], helper[1] - dot(helper, d) * d[1],
+               helper[2] - dot(helper, d) * d[2]};
+        return unitOf(p);
+    };
+    auto rotated = [&](const Vec3& d, float phiDeg) {
+        const Vec3 p = perpendicularTo(d);
+        const float c = std::cos(phiDeg * kPi / 180.f), sn = std::sin(phiDeg * kPi / 180.f);
+        return Vec3{d[0] * c + p[0] * sn, d[1] * c + p[1] * sn, d[2] * c + p[2] * sn};
+    };
+    test("direction: the practice learns a SIGNED direction; the opposite sign is a different gesture", [&] {
+        const Vec3 d = unitOf({.2f, .1f, 1.f});
+        const Vec3 neg{-d[0], -d[1], -d[2]};
+        const QuickProfile positive = practiceFor(d), negative = practiceFor(neg);
+        require(dot(positive.direction, d) > .97f, "positive direction not learned with its sign");
+        require(dot(negative.direction, neg) > .97f && dot(negative.direction, d) < -.97f,
+                "the opposite practice must learn the opposite sign");
+        for (const QuickProfile* profile : {&positive, &negative}) {
+            Run run(*profile);
+            run.quiet(800);
+            Shape designated;
+            designated.dir = profile->direction;
+            run.perform(designated, 700);
+            require(run.clicks == 1, "the designated direction did not click");
+            // the OPPOSITE direction, even larger and faster, must not open a candidate at all
+            Run other(*profile);
+            other.quiet(800);
+            Shape opposite;
+            opposite.dir = {-profile->direction[0], -profile->direction[1], -profile->direction[2]};
+            opposite.excursionDeg = 25.f;
+            opposite.ms = 400;
+            other.perform(opposite, 800);
+            require(other.clicks == 0 && other.rec.candidates == 0 && other.rec.suppressedMs == 0,
+                    "the opposite direction opened a candidate");
+        }
+    });
+    test("direction: perpendicular movements never open a candidate", [&] {
+        const Vec3 d = unitOf({0, .3f, 1.f});
+        const QuickProfile profile = practiceFor(d);
+        const Vec3 p1 = perpendicularTo(d);
+        const Vec3 p2 = unitOf({d[1] * p1[2] - d[2] * p1[1], d[2] * p1[0] - d[0] * p1[2],
+                                d[0] * p1[1] - d[1] * p1[0]});
+        for (const Vec3& dir : {p1, p2, Vec3{-p1[0], -p1[1], -p1[2]}, Vec3{-p2[0], -p2[1], -p2[2]}}) {
+            Run run(profile);
+            run.quiet(800);
+            Shape s;
+            s.dir = dir;
+            s.excursionDeg = 22.f;
+            run.perform(s, 800);
+            require(run.clicks == 0 && run.rec.candidates == 0, "a perpendicular movement opened a candidate");
+            require(run.rec.suppressedMs == 0, "pointing must not be suppressed for a perpendicular move");
+        }
+    });
+    test("direction: angular boundary cases follow the validated tolerance", [&] {
+        const Vec3 d = unitOf({.3f, .1f, 1.f});
+        const QuickProfile profile = practiceFor(d);
+        auto clicksAt = [&](float phi, float toleranceDeg) {
+            QuickSettings settings;
+            settings.directionToleranceDeg = toleranceDeg;
+            Run run(profile, settings);
+            run.quiet(800);
+            Shape s;
+            s.dir = rotated(profile.direction, phi);
+            run.perform(s, 800);
+            return std::pair<unsigned, unsigned>{run.clicks, run.rec.candidates};
+        };
+        // default tolerance 30 degrees
+        for (float phi : {0.f, 10.f, 20.f, 25.f}) {
+            require(clicksAt(phi, 30.f).first == 1, "a gesture inside the tolerance was missed");
+        }
+        for (float phi : {38.f, 45.f, 70.f, 90.f, 135.f}) {
+            const auto r = clicksAt(phi, 30.f);
+            require(r.first == 0 && r.second == 0, "a gesture beyond the tolerance opened a candidate");
+        }
+        // the boundary moves with the setting, within its bounds
+        require(clicksAt(22.f, 15.f).second == 0, "22 degrees must be outside a 15 degree tolerance");
+        require(clicksAt(22.f, 45.f).first == 1, "22 degrees must be inside a 45 degree tolerance");
+        require(clicksAt(50.f, 60.f).second >= 1, "50 degrees must open a candidate at the 60 degree bound");
+        require(QuickSettings{1.f, .35f, 10.f}.valid() && QuickSettings{1.f, .35f, 60.f}.valid(),
+                "bounds are inclusive");
+        require(!QuickSettings{1.f, .35f, 9.f}.valid() && !QuickSettings{1.f, .35f, 61.f}.valid() &&
+                    !QuickSettings{1.f, .35f, NAN}.valid(),
+                "an out-of-range angle was accepted");
+    });
+    test("direction: deviation after the candidate began cancels it without a click", [&] {
+        const QuickProfile profile = practiceFor(unitOf({.1f, 0, 1.f}));
+        auto runWith = [&](const Vec3& drift) {
+            Run run(profile);
+            run.quiet(800);
+            Shape s;
+            s.dir = profile.direction;
+            s.drift = drift;
+            run.perform(s, 1500);
+            return std::pair<unsigned, QuickReject>{run.clicks, run.rec.lastReject};
+        };
+        const Vec3 p = perpendicularTo(profile.direction);
+        const auto r = runWith({p[0] * 25.f, p[1] * 25.f, p[2] * 25.f});
+        require(r.first == 0 && r.second == QuickReject::CrossAxis, "a drifting gesture must be cancelled");
+        // the candidate is closed at once: the recognizer is not suppressing any more
+        Run run(profile);
+        run.quiet(800);
+        Shape s;
+        s.dir = profile.direction;
+        s.drift = {p[0] * 40.f, p[1] * 40.f, p[2] * 40.f};
+        bool sawOpen = false;
+        uint32_t cancelledAt = 0;
+        for (unsigned t = 0; t <= s.ms; t += 10) {
+            run.feed(rateAt(s, float(t)));
+            sawOpen = sawOpen || run.rec.suppressing();
+            if (sawOpen && !run.rec.suppressing() && cancelledAt == 0) {
+                cancelledAt = run.sim.now;
+            }
+        }
+        require(sawOpen && cancelledAt != 0, "the candidate should have opened and then been cancelled early");
+        require(cancelledAt < run.sim.now - 100, "cancelled only at the end instead of at the deviation");
+        require(run.clicks == 0, "clicked after excessive deviation");
+    });
+    test("direction: the status reports the designated direction and tolerance", [&] {
+        const Vec3 d = unitOf({0, .2f, 1.f});
+        Practice p([&](unsigned) {
+            Shape s;
+            s.dir = d;
+            return s;
+        });
+        p.practice.begin(p.sim.now);
+        require(p.until(QuickPhase::Preview, 120000), "preview");
+        const QuickStatus st = p.practice.status(p.sim.now);
+        require(st.designated && dot(st.direction, d) > .97f, "direction not reported in the preview");
+        require(std::abs(st.directionToleranceDeg - 30.f) < .01f, "tolerance not reported");
+        char buffer[quickJsonCapacity];
+        const size_t n = quickJson(buffer, sizeof buffer, st);
+        require(n > 100 && n < quickJsonCapacity * 3 / 4, "length headroom");
+        require(std::strstr(buffer, "\"designated\":true") && std::strstr(buffer, "\"direction\":[") &&
+                    std::strstr(buffer, "\"directionTolerance\":30"),
+                "direction fields missing from the JSON");
+        require(!std::strstr(buffer, "nan") && !std::strstr(buffer, "inf"), "non-finite token");
+        QuickStatus none;
+        quickJson(buffer, sizeof buffer, none);
+        require(std::strstr(buffer, "\"designated\":false"), "no direction before a practice");
     });
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
