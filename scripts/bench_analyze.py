@@ -74,6 +74,9 @@ def collect(lines):
             data["regs"].append(fields)
         elif family == "DIAG" and stage == "button":
             if "burst" in fields:
+                for key in ("startUs", "spanUs", "edges"):
+                    if key in fields and number(fields[key]) is not None:
+                        fields[key] = int(number(fields[key]))
                 data["button"]["burstList"].append(fields)
             elif "gateToggle" in fields:
                 data["button"]["toggleList"].append(fields)
@@ -87,6 +90,41 @@ def collect(lines):
             elif stage == "warn":
                 data["ble"]["warnings"].append(",".join(fields) or "warning")
     return data
+
+
+def simulate_gate(bursts, debounce_us=30000):
+    """Apply the momentary enable-gate rules to observed press/release bursts (list of dicts with
+    kind, startUs, spanUs). Returns (toggles, presses, ignored). Assumes the pin was idle at the start.
+    Rules: enable needs the press held for the debounce window; the next press disables at its first
+    edge; a stable release (the debounce window with no press) is needed between accepted presses."""
+    latched = False
+    armed = True
+    toggles = presses = ignored = 0
+    ordered = [b for b in bursts if b.get("startUs") is not None]
+    last_release_end = None
+    for index, burst in enumerate(ordered):
+        if burst.get("kind") == "release":
+            last_release_end = (burst["startUs"] + burst["spanUs"]) & 0xFFFFFFFF
+            continue
+        presses += 1
+        if not armed and last_release_end is not None:
+            armed = ((burst["startUs"] - last_release_end) & 0xFFFFFFFF) >= debounce_us
+        if not armed:
+            ignored += 1
+            continue
+        following = ordered[index + 1] if index + 1 < len(ordered) else None
+        held = (
+            ((following["startUs"] - burst["startUs"]) & 0xFFFFFFFF)
+            if following is not None and following.get("kind") == "release"
+            else float("inf")
+        )
+        if latched:
+            latched, armed = False, False
+            toggles += 1
+        elif held >= debounce_us:
+            latched, armed = True, False
+            toggles += 1
+    return toggles, presses, ignored
 
 
 def check(name, status, detail):
@@ -316,6 +354,23 @@ def judge(data):
             )
         )
         toggles = int(number(button.get("gateToggles"), 0))
+        if bursts and all(isinstance(b.get("startUs"), int) for b in bursts):
+            expected, seen, ignored = simulate_gate(bursts)
+            out.append(
+                check(
+                    "gate toggles match the rules applied to the observed presses",
+                    "PASS" if expected == toggles else "FAIL",
+                    f"reported {toggles}, rules predict {expected} from {seen} presses ({ignored} ignored)",
+                )
+            )
+        elif len(bursts) >= 64:
+            out.append(
+                check(
+                    "burst list may be truncated (old log format)",
+                    "WARN",
+                    f"{len(bursts)} bursts listed; the press count cannot be checked against {toggles} toggles",
+                )
+            )
         out.append(
             check(
                 "the real gate toggled once per press that lasted 30 ms or more",

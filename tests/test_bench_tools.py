@@ -150,6 +150,51 @@ class Analysis(unittest.TestCase):
             "raw accel responds", [c["name"] for c in ANALYZE.analyze_text(GOOD + sample)["checks"]]
         )
 
+    def burst_log(self, presses, toggles):
+        """presses: list of (start_ms, held_ms). Builds button burst lines plus the summary."""
+        lines = ["DIAG,button,idleLevel=1,expected=1,note=x"]
+        n = 0
+        for start, held in presses:
+            n += 1
+            lines.append(
+                f"DIAG,button,burst={n},kind=press,edges=1,spanUs=0,startUs={start * 1000}"
+            )
+            n += 1
+            lines.append(
+                f"DIAG,button,burst={n},kind=release,edges=3,spanUs=200,startUs={(start + held) * 1000}"
+            )
+        lines.append(
+            f"DIAG,button,edges={2 * len(presses)},droppedEdges=0,bursts={n},gateToggles={toggles},latchedAtEnd=0"
+        )
+        return GOOD.replace(BUTTON, "\n".join(lines) + "\n")
+
+    def test_gate_toggles_are_checked_against_the_observed_presses(self):
+        name = "gate toggles match the rules"
+        three = [(1000, 200), (2000, 200), (3000, 200)]
+        self.assertEqual(status_of(self.burst_log(three, 3), name), "PASS")
+        self.assertEqual(status_of(self.burst_log(three, 5), name), "FAIL", "extra toggles")
+        self.assertEqual(status_of(self.burst_log(three, 2), name), "FAIL", "missed toggles")
+        # a first press shorter than the debounce window enables nothing; the next press then enables
+        short_first = [(1000, 10), (2000, 200)]
+        self.assertEqual(status_of(self.burst_log(short_first, 1), name), "PASS")
+        self.assertEqual(status_of(self.burst_log(short_first, 2), name), "FAIL")
+        # a press 10 ms after the previous release has no stable release before it and is ignored
+        chatter = [(1000, 200), (1210, 200)]
+        self.assertEqual(status_of(self.burst_log(chatter, 1), name), "PASS")
+
+    def test_old_logs_with_a_full_burst_list_warn_that_they_may_be_truncated(self):
+        old = "\n".join(
+            f"DIAG,button,burst={i},kind={'press' if i % 2 else 'release'},edges=1,spanUs=0"
+            for i in range(1, 65)
+        )
+        text = GOOD.replace(
+            BUTTON,
+            "DIAG,button,idleLevel=1,expected=1,note=x\n"
+            + old
+            + "\nDIAG,button,edges=144,droppedEdges=0,bursts=64,gateToggles=49,latchedAtEnd=1\n",
+        )
+        self.assertEqual(status_of(text, "burst list may be truncated"), "WARN")
+
     def test_garbage_and_truncated_lines_do_not_crash(self):
         noisy = (
             "boot junk \x00\x01\nDIAG,imu,gyroMeanDps=a/b/c\nDIAG,\nBLE,state\nrst:0x1 (POWERON)\n"

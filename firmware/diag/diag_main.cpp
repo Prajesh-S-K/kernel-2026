@@ -342,13 +342,15 @@ void button(unsigned seconds) {
                           static_cast<unsigned long>(millis()));
         }
     }
-    Burst bursts[64];
+    // Static (not stack) storage: every recorded edge could be its own burst.
+    static Burst bursts[256];
     const size_t count =
-        nodx::diag::groupBursts(edgeLog.data(), edgeLog.size(), kQuietUs, bursts, 64);
+        nodx::diag::groupBursts(edgeLog.data(), edgeLog.size(), kQuietUs, bursts, 256);
     for (size_t i = 0; i < count; ++i) {
-        Serial.printf("DIAG,button,burst=%u,kind=%s,edges=%u,spanUs=%lu\n", unsigned(i + 1),
-                      bursts[i].settledLevel ? "release" : "press", bursts[i].edges,
-                      static_cast<unsigned long>(bursts[i].spanUs));
+        Serial.printf("DIAG,button,burst=%u,kind=%s,edges=%u,spanUs=%lu,startUs=%lu\n",
+                      unsigned(i + 1), bursts[i].settledLevel ? "release" : "press",
+                      bursts[i].edges, static_cast<unsigned long>(bursts[i].spanUs),
+                      static_cast<unsigned long>(bursts[i].startUs));
     }
     Serial.printf("DIAG,button,edges=%u,droppedEdges=%u,bursts=%u,gateToggles=%u,latchedAtEnd=%d\n",
                   unsigned(edgeLog.size()), unsigned(edgeLog.dropped()), unsigned(count), toggles,
