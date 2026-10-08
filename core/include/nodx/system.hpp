@@ -1,5 +1,6 @@
 #pragma once
 #include "calibration.hpp"
+#include "actions.hpp"
 #include "clickgesture.hpp"
 #include "quickgesture.hpp"
 #include "fault.hpp"
@@ -156,6 +157,18 @@ public:
     bool quickGestureEnabled() const {
         return uncal_ && quickEnabled_;
     }
+    // EXPERIMENTAL dwell action palette (RAM only, off at every start and every stop): one dwell
+    // duration selects among Left/Right/Double/Drag/Scroll/Stop. Needs a running session; turns dwell
+    // clicking and both gesture recognizers OFF (and they turn it off). A palette hover report comes
+    // from the companion page; while the pointer is over the palette a completed dwell selects a control
+    // and never clicks. Leaving the palette clears and re-arms the dwell.
+    bool setActionPalette(bool on, uint32_t now);
+    bool setActionHover(PaletteTarget target, uint32_t now);
+    bool actionPaletteEnabled() const {
+        return uncal_ && actionsEnabled_;
+    }
+    const char* actionBlocker() const;
+    ActionsStatus actionsStatus(uint32_t now) const;
     bool uncalibratedDwell() const {
         return uncal_ && uncalDwell_;
     }
@@ -238,6 +251,11 @@ private:
     bool quickReady_ = false, quickConfiguredFrame_ = false, quickEnabled_ = false;
     bool quickTrainingConfigured_ = false;
     bool uncalDwell_ = false;
+    // dwell action palette (RAM only; cleared by every stop or fault)
+    ActionPalette palette_;
+    bool actionsEnabled_ = false;
+    PaletteTarget hoverSeen_ = PaletteTarget::None;
+    int actionsWheel_ = 0;
     uint32_t uncalDwellMs_ = start::uncalDwellMs;
     float uncalDwellTolerance_ = start::uncalDwellTolerance;
     uint32_t uncalClicks_ = 0;
@@ -254,6 +272,7 @@ private:
     bool startSession(uint32_t now, bool configured);
     void enterSafe(FaultCode fault, uint32_t now);
     void resetInteraction(uint32_t now);
+    void releaseHeldButtons(uint32_t now);
     bool emitStationary();
     void stop(SystemState next, uint32_t now);
     void advanceCalibration(const MotionSample& mapped, uint32_t now);

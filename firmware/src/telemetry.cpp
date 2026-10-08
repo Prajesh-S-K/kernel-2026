@@ -117,6 +117,9 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     static char click[clickJsonCapacity];
     const size_t clickLength = clickJson(click, sizeof(click), s.clickStatus(now));
     append(buffer, sizeof(buffer), used, ",\"click\":%s", clickLength ? click : "{}");
+    static char actions[actionsJsonCapacity];
+    const size_t actionsLength = actionsJson(actions, sizeof(actions), s.actionsStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"actions\":%s", actionsLength ? actions : "{}");
     static char quick[quickJsonCapacity];
     const size_t quickLength = quickJson(quick, sizeof(quick), s.quickStatus(now));
     append(buffer, sizeof(buffer), used, ",\"quick\":%s", quickLength ? quick : "{}");

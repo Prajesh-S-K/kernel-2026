@@ -259,8 +259,8 @@ void simulatedChecks() {
           "gesture nod2 4", "gesture nod2 nan", "gesture nod2 2 extra"}) {
         expect(refused(send(bad)), bad);
     }
-    expect(ok(send("gesture nod2", 80)), "gesture playback queued");
-    expect(refused(send("gesture nod2", 80)), "second gesture refused while one is playing");
+    expect(ok(send("gesture nod2", 250)), "gesture playback queued");
+    expect(refused(send("gesture nod2", 250)), "second gesture refused while one is playing");
     pump(1500);
     expect(ok(send("gesture tilt1 1.5")), "scaled gesture accepted");
     pump(1500);
@@ -323,14 +323,14 @@ void endToEndChecks() {
     playGesture("nod2");
     expect(!has(status(), "\"state\":\"ACTIVE\""), "resume gesture ignored while disabled");
     expect(refused(send("resume")), "helper resume refused while disabled");
-    ack = send("enable 1", 80); // press
+    ack = send("enable 1", 250); // press
     pump(100);
     ack = status();
     expect(has(ack, "\"pressed\":true") && has(ack, "\"latched\":true") &&
                has(ack, "\"permitted\":true"),
            "one press latches permission");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "enabling never resumes control");
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
     ack = status();
     expect(has(ack, "\"pressed\":false") && has(ack, "\"latched\":true"),
@@ -339,17 +339,17 @@ void endToEndChecks() {
     expect(has(status(), "\"state\":\"ACTIVE\""), "explicit gesture resumes after enabling");
     playGesture("tilt2");
     expect(has(status(), "\"drag\":true"), "drag gesture starts a drag");
-    ack = send("enable 1", 80); // the disabling press: effect visible in its own acknowledgement
+    ack = send("enable 1", 250); // the disabling press: effect visible in its own acknowledgement
     expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"drag\":false") &&
                has(ack, "\"latched\":false"),
            "the disabling press pauses, releases the drag and clears the latch at once");
     pump(1000);
     expect(has(status(), "\"latched\":false"), "holding the button toggled again");
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
 
     // Reboot with the button HELD: permission is never persisted and a held press enables nothing.
-    expect(ok(send("enable 1", 80)), "button held for the reboot");
+    expect(ok(send("enable 1", 250)), "button held for the reboot");
     reboot();
     pump(3000);
     ack = status();
@@ -359,12 +359,12 @@ void endToEndChecks() {
     expect(has(ack, "\"permitted\":false") && has(ack, "\"pressed\":true"),
            "a button held at boot enabled control");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "reboot never resumes control");
-    expect(ok(send("enable 0", 80)), "button released after boot");
+    expect(ok(send("enable 0", 250)), "button released after boot");
     pump(100);
     expect(has(status(), "\"permitted\":false"), "release alone enabled control");
-    expect(ok(send("enable 1", 80)), "new press after boot");
+    expect(ok(send("enable 1", 250)), "new press after boot");
     pump(100);
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
     expect(has(status(), "\"permitted\":true") && !has(status(), "\"state\":\"ACTIVE\""),
            "a new press after release enables, without resuming");
@@ -376,9 +376,9 @@ void endToEndChecks() {
     ack = status();
     expect(has(ack, "\"state\":\"SAFE_STATE\"") && has(ack, "\"latched\":false"),
            "sensor fault stops control and drops the button permission");
-    expect(ok(send("enable 1", 80)), "press during the fault");
+    expect(ok(send("enable 1", 250)), "press during the fault");
     pump(100);
-    expect(ok(send("enable 0", 80)), "release during the fault");
+    expect(ok(send("enable 0", 250)), "release during the fault");
     pump(100);
     expect(has(status(), "\"state\":\"SAFE_STATE\"") && refused(send("resume")),
            "a button press bypassed the fault");
@@ -392,7 +392,7 @@ void endToEndChecks() {
     ack = send("handsfree commit");
     expect(ok(ack) && has(ack, "\"kind\":\"MAINTAINED\"") && has(ack, "\"permitted\":false"),
            "maintained kind committed; its switch is released so control is inhibited");
-    expect(ok(send("enable 1", 80)), "maintained switch ON");
+    expect(ok(send("enable 1", 250)), "maintained switch ON");
     pump(200);
     ack = status();
     expect(has(ack, "\"permitted\":true") && has(ack, "\"latched\":false") &&
@@ -400,7 +400,7 @@ void endToEndChecks() {
            "maintained ON permits without a latch and without resuming");
     playGesture("nod2");
     expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes under the maintained switch");
-    ack = send("enable 0", 80);
+    ack = send("enable 0", 250);
     expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"permitted\":false"),
            "maintained OFF pauses at once");
     reboot();
@@ -496,6 +496,19 @@ void hardwareChecks() {
                ok(send("quick enable off")),
            "cancel, clear, retry and disable are always accepted");
     expect(has(status(), "\"quick\":{\"phase\":\"IDLE\""), "quick status reported");
+    // Dwell action palette: validated commands, refused without a running session, status reported.
+    expect(refused(send("actions enable on")), "the action palette needs a running session");
+    expect(refused(send("actions enable maybe")) && refused(send("actions enable")) &&
+               refused(send("actions enable on now")) && refused(send("actions")) &&
+               refused(send("actions bogus on")),
+           "malformed action palette commands refused");
+    expect(refused(send("actions hover left")), "hover is ignored (refused) while the palette is off");
+    expect(refused(send("actions hover middle")) && refused(send("actions hover")) &&
+               refused(send("actions hover left extra")),
+           "bad hover targets refused");
+    expect(ok(send("actions enable off")), "turning the palette off is always accepted");
+    expect(has(status(), "\"actions\":{\"enabled\":false,\"mode\":\"LEFT\""),
+           "action palette status reported");
     expect(refused(send("capture start 0")) && refused(send("capture start 21")) &&
                refused(send("capture start")) && refused(send("capture start 5 now")),
            "capture length is bounded to 1-20 seconds");

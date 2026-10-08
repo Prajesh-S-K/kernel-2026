@@ -6,6 +6,9 @@ namespace nodx {
 struct Command {
     float dx = 0, dy = 0, wheel = 0;
     bool down = false, pulse = false;
+    // A pulse is one primary press/release pair unless `right` (the secondary button) or `twice` (two
+    // pairs back to back, for a double-click) is set. Used only by the dwell action palette demo.
+    bool right = false, twice = false;
 };
 class InteractionEngine {
 public:
@@ -16,6 +19,7 @@ public:
 struct Report {
     int8_t dx = 0, dy = 0, wheel = 0;
     bool down = false;
+    bool right = false; // secondary button (bit 1 of the existing 3-button descriptor)
 };
 class SafetyManager {
 public:

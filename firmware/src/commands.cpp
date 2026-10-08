@@ -174,6 +174,19 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "actions") {
+        std::string verb, value;
+        input >> verb >> value;
+        if (verb == "enable") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setActionPalette(value == "on", now);
+        } else if (verb == "hover") {
+            nodx::PaletteTarget target;
+            ok = nodx::parsePaletteTarget(value.c_str(), target) && (input >> std::ws).eof() &&
+                 system.setActionHover(target, now);
+        } else {
+            ok = false;
+        }
     } else if (ok && operation == "click") {
         std::string verb, value;
         input >> verb;

@@ -52,7 +52,10 @@ export function uncalView(device) {
   const dwellOn = active && u.dwell.enabled;
   const gestureOn = active && device?.click?.enabled === true;
   const quickOn = active && device?.quick?.enabled === true;
-  const kind = quickOn
+  const actionsOn = active && device?.actions?.enabled === true;
+  const kind = actionsOn
+    ? 'DWELL ACTION PALETTE'
+    : quickOn
     ? 'EXPERIMENTAL QUICK GESTURE CLICK'
     : dwellOn && gestureOn
       ? 'DWELL + GESTURE CLICK'

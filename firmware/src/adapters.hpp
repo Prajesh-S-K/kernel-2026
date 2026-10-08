@@ -230,12 +230,12 @@ public:
             pendingX_ = pendingY_ = pendingWheel_ = 0;
             return false;
         }
-        const bool zero = r.dx == 0 && r.dy == 0 && r.wheel == 0 && !r.down;
+        const bool zero = r.dx == 0 && r.dy == 0 && r.wheel == 0 && !r.down && !r.right;
         const uint32_t now = millis();
         pendingX_ += r.dx;
         pendingY_ += r.dy;
         pendingWheel_ += r.wheel;
-        if (zero || r.down != lastDown_) {
+        if (zero || r.down != lastDown_ || r.right != lastRight_) {
             if (zero) {
                 pendingX_ = pendingY_ = pendingWheel_ = 0; // a stop never replays held-back motion
             }
@@ -243,16 +243,17 @@ public:
             return true; // held back; added to the next notification
         }
         auto clamp = [](int v) { return uint8_t(int8_t(v < -127 ? -127 : v > 127 ? 127 : v)); };
-        uint8_t bytes[] = {uint8_t(r.down ? 1 : 0), clamp(pendingX_), clamp(pendingY_),
+        uint8_t bytes[] = {uint8_t((r.down ? 1 : 0) | (r.right ? 2 : 0)), clamp(pendingX_), clamp(pendingY_),
                            clamp(pendingWheel_)};
         pendingX_ = pendingY_ = pendingWheel_ = 0;
         lastDown_ = r.down;
+        lastRight_ = r.right;
         lastNotifyMs_ = now;
         return input->notify(bytes, sizeof(bytes));
     }
 
 private:
     int pendingX_ = 0, pendingY_ = 0, pendingWheel_ = 0;
-    bool lastDown_ = false;
+    bool lastDown_ = false, lastRight_ = false;
     uint32_t lastNotifyMs_ = 0;
 };

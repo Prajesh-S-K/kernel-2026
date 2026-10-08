@@ -51,6 +51,10 @@ constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 // Dwell clicking in the uncalibrated demo (explicitly enabled, RAM only, adjustable). The distance unit
 // is accumulated OUTGOING HID movement; host pointer acceleration means it is not verified screen
 // pixels. The dwell duration is the progress phase; the selection manager's 250 ms arming precedes it.
+// Dwell action palette demo (EXPERIMENTAL START values; RAM only, never saved).
+constexpr float actionScrollGain = .35f;        // wheel units per second per deg/s beyond the neutral zone
+constexpr float actionScrollNeutral = 3.f;      // deg/s of vertical movement that is still "neutral"
+constexpr uint32_t actionHoverTimeoutMs = 3000; // a palette hover report not refreshed this long expires
 constexpr uint32_t uncalDwellMs = 1200;
 constexpr float uncalDwellTolerance = 8.f;
 // One Euro smoothing for configured control. EXPERIMENTAL START values: chosen on synthetic recordings

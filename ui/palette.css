@@ -1,0 +1,142 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1114;
+  --panel: #152127;
+  --line: #3b525c;
+  --text: #f2f7f8;
+  --muted: #a9bcc3;
+  --accent: #2fd3b0;
+  --warn: #ffb020;
+  --stop: #ff5a5f;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    18px/1.35 system-ui,
+    sans-serif;
+}
+main {
+  padding: 14px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: 3px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.banner strong {
+  font-size: 30px;
+  letter-spacing: 0.04em;
+}
+.banner span {
+  color: var(--muted);
+  font-size: 16px;
+}
+.banner.ready {
+  border-color: var(--accent);
+}
+.banner.armed,
+.banner.scrolling {
+  border-color: var(--warn);
+}
+.banner.dragging {
+  border-color: var(--stop);
+  background: #3a1517;
+}
+.banner.dragging strong {
+  font-size: 44px;
+  color: var(--stop);
+}
+.banner.scrolling strong {
+  color: var(--warn);
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.control {
+  position: relative;
+  overflow: hidden;
+  min-height: 118px;
+  padding: 14px;
+  border: 3px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  user-select: none;
+  cursor: default;
+}
+.control strong {
+  display: block;
+  font-size: 26px;
+}
+.control small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.control .fill {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 10px;
+  width: 0;
+  background: var(--accent);
+}
+.control.selected {
+  border-color: var(--accent);
+  background: #123329;
+}
+.control.selected strong::after {
+  content: ' ✓';
+  color: var(--accent);
+}
+.control.hovered {
+  border-color: #ffffff;
+}
+.control.active {
+  border-color: var(--stop);
+}
+.control.exit {
+  border-color: var(--warn);
+  background: #3a2b0c;
+}
+.control.exit .fill {
+  background: var(--warn);
+}
+.control.stop {
+  grid-column: 1 / -1;
+  border-color: var(--stop);
+  background: #2b1517;
+  min-height: 104px;
+}
+.control.stop .fill {
+  background: var(--stop);
+}
+.note {
+  color: var(--muted);
+  font-size: 13px;
+}
+@media (max-width: 380px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

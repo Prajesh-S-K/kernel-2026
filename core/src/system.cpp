@@ -82,6 +82,8 @@ void System::resetInteraction(uint32_t now) {
     hid_.reset();
     diagnostics_.motion = {};
     dragging_ = false;
+    palette_.reset(); // pending actions, a held drag and a scroll never survive a reset
+    hoverSeen_ = PaletteTarget::None;
     recognizer_.reset(now);
 }
 
@@ -116,6 +118,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     configured_ = false;
     clickEnabled_ = false;
     quickEnabled_ = false;
+    actionsEnabled_ = false;
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
     uncalDwell_ = false;
@@ -136,6 +139,7 @@ void System::stop(SystemState next, uint32_t now) {
     configured_ = false;
     clickEnabled_ = false;
     quickEnabled_ = false;
+    actionsEnabled_ = false;
     uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
     uncalDwell_ = false; // dwell clicking never outlives the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
@@ -393,7 +397,47 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     const bool outputAllowed = active && state_ == SystemState::Active;
     Selection selected;
     const bool dwellClicking = uncal_ && uncalDwell_ && !demoMovementOnly_;
-    if (dwellClicking && outputAllowed) {
+    const bool actionsActive = uncal_ && actionsEnabled_ && !demoMovementOnly_;
+    ActionOutput actionOut;
+    if (actionsActive && outputAllowed) {
+        // Dwell action palette: the SelectionManager times the one dwell; the palette decides what a
+        // completed dwell means. Over the palette it selects a control and is never an OS click.
+        const PaletteTarget over = palette_.hover(now);
+        if (over != hoverSeen_) {
+            selection_.reset(false, now); // a fresh dwell that starts where the pointer now is
+            if (over == PaletteTarget::None) {
+                selection_.lockAt(x_, y_); // left the palette: cleared, re-armed only by real movement
+            }
+            hoverSeen_ = over;
+        }
+        bool completed = false;
+        if (palette_.scrollActive()) {
+            selection_.interrupt(); // scrolling is not selecting; the exit is timed by the palette
+        } else {
+            completed = selection_.update(false, x_, y_, true, false, control, now).pulse;
+        }
+        ActionInput in;
+        in.dwellPulse = completed;
+        in.verticalRate = (uncal_ && !configured_ && uncalReverseY_) ? -diagnostics_.motion.y
+                                                                     : diagnostics_.motion.y;
+        in.lateralRate = (uncal_ && !configured_ && uncalReverseX_) ? -diagnostics_.motion.x
+                                                                    : diagnostics_.motion.x;
+        in.dt = dtSeconds;
+        in.dwellMs = control.dwellMs;
+        actionOut = palette_.update(in, now);
+        if (actionOut.resetDwell) {
+            selection_.reset(false, now);
+        }
+        if (actionOut.lockAfter) {
+            selection_.lockAt(x_, y_);
+        }
+        selected = {};
+        selected.down = actionOut.down;
+        selected.pulse = actionOut.pulse;
+        if (actionOut.freezePointer) {
+            intent.dx = intent.dy = 0;
+        }
+    } else if (dwellClicking && outputAllowed) {
         // Explicitly enabled dwell in the uncalibrated demo: the normal selection manager with the
         // demo profile. No raw switch, no scrolling; hold/drag can never come out of it.
         if (recognizing) {
@@ -424,8 +468,14 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (movementOnly) {
         const float limit = uncal_ ? start::uncalDemoMaxStep : start::demoMaxStep;
         command.down = false;
-        command.pulse = command.pulse && (dwellClicking || gestureClicking);
+        command.pulse = command.pulse && (dwellClicking || gestureClicking || actionsActive);
         command.wheel = 0;
+        if (actionsActive) {
+            command.down = actionOut.down && outputAllowed; // a drag holds the primary button
+            command.right = actionOut.right;
+            command.twice = actionOut.twice;
+            command.wheel = actionOut.wheel; // the gate and the HIDManager bound it
+        }
         command.dx = std::clamp(command.dx, -limit, limit);
         command.dy = std::clamp(command.dy, -limit, limit);
     }
@@ -436,8 +486,11 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         hid_.reset(); // no fractional movement survives a suppressed or inactive period
     }
     const bool delivered = hid_.emit(safeCommand);
-    if ((dwellClicking || gestureClicking) && safeCommand.pulse) {
+    if ((dwellClicking || gestureClicking || actionsActive) && safeCommand.pulse) {
         ++uncalClicks_;
+    }
+    if (actionsActive) {
+        actionsWheel_ += hid_.last.wheel < 0 ? -hid_.last.wheel : hid_.last.wheel; // notches sent, either way
     }
     if (safety_.calculationFault) {
         enterSafe(FaultCode::Calculation, now);
@@ -455,6 +508,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         }
     }
 
+    if (actionOut.stop && state_ == SystemState::Active) {
+        stopUncalibratedDemo("stopped from the action palette; explicit restart required");
+    }
     if (state_ == SystemState::SafeState) {
         diagnostics_.cursor = "SAFE_STATE";
     } else if (state_ == SystemState::Paused) {
@@ -463,6 +519,10 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         diagnostics_.cursor = "WARNING";
     } else if (recognizing) {
         diagnostics_.cursor = "GESTURE";
+    } else if (actionsActive && palette_.dragging()) {
+        diagnostics_.cursor = "DRAGGING";
+    } else if (actionsActive && palette_.scrollActive()) {
+        diagnostics_.cursor = "SCROLL_ACTIVE";
     } else if (selected.pulse) {
         diagnostics_.cursor = "CLICK";
     } else if (selected.down) {
@@ -780,7 +840,7 @@ UserProfile System::uncalibratedDemoProfile() const {
                      start::uncalDemoGain};
         demo.alpha = start::uncalDemoAlpha;
     }
-    demo.dwellEnabled = uncalDwell_; // movement-only unless dwell clicking was explicitly enabled
+    demo.dwellEnabled = uncalDwell_ || actionsEnabled_; // movement-only unless dwell clicking was explicitly enabled
     demo.dwellMs = uncalDwellMs_;
     demo.dwellTolerance = uncalDwellTolerance_;
     demo.scrollEnabled = false;
@@ -850,6 +910,9 @@ bool System::startSession(uint32_t now, bool configured) {
     uncalDwell_ = false; // every start is movement-only until dwell is enabled again
     clickEnabled_ = false; // ... and until the gesture click is enabled again
     quickEnabled_ = false; // ... or the quick gesture click
+    actionsEnabled_ = false; // ... or the dwell action palette
+    palette_.clearCounters();
+    actionsWheel_ = 0;
     configured_ = configured;
     uncalProfile_ = uncalibratedDemoProfile();
     if (!emitStationary()) {
@@ -955,6 +1018,10 @@ bool System::setClickGesture(bool on, uint32_t now) {
     clickRec_.configure(clickTemplate_); // needs a neutral stretch before it arms
     clickRec_.reset(now);
     clickEnabled_ = true;
+    if (actionsEnabled_) {
+        actionsEnabled_ = false; // ... and not together with the action palette
+        releaseHeldButtons(now);
+    }
     quickEnabled_ = false; // one click recognizer at a time
     if (uncalDwell_) {
         uncalDwell_ = false; // ... and not together with dwell
@@ -1087,6 +1154,10 @@ bool System::setQuickGesture(bool on, uint32_t now) {
     }
     uncalDwell_ = false; // mutually exclusive with dwell and with the trained gesture
     clickEnabled_ = false;
+    if (actionsEnabled_) {
+        actionsEnabled_ = false; // ... and with the action palette
+        releaseHeldButtons(now);
+    }
     uncalProfile_ = uncalibratedDemoProfile();
     selection_.reset(false, now);
     quickRec_.configure(quickProfile_, quickSettings_);
@@ -1305,6 +1376,10 @@ bool System::setUncalibratedDwell(bool on, uint32_t now) {
     if (on) {
         quickEnabled_ = false; // dwell and the recognizers are mutually exclusive
         clickEnabled_ = false;
+        if (actionsEnabled_) {
+            actionsEnabled_ = false; // ... and the action palette has its own dwell
+            releaseHeldButtons(now);
+        }
     }
     uncalProfile_ = uncalibratedDemoProfile();
     selection_.reset(false, now); // fresh dwell: progress 0, nothing carried over
@@ -1329,6 +1404,89 @@ bool System::setUncalibratedDwellSettings(uint32_t dwellMs, float tolerance) {
     return true;
 }
 
+void System::releaseHeldButtons(uint32_t now) {
+    const bool held = palette_.dragging();
+    palette_.reset();
+    hoverSeen_ = PaletteTarget::None;
+    if (held && state_ != SystemState::SafeState) {
+        // Switching modes while a drag holds the button: release it now, through the same final
+        // boundary. A failed release inhibits further output (transport fault, explicit restart).
+        if (!emitStationary()) {
+            enterSafe(FaultCode::Transport, now);
+        }
+    }
+}
+const char* System::actionBlocker() const {
+    if (!uncal_ || state_ != SystemState::Active) {
+        return "start the control session first";
+    }
+    return nullptr;
+}
+bool System::setActionPalette(bool on, uint32_t now) {
+    if (!on) {
+        if (actionsEnabled_) {
+            actionsEnabled_ = false;
+            uncalProfile_ = uncalibratedDemoProfile();
+            selection_.reset(false, now);
+            releaseHeldButtons(now);
+            diagnostics_.reason = "dwell action palette off";
+        }
+        return true;
+    }
+    if (const char* blocker = actionBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    uncalDwell_ = false; // competing recognizers and dwell clicking are off while it is on
+    clickEnabled_ = false;
+    quickEnabled_ = false;
+    actionsEnabled_ = true;
+    uncalProfile_ = uncalibratedDemoProfile();
+    palette_.reset();
+    hoverSeen_ = PaletteTarget::None;
+    selection_.reset(false, now);
+    diagnostics_.reason = "EXPERIMENTAL dwell action palette on; Left-click is selected";
+    return true;
+}
+bool System::setActionHover(PaletteTarget target, uint32_t now) {
+    if (!uncal_ || !actionsEnabled_) {
+        return false;
+    }
+    palette_.setHover(target, now);
+    return true;
+}
+ActionsStatus System::actionsStatus(uint32_t now) const {
+    ActionsStatus st;
+    st.enabled = uncal_ && actionsEnabled_;
+    const char* blocker = actionBlocker();
+    st.blocked = blocker ? blocker : "";
+    st.dwellMs = uncalDwellMs_;
+    st.tolerance = uncalDwellTolerance_;
+    st.neutral = start::actionScrollNeutral;
+    st.left = palette_.left;
+    st.right = palette_.right;
+    st.doubles = palette_.doubles;
+    st.dragStarts = palette_.dragStarts;
+    st.dragReleases = palette_.dragReleases;
+    st.scrollStarts = palette_.scrollStarts;
+    st.scrollExits = palette_.scrollExits;
+    st.selections = palette_.selections;
+    st.last = name(palette_.last);
+    st.wheelUnits = uint32_t(actionsWheel_);
+    if (st.enabled) {
+        const PaletteTarget over = palette_.hover(now);
+        st.mode = name(palette_.mode());
+        st.dragging = palette_.dragging();
+        st.scroll = name(palette_.scroll());
+        st.frozen = palette_.scrollActive();
+        st.hover = name(over);
+        st.inPalette = over != PaletteTarget::None;
+        st.dwellState = name(selection_.dwell);
+        st.dwellProgress = selection_.progress(lastTick_, uncalProfile_);
+        st.exitProgress = palette_.exitProgress(lastTick_, uncalDwellMs_);
+    }
+    return st;
+}
 float System::dwellProgress(uint32_t now) const {
     return selection_.progress(now, uncal_ ? uncalProfile_ : profile_);
 }

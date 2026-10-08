@@ -1307,3 +1307,14 @@ hr {
 .map-preview[hidden] {
   display: none;
 }
+
+/* The older trained-gesture recogniser stays collapsed and visually apart from the quick gesture. */
+.older-recognizer {
+  margin-top: 28px;
+  border-style: dashed;
+  opacity: 0.75;
+}
+.older-recognizer > summary {
+  cursor: pointer;
+  font-size: 0.85em;
+}

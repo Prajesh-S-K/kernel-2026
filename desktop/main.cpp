@@ -185,6 +185,9 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     char click[clickJsonCapacity];
     const size_t clickLength = clickJson(click, sizeof click, s.clickStatus(now));
     std::cout << ",\"click\":" << (clickLength ? click : "{}");
+    char actions[actionsJsonCapacity];
+    const size_t actionsLength = actionsJson(actions, sizeof actions, s.actionsStatus(now));
+    std::cout << ",\"actions\":" << (actionsLength ? actions : "{}");
     char quick[quickJsonCapacity];
     const size_t quickLength = quickJson(quick, sizeof quick, s.quickStatus(now));
     std::cout << ",\"quick\":" << (quickLength ? quick : "{}");
@@ -192,7 +195,11 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     for (size_t j = 0; j < hid.reports.size(); ++j) {
         const auto& r = hid.reports[j];
         std::cout << (j ? "," : "") << "[" << int(r.dx) << ',' << int(r.dy) << ',' << int(r.wheel)
-                  << ',' << (r.down ? 1 : 0) << ']';
+                  << ',' << (r.down ? 1 : 0);
+        if (r.right) {
+            std::cout << ",1"; // optional fifth element: the secondary button, present only when pressed
+        }
+        std::cout << ']';
     }
     std::cout << "]}" << std::endl;
     hid.reports.clear();
@@ -523,6 +530,19 @@ int main(int argc, char** argv) {
                     } else if (ok) {
                         sys.quickClear();
                     }
+                } else {
+                    ok = false;
+                }
+            } else if (op == "actions") {
+                std::string verb, value;
+                cmd >> verb >> value;
+                if (verb == "enable") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setActionPalette(value == "on", now);
+                } else if (verb == "hover") {
+                    PaletteTarget target;
+                    ok = parsePaletteTarget(value.c_str(), target) && (cmd >> std::ws).eof() &&
+                         sys.setActionHover(target, now);
                 } else {
                     ok = false;
                 }

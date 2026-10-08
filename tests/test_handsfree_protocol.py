@@ -339,6 +339,31 @@ class CommandValidation(HandsFreeCase):
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 SERVER.command_for(bad)
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "enable", "enabled": True}),
+            "actions enable on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "enable", "enabled": False}),
+            "actions enable off",
+        )
+        for target in ("none", "left", "right", "double", "drag", "scroll", "stop"):
+            self.assertEqual(
+                SERVER.command_for({"action": "actions", "op": "hover", "target": target}),
+                f"actions hover {target}",
+            )
+        for bad in (
+            {"action": "actions"},
+            {"action": "actions", "op": "enable"},
+            {"action": "actions", "op": "enable", "enabled": 1},
+            {"action": "actions", "op": "hover"},
+            {"action": "actions", "op": "hover", "target": "middle"},
+            {"action": "actions", "op": "hover", "target": "LEFT; stop"},
+            {"action": "actions", "op": "hover", "target": 3},
+            {"action": "actions", "op": "select", "target": "left"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
         for bad in (
             {"action": "click"},
             {"action": "click", "op": "train"},
@@ -952,6 +977,70 @@ class ReplayAndTrials(HandsFreeCase):
         self.assertEqual(post({**trial, "interactionMode": "OTHER"}), 400)
         self.assertEqual(post({**trial, "gestureInterruptions": -1}), 400)
         self.assertEqual(post({**trial, "gestureInterruptions": 1.5}), 400)
+
+
+def secondary(report):
+    # [dx, dy, wheel, primary] plus an optional fifth element, present only while the secondary
+    # (right) button is pressed.
+    return len(report) > 4 and bool(report[4])
+
+
+class ActionPaletteSimulatorTest(HandsFreeCase):
+    """The palette through the real simulator process: enable, select by hover dwell, click."""
+
+    def reports(self, response):
+        return response.get("reports", [])
+
+    def steps(self, count, vector="0 0 0 0 1 0 0"):
+        seen = []
+        remaining = count
+        while remaining > 0:
+            chunk = min(50, remaining)
+            response = self.send(f"step {chunk} {vector}")
+            seen.extend(self.reports(response))
+            remaining -= chunk
+        return response, seen
+
+    def test_palette_selection_never_clicks_and_a_target_dwell_clicks_once(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertFalse(self.send("actions hover left")["ok"], "hover accepted while off")
+        enabled = self.send("actions enable on")
+        self.assertTrue(enabled["ok"], enabled)
+        self.assertTrue(enabled["actions"]["enabled"])
+        self.assertEqual(enabled["actions"]["mode"], "LEFT")
+        # select Right by dwelling over its palette control: no OS click of any kind
+        self.assertTrue(self.send("actions hover right")["ok"])
+        response, seen = self.steps(170)
+        self.send("actions hover none")
+        self.assertEqual(
+            [r for r in seen if r[3] or secondary(r)], [], "a palette selection clicked"
+        )
+        self.assertEqual(response["actions"]["mode"], "RIGHT")
+        self.assertEqual(response["actions"]["selections"], 1)
+        # move on, then dwell on the target: exactly one right click, back to LEFT
+        self.steps(40, "40 0 0 0 1 0 0")
+        self.quiet(30)
+        response, seen = self.steps(170)
+        presses = [r for r in seen if secondary(r)]
+        self.assertEqual(len(presses), 1, seen)
+        self.assertFalse(any(r[3] for r in seen), "a primary press for a right click")
+        self.assertEqual(response["actions"]["mode"], "LEFT")
+        # the palette is cleared by a stop; a restart needs it enabled again
+        self.assertTrue(self.send("handsfree uncal stop")["ok"])
+        self.assertFalse(self.send("status")["actions"]["enabled"])
+
+    def test_stop_control_ends_the_session_by_dwell(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        self.assertTrue(self.send("actions hover stop")["ok"])
+        response, seen = self.steps(170)
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [])
+        self.assertNotEqual(response["state"], "ACTIVE")
+        self.assertFalse(response["actions"]["enabled"])
 
 
 if __name__ == "__main__":

@@ -158,6 +158,21 @@ def command_for(data):
                 command += f" {float(angle):.0f}"
             return command
         raise ValueError("Invalid quick gesture request")
+    if action == "actions":
+        operation = data.get("op")
+        if operation == "enable":
+            return "actions enable " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "hover" and data.get("target") in (
+            "none",
+            "left",
+            "right",
+            "double",
+            "drag",
+            "scroll",
+            "stop",
+        ):
+            return f"actions hover {data['target']}"
+        raise ValueError("Invalid action palette request")
     if action == "click":
         operation = data.get("op")
         if operation == "train" and data.get("frame") in ("fallback", "configured"):

@@ -6,6 +6,7 @@ import { createHandsFreeView } from './handsfree-view.js';
 import { mappingView } from './mapping.js';
 import { clickView } from './click.js';
 import { quickView } from './quick.js';
+import { PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
 import {
   BANNER,
   DWELL_NOTE,
@@ -218,6 +219,8 @@ function render(data, applyReports = true) {
   renderMapping(data);
   renderClick(data);
   renderQuick(data);
+  renderActions(data);
+  statusChannel?.postMessage(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -416,6 +419,34 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+const statusChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('nodx-status') : null;
+function renderActions(data) {
+  const view = panelView(data);
+  $('actionsPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  const a = view.a;
+  $('actionsTag').textContent = view.enabled ? 'ENABLED' : 'OFF';
+  $('actionsBanner').textContent = view.banner.text;
+  $('actionsDetail').textContent = view.banner.detail;
+  $('actionsEnable').disabled = !view.canEnable && !view.enabled;
+  $('actionsEnable').checked = view.enabled;
+  $('actionsStop').disabled = data.state !== 'ACTIVE';
+  $('actionsBar').style.width = `${Math.round((a.scroll === 'ACTIVE' ? a.exitProgress : a.dwell.progress) * 100)}%`;
+  for (const [id, value] of [
+    ['actionsMs', a.dwellMs],
+    ['actionsTol', a.tolerance],
+  ])
+    if (document.activeElement !== $(id) && value) $(id).value = value;
+  $('actionsNote').textContent = `${PALETTE_NOTE} ${SCROLL_NOTE}`;
+  $('actionsStats').textContent = view.stats;
+  $('actionsBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+  if (view.enabled) {
+    // exclusive with the other click modes: the device turns them off, the page shows it
+    $('clickEnable').checked = false;
+    $('quickEnable').checked = false;
+    $('uncalDwell').checked = false;
+  }
+}
 function renderQuick(data) {
   const view = quickView(data);
   $('quickPanel').hidden = !view.hardware;
@@ -451,6 +482,7 @@ function renderQuick(data) {
 }
 function renderClick(data) {
   const view = clickView(data);
+  $('olderClick').hidden = !view.hardware;
   $('clickPanel').hidden = !view.hardware;
   if (!view.hardware) return;
   $('clickTag').textContent = view.enabled ? 'ENABLED' : view.training ? 'TEACHING' : 'OFF';
@@ -567,6 +599,19 @@ for (const [id, extra] of [
   ['quickClear', { op: 'clear' }],
 ])
   $(id).onclick = () => action('quick', extra);
+$('actionsEnable').onchange = () =>
+  action('actions', { op: 'enable', enabled: $('actionsEnable').checked });
+$('actionsStop').onclick = () => action('control', { op: 'stop' });
+$('actionsApply').onclick = () =>
+  action('handsfree', {
+    op: 'uncaldwellset',
+    ms: Number($('actionsMs').value),
+    tolerance: Number($('actionsTol').value),
+  });
+$('actionsOpen').onclick = () => {
+  const opened = window.open('palette.html', 'nodxPalette', 'popup,width=420,height=700');
+  if (!opened) toast('The palette window was blocked: allow pop-ups for this page, then try again.');
+};
 $('quickEnable').onchange = () =>
   action('quick', { op: 'enable', enabled: $('quickEnable').checked });
 $('quickApply').onclick = () =>

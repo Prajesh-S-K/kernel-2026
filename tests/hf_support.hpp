@@ -28,7 +28,8 @@ public:
         return online;
     }
     bool send(const Report& r) override {
-        const bool releasing = !r.down && !reports.empty() && reports.back().down;
+        const bool releasing =
+            !r.down && !r.right && !reports.empty() && (reports.back().down || reports.back().right);
         reports.push_back(r);
         return !fail && !(failRelease && releasing);
     }

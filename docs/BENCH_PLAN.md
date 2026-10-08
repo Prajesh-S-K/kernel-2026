@@ -446,3 +446,53 @@ verified.
 * Integration drift: a gyro bias estimate error of about 2 deg/s still settles; 3 deg/s and more is rejected.
   The bias comes from the 1.5 s stillness (expected error far smaller on the bench sensor); hardware drift over
   the hour is unmeasured.
+
+## EXPERIMENTAL dwell action palette (software complete; hardware pending a firmware upload)
+Needs firmware newer than `49970b8` (the palette, the secondary-button report and the new status block are in
+the working tree, not flashed). Everything below is a prototype for an attended demonstration.
+
+What it is. One dwell (START 1200 ms + 250 ms arming, adjustable 500-5000 ms, tolerance 2-50) does everything.
+The companion's palette window (`palette.html`, opened from the "Dwell action palette" panel) shows six large
+controls: Left-click (default), Right-click, Double-click, Drag, Scroll, Stop. Hold the pointer still on a
+control to choose it; hold still on a target to act on it. No physical click is needed anywhere. It is a normal
+companion window you place BESIDE the target application; it is not a system-wide overlay and is not kept on top.
+
+Behaviour (each covered by a test).
+- Left-click: one click per completed dwell; after any click the pointer must move deliberately (more than 1.5 x
+  the tolerance) before another dwell can arm.
+- Right-click and Double-click: one shot, then back to Left-click. Double-click is press, release, press, release.
+- Drag: dwell presses and holds the left button (DRAGGING is shown very large); move normally; after the press the
+  release dwell needs deliberate movement first; dwell again releases.
+- Scroll: choosing it neither clicks nor freezes; dwell on the content starts it (no click); the pointer then
+  freezes and vertical head movement drives bounded wheel reports (neutral zone 3 deg/s beyond the 2.5 deg/s
+  pointer deadzone; head down scrolls down, following the pointer's reversal setting). To leave: hold BOTH axes
+  still for the dwell time; the Exit control fills while you do. Sideways movement is not stillness.
+- Stop: choosing it ends control. In Left, Right, Double, Drag and armed Scroll it is reachable by pointer dwell.
+  While Scroll is ACTIVE the pointer is frozen, so reach Stop by leaving Scroll first (hold still) or use the
+  website Stop or the physical button, which always work.
+- Selecting a palette control never sends an OS click. Leaving the palette clears the dwell and re-arms it only
+  after deliberate movement. Choosing the same control again needs deliberate movement too.
+- Stop, the physical button, a fault, a disconnect or turning the palette off clear every pending action, release
+  a held drag through the normal stop path and never restart by themselves. A failed release of a click, a
+  double-click or a drag release fails the emit and takes the existing inhibiting transport-fault path (the
+  session ends, an explicit restart is needed).
+- Not claimed: that the Mac releases a button that was held when the Bluetooth link dropped. That hardware case
+  stays open; the attended demo should test it deliberately (start a drag, then switch the board off).
+
+Honest limits. The dwell tolerance is in accumulated outgoing HID movement units, not verified screen pixels (the
+Mac applies pointer acceleration). The page reports the hover over a localhost link, so there is a short delay
+between the pointer entering a control and the device knowing (not yet measured). A late report restarts the
+dwell when it arrives, and moving onto the palette already breaks a target dwell that was running; a click could
+only leak if a target dwell finished inside that delay without the pointer leaving the tolerance. The palette
+window itself ignores clicks. Measure the delay in the demo. Reading while in Scroll needs a longer dwell or repeated re-entry. Scroll speed and the neutral
+zone are synthetic-input START values, never tried on a person.
+
+Attended demonstration (after an authorised firmware upload, with the pointer over a harmless target):
+1. Start without calibration; check pointing with every click mode off; open the palette window beside a test page.
+2. Enable the palette. Left-click: five dwells on a harmless button; confirm one click each and no repeats.
+3. Right-click then Double-click on a page that shows them; confirm the return to Left-click.
+4. Drag a harmless item; confirm DRAGGING, move, release. Then start a drag and press the physical button; confirm
+   release. Then (optional, deliberate) start a drag and power the board off to observe the host.
+5. Scroll a long page; leave it by holding still; try the website Stop while scrolling.
+6. Dwell on each palette control with a page that would show a click if one leaked; confirm none does.
+Record per step: wrong or missed actions, accidental clicks, time to select, any serial stall.
