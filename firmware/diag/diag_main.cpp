@@ -189,16 +189,16 @@ void imu(unsigned seconds) {
             }
         }
         memcpy(previous, b, sizeof(b));
-        auto word = [&](size_t at) { return int16_t((uint16_t(b[at]) << 8) | b[at + 1]); };
-        const double fx = word(0) / 16384.0, fy = word(2) / 16384.0, fz = word(4) / 16384.0;
+        auto s16 = [&](size_t at) { return int16_t((uint16_t(b[at]) << 8) | b[at + 1]); };
+        const double fx = s16(0) / 16384.0, fy = s16(2) / 16384.0, fz = s16(4) / 16384.0;
         ax.add(fx);
         ay.add(fy);
         az.add(fz);
         mag.add(std::sqrt(fx * fx + fy * fy + fz * fz));
-        temp.add(word(6) / 340.0 + 36.53);
-        gx.add(word(8) / 131.0);
-        gy.add(word(10) / 131.0);
-        gz.add(word(12) / 131.0);
+        temp.add(s16(6) / 340.0 + 36.53);
+        gx.add(s16(8) / 131.0);
+        gy.add(s16(10) / 131.0);
+        gz.add(s16(12) / 131.0);
     }
     writeReg(0x38, 0x00); // leave INT_ENABLE as the firmware expects it
     Serial.printf("DIAG,imu,seconds=%u,frames=%u,framesChanged=%u,i2cErrors=%u\n", seconds, frames,
@@ -248,6 +248,62 @@ void imuRegisters() {
         delay(10);
     }
     Serial.println("DIAG,regs,note=read-only;accel=bytes0-5,temp=6-7,gyro=8-13");
+}
+
+// Read-only raw stream for an orientation test: no register is written. Reports the raw 16-bit
+// words (accel +-2 g = 16384 LSB/g, gyro +-250 dps = 131 LSB/dps ONLY IF the sensor really has
+// those scales) and the min/max range each channel covered, so a tilt shows up as accel range and a
+// rotation as gyro range.
+void imuRaw(unsigned seconds) {
+    if (!startWire()) {
+        Serial.println("DIAG,raw,error=pins-not-configured-or-wire-failed");
+        return;
+    }
+    int32_t lo[7], hi[7];
+    for (int i = 0; i < 7; ++i) {
+        lo[i] = 32767;
+        hi[i] = -32768;
+    }
+    unsigned frames = 0, distinct = 0, errors = 0;
+    uint8_t previous[14] = {};
+    uint32_t nextPrint = millis();
+    const uint32_t end = millis() + seconds * 1000u;
+    Serial.printf(
+        "DIAG,raw,prompt=tilt-the-board-slowly-through-different-orientations-now,seconds=%u\n",
+        seconds);
+    while (int32_t(millis() - end) < 0) {
+        uint8_t b[14];
+        if (!readReg(0x3b, b, sizeof(b))) {
+            ++errors;
+            delay(20);
+            continue;
+        }
+        ++frames;
+        if (memcmp(b, previous, sizeof(b)) != 0) {
+            ++distinct;
+        }
+        memcpy(previous, b, sizeof(b));
+        auto s16 = [&](size_t at) { return int16_t((uint16_t(b[at]) << 8) | b[at + 1]); };
+        const int16_t v[7] = {s16(0), s16(2), s16(4), s16(8), s16(10), s16(12), s16(6)};
+        for (int i = 0; i < 7; ++i) {
+            lo[i] = v[i] < lo[i] ? v[i] : lo[i];
+            hi[i] = v[i] > hi[i] ? v[i] : hi[i];
+        }
+        if (int32_t(millis() - nextPrint) >= 0) {
+            nextPrint += 250;
+            Serial.printf("DIAG,raw,ax=%d,ay=%d,az=%d,gx=%d,gy=%d,gz=%d,temp=%d\n", v[0], v[1],
+                          v[2], v[3], v[4], v[5], v[6]);
+        }
+        delay(20);
+    }
+    Serial.printf("DIAG,raw,summary=1,seconds=%u,frames=%u,distinctFrames=%u,i2cErrors=%u\n",
+                  seconds, frames, distinct, errors);
+    Serial.printf("DIAG,raw,rangeAccelLsb=%ld/%ld/%ld,rangeGyroLsb=%ld/%ld/%ld,rangeTempLsb=%ld\n",
+                  long(hi[0] - lo[0]), long(hi[1] - lo[1]), long(hi[2] - lo[2]),
+                  long(hi[3] - lo[3]), long(hi[4] - lo[4]), long(hi[5] - lo[5]),
+                  long(hi[6] - lo[6]));
+    Serial.printf("DIAG,raw,minAccelLsb=%ld/%ld/%ld,maxAccelLsb=%ld/%ld/%ld\n", long(lo[0]),
+                  long(lo[1]), long(lo[2]), long(hi[0]), long(hi[1]), long(hi[2]));
 }
 
 // ---------------------------------------------------------------- stage 3: the enable button
@@ -300,7 +356,8 @@ void button(unsigned seconds) {
 }
 
 void help() {
-    Serial.println("DIAG,help,commands=help|info|scan|imu [seconds]|imuregs|button [seconds]|all");
+    Serial.println("DIAG,help,commands=help|info|scan|imu [seconds]|imuregs|imuraw "
+                   "[seconds]|button [seconds]|all");
 }
 unsigned secondsArg(const String& line, unsigned fallback) {
     const int space = line.indexOf(' ');
@@ -345,6 +402,8 @@ void loop() {
                 scan();
             } else if (command == "imuregs") {
                 imuRegisters();
+            } else if (command.startsWith("imuraw")) {
+                imuRaw(secondsArg(command, 20));
             } else if (command.startsWith("imu")) {
                 imu(secondsArg(command, 10));
             } else if (command.startsWith("button")) {

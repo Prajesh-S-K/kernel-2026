@@ -136,6 +136,20 @@ class Analysis(unittest.TestCase):
             ][0]["detail"],
         )
 
+    def test_tilt_test_is_judged_from_the_ranges_each_channel_covered(self):
+        summary = "DIAG,raw,summary=1,seconds=20,frames=900,distinctFrames=900,i2cErrors=0\n"
+        live = "DIAG,raw,rangeAccelLsb=15000/9000/17000,rangeGyroLsb=2000/1500/900,rangeTempLsb=3\n"
+        dead = "DIAG,raw,rangeAccelLsb=2/1/3,rangeGyroLsb=0/0/0,rangeTempLsb=1\n"
+        self.assertEqual(status_of(GOOD + summary + live, "raw accel responds"), "PASS")
+        self.assertEqual(status_of(GOOD + summary + live, "raw gyro responds"), "PASS")
+        self.assertEqual(status_of(GOOD + summary + dead, "raw accel responds"), "FAIL")
+        self.assertEqual(status_of(GOOD + summary + dead, "raw gyro responds"), "FAIL")
+        # The 4 Hz sample lines are not summaries and must not be mistaken for one.
+        sample = "DIAG,raw,ax=1,ay=2,az=3,gx=4,gy=5,gz=6,temp=7\n"
+        self.assertNotIn(
+            "raw accel responds", [c["name"] for c in ANALYZE.analyze_text(GOOD + sample)["checks"]]
+        )
+
     def test_garbage_and_truncated_lines_do_not_crash(self):
         noisy = (
             "boot junk \x00\x01\nDIAG,imu,gyroMeanDps=a/b/c\nDIAG,\nBLE,state\nrst:0x1 (POWERON)\n"
@@ -203,7 +217,18 @@ class Logger(unittest.TestCase):
         self.assertEqual(shown, ["DIAG,button,prompt=press-and-release-the-button-now,seconds=20"])
 
     def test_only_short_diagnostic_commands_are_accepted(self):
-        for ok in ("info", "scan", "imuregs", "imu 10", "button 20", "down confirm", "up", "nudge"):
+        for ok in (
+            "info",
+            "scan",
+            "imuregs",
+            "imuraw",
+            "imuraw 30",
+            "imu 10",
+            "button 20",
+            "down confirm",
+            "up",
+            "nudge",
+        ):
             self.assertTrue(LOG.SAFE_COMMAND.fullmatch(ok), ok)
         for bad in ("rm -rf /", "imu 1000", "flash", "ota", "imu;ls", "", "down  confirm"):
             self.assertFalse(LOG.SAFE_COMMAND.fullmatch(bad), bad)
@@ -252,6 +277,27 @@ IOREG_ONE = """+-o Root  <class IORegistryEntry, id 0x100000100>
 LSOF_HELD = """COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
 screen   4242 me    5u   CHR    9,6      0t0  613 /dev/cu.usbmodem101
 """
+
+
+class DiagnosticSource(unittest.TestCase):
+    def test_no_identifier_collides_with_an_arduino_macro(self):
+        # Arduino.h defines word(...) as makeWord(...). A lambda named `word` therefore silently
+        # decoded every frame as makeWord(<byte offset>), which made the first bench run report
+        # frozen near-zero accel/gyro values that were really the offsets 0,2,4,6,8,10,12.
+        source = (ROOT / "firmware" / "diag" / "diag_main.cpp").read_text()
+        for macro in (
+            "word",
+            "bit",
+            "min",
+            "max",
+            "abs",
+            "round",
+            "constrain",
+            "radians",
+            "degrees",
+        ):
+            self.assertNotRegex(source, rf"(?<![\w.:])auto\s+{macro}\s*=", macro)
+            self.assertNotRegex(source, rf"(?<![\w.:>]){macro}\(\s*\d", f"{macro}(<number>) call")
 
 
 class PortIdentification(unittest.TestCase):

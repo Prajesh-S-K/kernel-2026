@@ -50,6 +50,7 @@ def collect(lines):
         "button": {"burstList": [], "toggleList": []},
         "ble": {"states": [], "sends": [], "warnings": []},
         "regs": [],
+        "raw": {},
         "ignored": 0,
     }
     for text in lines:
@@ -66,6 +67,9 @@ def collect(lines):
                 data["scan"]["addresses"].append(fields["address"].lower())
             else:
                 data["scan"].update(fields)
+        elif family == "DIAG" and stage == "raw":
+            if "summary" in fields or "rangeAccelLsb" in fields or "minAccelLsb" in fields:
+                data["raw"].update(fields)
         elif family == "DIAG" and stage == "regs":
             data["regs"].append(fields)
         elif family == "DIAG" and stage == "button":
@@ -250,6 +254,26 @@ def judge(data):
                     "raw frames identical across the dump (a live sensor is not)",
                     "FAIL" if len(set(frames)) == 1 else "PASS",
                     f"{len(frames)} frames, {len(set(frames))} distinct",
+                )
+            )
+    raw = data["raw"]
+    if raw:
+        accel, gyro = triple(raw.get("rangeAccelLsb")), triple(raw.get("rangeGyroLsb"))
+        if accel and gyro:
+            # START: a gentle tilt through several orientations moves a live accelerometer by well over
+            # 0.2 g (3277 LSB at +-2 g) on some axis, and a gyro by over 5 dps (655 LSB at +-250 dps).
+            out.append(
+                check(
+                    "raw accel responds to tilting (range over 0.2 g on some axis, START)",
+                    "PASS" if max(accel) >= 3277 else "FAIL",
+                    f"ranges={accel} LSB, distinctFrames={raw.get('distinctFrames')}",
+                )
+            )
+            out.append(
+                check(
+                    "raw gyro responds to tilting (range over 5 dps on some axis, START)",
+                    "PASS" if max(gyro) >= 655 else "FAIL",
+                    f"ranges={gyro} LSB",
                 )
             )
     # ---- stage 3: enable button
