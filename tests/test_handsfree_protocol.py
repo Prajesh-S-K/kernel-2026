@@ -1,0 +1,531 @@
+"""Hands-free integration tests: native engine over its line protocol, the HTTP bridge's
+validation and the serial adapter. Synthetic input only; nothing here measures real users."""
+
+import http.server
+import importlib.util
+import json
+import math
+import os
+import subprocess
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("server", ROOT / "desktop/server.py")
+SERVER = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(SERVER)
+EXE = Path(os.environ.get("NODX_SIM", ROOT / "build/nodx_sim"))
+NEUTRAL = "step 50 0 0 0 0 1 0 0"
+
+
+class HandsFreeCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.runtime = Path(self.tmp.name)
+        self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+
+    def tearDown(self):
+        self.device.close()
+        self.tmp.cleanup()
+
+    def send(self, command):
+        return self.device.request(command)
+
+    def restart(self):
+        self.device.close()
+        self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+
+    def quiet(self, samples=50):
+        remaining, result = samples, None
+        while remaining > 0:
+            count = min(50, remaining)
+            result = self.send(f"step {count} 0 0 0 0 1 0 0")
+            remaining -= count
+        return result
+
+    def calibrate(self):
+        self.send("calibrate")
+        for _ in range(20):
+            result = self.send("step 50 0 0 0 0 1 1 0")
+        self.assertEqual(result["calibration"], "COMPLETE")
+
+    def train(self, gesture, pattern):
+        self.assertTrue(self.send(f"train start {gesture}")["ok"])
+        self.quiet(110)
+        for _ in range(4):
+            self.assertTrue(self.send(f"gesture {pattern}")["ok"])
+        result = self.send(f"gesture {pattern}")  # validation repeat
+        self.assertEqual(result["handsFree"]["training"]["phase"], "READY", result)
+        self.assertTrue(self.send("train accept")["ok"])
+
+    def setup_hands_free(self):
+        self.calibrate()
+        self.train("pause", "nod2")
+        self.train("drag", "tilt2")
+        result = self.send("handsfree commit")
+        self.assertTrue(result["ok"], result)
+        return result
+
+    def activate_by_gesture(self):
+        self.quiet(60)
+        result = self.send("gesture nod2")
+        self.assertEqual(result["state"], "ACTIVE", result["handsFree"])
+        return result
+
+
+class SetupAndDailyWorkflow(HandsFreeCase):
+    def test_helper_setup_then_daily_use_needs_no_buttons(self):
+        committed = self.setup_hands_free()
+        self.assertEqual(committed["state"], "READY")
+        self.assertEqual(committed["handsFree"]["mode"], "HANDS_FREE")
+        self.assertTrue(committed["profile"]["dwellEnabled"])
+        self.assertEqual(committed["protocolRevision"], 3)
+        self.assertEqual(committed["protocol"], 1)
+        # Daily workflow: only gestures and the maintained switch, no resume/pause/calibrate.
+        active = self.activate_by_gesture()
+        self.assertTrue(active["handsFree"]["switch"]["permitted"])
+        dragging = self.send("gesture tilt2")
+        self.assertTrue(dragging["handsFree"]["drag"])
+        self.assertEqual(dragging["cursor"], "DRAG")
+        self.assertTrue(dragging["reports"][-1][3])
+        released = self.send("gesture tilt2")
+        self.assertFalse(released["handsFree"]["drag"])
+        self.assertEqual(released["reports"][-1][3], 0)
+        paused = self.send("gesture nod2")
+        self.assertEqual(paused["state"], "PAUSED")
+        self.assertEqual(self.send("gesture nod2")["state"], "ACTIVE")
+
+    def test_dwell_click_works_while_hands_free(self):
+        self.setup_hands_free()
+        self.activate_by_gesture()
+        self.send("step 30 30 0 0 0 1 0 0")  # move away so the post-resume lockout clears
+        clicks = 0
+        for _ in range(6):
+            result = self.send(NEUTRAL)
+            downs = [r[3] for r in result["reports"]]
+            clicks += sum(1 for a, b in zip([0] + downs, downs) if b and not a)
+        self.assertEqual(clicks, 1)
+
+    def test_conversion_is_explicit(self):
+        self.calibrate()
+        before = self.send("status")
+        self.assertEqual(before["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.assertFalse(before["profile"]["dwellEnabled"])
+        self.send("generic")
+        self.send("load")
+        self.quiet(200)
+        self.train("pause", "nod2")
+        self.restart()
+        after = self.send("status")
+        self.assertEqual(after["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.assertEqual(after["handsFree"]["config"], "MISSING")
+        self.assertEqual(after["profile"], before["profile"])
+        self.assertFalse((self.runtime / "hf0.bin").exists())
+
+    def test_existing_clients_and_commands_still_work(self):
+        self.calibrate()
+        result = self.send("status")
+        for key in (
+            "protocol",
+            "protocolRevision",
+            "faultCode",
+            "softwareVersion",
+            "profile",
+            "reports",
+            "dwell",
+            "calibration",
+        ):
+            self.assertIn(key, result)
+        self.assertEqual(result["protocol"], 1)
+        self.assertTrue(self.send("resume")["ok"])
+        stepped = self.send("step 5 20 0 0 1 1 0 0")  # the original eight fields
+        self.assertTrue(stepped["ok"])
+        self.assertTrue(self.send("pause")["ok"])
+        self.assertTrue(self.send("settings 1 0")["ok"])
+        self.assertTrue(self.send("dwell 1")["ok"])
+
+    def test_telemetry_is_finite_valid_json_in_every_state(self):
+        states = [self.send("status")]
+        self.calibrate()
+        states.append(self.send("step 5 0 0 0 0 1 0 1"))  # NaN gyro fault
+        states.append(self.send("step 5 0 0 0 0 1 0 2"))  # extreme gyro
+        self.setup_hands_free()
+        (self.runtime / "hf0.bin").write_bytes(b"x" * 600)
+        (self.runtime / "hf1.bin").write_bytes(b"y")
+        self.restart()
+        states.append(self.send("status"))
+        states.append(self.send("corrupt"))
+        for state in states:
+            encoded = json.dumps(state, allow_nan=False, separators=(",", ":"))
+            self.assertIn("handsFree", state)
+            # Firmware frames are bounded at 2048 bytes; keep real headroom for longer reasons.
+            self.assertLess(len(encoded), 1900)
+
+
+class CommandValidation(HandsFreeCase):
+    def test_native_commands_reject_malformed_input(self):
+        for command in (
+            "enable",
+            "enable 2",
+            "enable 1 extra",
+            "enable 0.5",
+            "gesture",
+            "gesture nod9",
+            "gesture nod2 9",
+            "gesture nod2 nan",
+            "gesture nod2 inf",
+            "gesture nod2 1 extra",
+            "gesture spin2",
+            "train",
+            "train start",
+            "train start both",
+            "train start pause extra",
+            "train cancel now",
+            "train bogus",
+            "handsfree",
+            "handsfree bogus",
+            "handsfree commit extra",
+            "handsfree switchless maybe",
+            "handsfree switchless",
+            "step 5 0 0 0 0 1 0 0 2",
+            "step 5 0 0 0 0 1 0 0 1 extra",
+            "step 5 0 0 0 0 1 0 0 1.5",
+            "step 5 0 0 0 0 1 0 0 -1",
+        ):
+            self.assertFalse(self.send(command)["ok"], command)
+
+    def test_server_validates_new_actions(self):
+        for data in (
+            {"action": "enable"},
+            {"action": "enable", "enabled": 1},
+            {"action": "gesture"},
+            {"action": "gesture", "name": "nod4"},
+            {"action": "gesture", "name": "nod2", "scale": math.nan},
+            {"action": "gesture", "name": "nod2", "scale": 10},
+            {"action": "gesture", "name": "nod2\nstatus"},
+            {"action": "train"},
+            {"action": "train", "op": "start"},
+            {"action": "train", "op": "start", "gesture": "both"},
+            {"action": "train", "op": "wipe"},
+            {"action": "handsfree"},
+            {"action": "handsfree", "op": "switchless"},
+            {"action": "handsfree", "op": "switchless", "enabled": "yes"},
+            {"action": "step", "enabled": 1},
+            {"action": "step", "enabled": "true"},
+        ):
+            with self.assertRaises(ValueError, msg=str(data)):
+                SERVER.command_for(data)
+        self.assertEqual(SERVER.command_for({"action": "enable", "enabled": False}), "enable 0")
+        self.assertEqual(
+            SERVER.command_for({"action": "gesture", "name": "tilt2"}), "gesture tilt2 1"
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "train", "op": "start", "gesture": "drag"}),
+            "train start drag",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "switchless", "enabled": True}),
+            "handsfree switchless on",
+        )
+        self.assertTrue(SERVER.command_for({"action": "step", "enabled": False}).endswith(" 0"))
+        self.assertEqual(
+            SERVER.command_for({"action": "step"}).split()[-1],
+            "0",
+            "an omitted enabled field must not add a ninth token",
+        )
+
+    def test_training_requires_a_profile_and_accept_requires_validation(self):
+        self.assertFalse(self.send("train start pause")["ok"])
+        self.calibrate()
+        started = self.send("train start pause")
+        self.assertTrue(started["ok"])
+        self.assertEqual(started["state"], "TRAINING")
+        self.assertFalse(self.send("train accept")["ok"])
+        cancelled = self.send("train cancel")
+        self.assertTrue(cancelled["ok"])
+        self.assertEqual(cancelled["state"], "READY")
+        self.assertEqual(cancelled["handsFree"]["training"]["phase"], "IDLE")
+        self.assertEqual(self.send("handsfree commit")["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.assertFalse(self.send("handsfree commit")["ok"])
+
+
+class SaveFailureAndRecovery(HandsFreeCase):
+    def block(self, names):
+        for name in names:  # a directory in the way makes the temp-file write fail
+            (self.runtime / f"{name}.tmp").mkdir()
+
+    def unblock(self, names):
+        for name in names:
+            (self.runtime / f"{name}.tmp").rmdir()
+
+    def staged(self):
+        self.calibrate()
+        self.train("pause", "nod2")
+        self.train("drag", "tilt2")
+
+    def test_profile_write_failure_is_reported_and_nothing_changes(self):
+        self.staged()
+        names = ["profile0.bin", "profile1.bin"]
+        self.block(names)
+        result = self.send("handsfree commit")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["faultCode"], "STORAGE")
+        self.assertEqual(result["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.assertEqual(result["handsFree"]["config"], "MISSING")
+        self.assertFalse(result["profile"]["dwellEnabled"])
+        self.assertFalse((self.runtime / "hf0.bin").exists())
+        self.unblock(names)
+        self.assertTrue(self.send("handsfree commit")["ok"])
+
+    def test_configuration_write_failure_restores_the_profile(self):
+        self.staged()
+        names = ["hf0.bin", "hf1.bin"]
+        self.block(names)
+        result = self.send("handsfree commit")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["faultCode"], "STORAGE")
+        self.assertEqual(result["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.restart()
+        reloaded = self.send("status")
+        self.assertFalse(reloaded["profile"]["dwellEnabled"], "profile left converted")
+        self.assertEqual(reloaded["handsFree"]["config"], "MISSING")
+        self.unblock(names)
+
+    def test_failed_replacement_keeps_the_prior_configuration(self):
+        self.setup_hands_free()
+        prior = self.send("status")["handsFree"]["configId"]
+        self.train("drag", "turn2")
+        names = ["hf0.bin", "hf1.bin"]
+        self.block(names)
+        self.assertFalse(self.send("handsfree commit")["ok"])
+        self.unblock(names)
+        self.restart()
+        self.assertEqual(self.send("status")["handsFree"]["configId"], prior)
+
+    def test_corrupt_and_oversized_configuration_inhibit_until_helper_repair(self):
+        self.setup_hands_free()
+        for payload in (b"x" * 4096, b"short"):
+            self.device.close()
+            for name in ("hf0.bin", "hf1.bin"):
+                (self.runtime / name).write_bytes(payload)
+            self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+            status = self.quiet(60)
+            self.assertEqual(status["handsFree"]["mode"], "CONFIG_INVALID")
+            self.assertEqual(status["handsFree"]["config"], "CORRUPT")
+            self.assertFalse(self.send("resume")["ok"])
+            self.assertEqual(self.send("gesture nod2")["state"], "READY")
+        repaired = self.send("handsfree legacy")
+        self.assertTrue(repaired["ok"])
+        self.assertEqual(repaired["handsFree"]["mode"], "LEGACY_SWITCH")
+        self.restart()
+        self.assertEqual(self.send("status")["handsFree"]["mode"], "LEGACY_SWITCH")
+
+    def test_fault_recovery_never_resumes_hands_free_control(self):
+        self.setup_hands_free()
+        self.activate_by_gesture()
+        faulted = self.send("step 5 0 0 0 0 1 0 1")
+        self.assertEqual(faulted["state"], "SAFE_STATE")
+        self.assertTrue(all(r == [0, 0, 0, 0] for r in faulted["reports"]))
+        recovered = self.quiet(200)
+        self.assertEqual(recovered["state"], "READY")
+        self.assertFalse(self.send("gesture tilt2")["handsFree"]["drag"])
+
+
+class SwitchAndTransport(HandsFreeCase):
+    def test_switch_off_releases_immediately_and_on_never_resumes(self):
+        self.setup_hands_free()
+        self.activate_by_gesture()
+        self.assertTrue(self.send("gesture tilt2")["handsFree"]["drag"])
+        off = self.send("enable 0")
+        self.assertTrue(off["ok"])
+        self.assertEqual(off["state"], "PAUSED")
+        self.assertEqual(off["reports"][-1], [0, 0, 0, 0], "no immediate release report")
+        self.assertFalse(off["handsFree"]["drag"])
+        blocked = self.quiet(100)
+        self.assertEqual(blocked["handsFree"]["blocked"], "control switch is OFF")
+        self.assertFalse(self.send("resume")["ok"])
+        self.assertEqual(self.send("gesture nod2")["state"], "PAUSED")
+        on = self.send("enable 1")
+        self.assertTrue(on["ok"])
+        settled = self.quiet(100)
+        self.assertTrue(settled["handsFree"]["switch"]["permitted"])
+        self.assertEqual(settled["state"], "PAUSED")
+        self.assertEqual(self.send("gesture nod2")["state"], "ACTIVE")
+
+    def test_step_enable_field_drives_the_switch(self):
+        self.setup_hands_free()
+        self.activate_by_gesture()
+        off = self.send("step 5 0 0 0 0 1 0 0 0")
+        self.assertEqual(off["state"], "PAUSED")
+        on = self.send("step 10 0 0 0 0 1 0 0 1")
+        self.assertTrue(on["handsFree"]["switch"]["on"])
+        self.assertEqual(on["state"], "PAUSED")
+
+    def test_repeated_transport_failure_keeps_output_inhibited(self):
+        self.setup_hands_free()
+        self.activate_by_gesture()
+        for _ in range(5):
+            result = self.send("step 20 40 0 0 0 1 0 6")
+            self.assertEqual(result["state"], "SAFE_STATE")
+            self.assertTrue(all(r[3] == 0 for r in result["reports"]))
+        self.assertEqual(self.quiet(200)["state"], "READY")
+
+    def test_serial_adapter_passes_new_commands_and_still_refuses_native_only(self):
+        class FakeSerial:
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                self.written = data
+                self.sequence = int(data.decode().split()[0][1:])
+
+            def readline(self):
+                return json.dumps({"protocol": 1, "requestId": self.sequence, "ok": True}).encode()
+
+        adapter = SERVER.SerialDevice.__new__(SERVER.SerialDevice)
+        adapter.serial = FakeSerial()
+        adapter.sequence = 0
+        for command in ("train start pause", "handsfree commit", "enable 0", "gesture nod2 1"):
+            adapter.request(command)
+            self.assertTrue(adapter.serial.written.decode().endswith(command + "\n"))
+            self.assertLessEqual(len(adapter.serial.written), 80)
+        with self.assertRaises(ValueError):
+            adapter.request("corrupt")
+        with self.assertRaises(ValueError):
+            adapter.request("record on")
+        adapter.request("step 5 0 0 0 0 1 0 0 1")
+        self.assertEqual(adapter.serial.written.split(b" ", 1)[1], b"status\n")
+
+
+class ReplayAndTrials(HandsFreeCase):
+    def replay(self, path, *flags):
+        completed = subprocess.run(
+            [str(EXE), self.tmp.name, "--replay", str(path), *flags],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return completed.stdout
+
+    def test_gesture_replay_is_reproducible_and_resumes_only_by_gesture(self):
+        self.setup_hands_free()
+        self.send("record on")
+        self.send("gesture nod2")
+        self.send("record off")
+        path = self.runtime / "samples.csv"
+        self.assertIn(",enable", path.read_text().splitlines()[0])
+        self.device.close()
+        first = self.replay(path, "--hands-free")
+        second = self.replay(path, "--hands-free")
+        self.assertEqual(first, second, "replay is not deterministic")
+        rows = [json.loads(line) for line in first.splitlines()]
+        self.assertEqual(rows[0]["state"], "READY")
+        self.assertEqual(rows[-1]["state"], "ACTIVE")
+        self.assertEqual(rows[-1]["handsFree"]["gesture"]["executed"], 1)
+        self.assertEqual(len(rows), 150)
+        # nothing executes during the 400 ms of stillness before the pattern
+        self.assertTrue(all(r["handsFree"]["gesture"]["executed"] == 0 for r in rows[:60]))
+        self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+
+    def test_replay_with_the_switch_off_never_activates(self):
+        self.setup_hands_free()
+        self.send("record on")
+        self.send("gesture nod2")
+        self.send("record off")
+        path = self.runtime / "samples.csv"
+        lines = path.read_text().splitlines()
+        disabled = [lines[0]] + [line.rsplit(",", 1)[0] + ",0" for line in lines[1:]]
+        path.write_text("\n".join(disabled) + "\n")
+        self.device.close()
+        rows = [json.loads(line) for line in self.replay(path, "--hands-free").splitlines()]
+        self.assertTrue(all(r["state"] != "ACTIVE" for r in rows))
+        self.assertTrue(all(r["handsFree"]["gesture"]["executed"] == 0 for r in rows))
+        self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+
+    def test_replay_rejects_a_bad_enable_flag(self):
+        path = self.runtime / "bad.csv"
+        path.write_text(
+            "timestampMs,gyroX,gyroY,gyroZ,accelX,accelY,accelZ,valid,enable\n10,0,0,0,0,0,1,1,2\n"
+        )
+        completed = subprocess.run(
+            [str(EXE), self.tmp.name, "--replay", str(path), "--hands-free"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+
+    def test_trial_endpoint_enforces_interaction_context(self):
+        class Dummy:
+            def request(self, command):
+                return {"ok": True}
+
+            def close(self):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SERVER.Handler)
+        server.runtime = self.runtime
+        server.device = Dummy()
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        profile = {"gain": [30, 30, 30, 30], "dwellEnabled": True}
+        context = {
+            "deviceSource": "SIMULATED",
+            "inputSource": "SIMULATED",
+            "condition": "ADAPTIVE",
+            "selectionMethod": "DWELL",
+            "interactionMode": "HANDS_FREE",
+            "gestureConfigId": "0badc0de",
+            "profile": profile,
+        }
+        trial = {
+            "trial": 1,
+            "condition": "ADAPTIVE",
+            "inputSource": "SIMULATED",
+            "deviceSource": "SIMULATED",
+            "selectionMethod": "DWELL",
+            "interactionMode": "HANDS_FREE",
+            "gestureConfigId": "0badc0de",
+            "distance": 100,
+            "width": 50,
+            "movementTimeMs": 900,
+            "hit": True,
+            "aborted": False,
+            "profile": profile,
+            "blockContext": context,
+            "gestureInterruptions": 2,
+        }
+
+        def post(data):
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/trial",
+                data=json.dumps(data).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status
+            except urllib.error.HTTPError as error:
+                error.close()
+                return error.code
+
+        self.assertEqual(post(trial), 200)
+        logged = json.loads((self.runtime / "trials.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(logged["interactionMode"], "HANDS_FREE")
+        self.assertEqual(logged["gestureInterruptions"], 2)
+        for key, value in (
+            ("interactionMode", "LEGACY_SWITCH"),
+            ("gestureConfigId", "00000000"),
+        ):
+            self.assertEqual(post({**trial, key: value}), 400, key)
+        self.assertEqual(post({**trial, "interactionMode": "OTHER"}), 400)
+        self.assertEqual(post({**trial, "gestureInterruptions": -1}), 400)
+        self.assertEqual(post({**trial, "gestureInterruptions": 1.5}), 400)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

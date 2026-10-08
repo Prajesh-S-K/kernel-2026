@@ -20,6 +20,8 @@ add_library(nodx
     core/src/system.cpp
     core/src/profile.cpp
     core/src/sensor.cpp
+    core/src/gesture.cpp
+    core/src/handsfree.cpp
 )
 target_include_directories(nodx PUBLIC core/include)
 target_compile_options(nodx PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -27,9 +29,12 @@ add_executable(nodx_sim desktop/main.cpp)
 target_link_libraries(nodx_sim PRIVATE nodx)
 add_executable(nodx_tests tests/test_main.cpp)
 target_link_libraries(nodx_tests PRIVATE nodx)
+add_executable(nodx_handsfree_tests tests/test_handsfree.cpp)
+target_link_libraries(nodx_handsfree_tests PRIVATE nodx)
 enable_testing()
 add_test(NAME control_invariants COMMAND nodx_tests)
+add_test(NAME handsfree_invariants COMMAND nodx_handsfree_tests)
 
-foreach(target nodx_sim nodx_tests)
+foreach(target nodx_sim nodx_tests nodx_handsfree_tests)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endforeach()

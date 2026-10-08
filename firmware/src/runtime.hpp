@@ -7,6 +7,12 @@ extern MPU6050Sensor mpu;
 extern SimulatedSensor simulator;
 extern BLEHID ble;
 extern ProfileRepository repository;
+extern NVSConfigStorage configStorage;
+extern HandsFreeRepository configRepository;
+#ifdef NODX_SIMULATED
+extern bool simulatedEnable;             // simulated maintained switch (default ON)
+extern std::vector<Rates> gestureScript; // synthetic gesture samples still to play
+#endif
 extern System* systemEngine;
 void initializeRuntime();
 void serviceRuntime();

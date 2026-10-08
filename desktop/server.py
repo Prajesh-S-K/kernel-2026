@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -43,6 +44,16 @@ def boolean(data, key, default=False):
     return value
 
 
+GESTURE_NAME = re.compile(r"(nod|turn|tilt)[1-3]")
+MODES = ("LEGACY_SWITCH", "HANDS_FREE", "CONFIG_INVALID")
+
+
+def required_boolean(data, key):
+    if key not in data:
+        raise ValueError(f"{key} is required")
+    return boolean(data, key)
+
+
 def command_for(data):
     action = data.get("action", "status")
     if action == "step":
@@ -53,7 +64,31 @@ def command_for(data):
             for k, default in (("pressed", False), ("connected", True), ("automatic", True))
         ]
         fault = integer(data, "fault", 0, 0, 6)
-        return "step " + " ".join(map(str, [count, *motion, *flags, fault]))
+        command = "step " + " ".join(map(str, [count, *motion, *flags, fault]))
+        if "enabled" in data:  # additive: the simulated maintained control-enable switch
+            command += f" {int(boolean(data, 'enabled'))}"
+        return command
+    if action == "enable":
+        return f"enable {int(required_boolean(data, 'enabled'))}"
+    if action == "gesture":
+        name = data.get("name")
+        if not isinstance(name, str) or not GESTURE_NAME.fullmatch(name):
+            raise ValueError("Invalid gesture name")
+        return f"gesture {name} {number(data, 'scale', 1, 0.25, 3):g}"
+    if action == "train":
+        operation = data.get("op")
+        if operation in ("cancel", "accept"):
+            return f"train {operation}"
+        if operation == "start" and data.get("gesture") in ("pause", "drag"):
+            return f"train start {data['gesture']}"
+        raise ValueError("Invalid training request")
+    if action == "handsfree":
+        operation = data.get("op")
+        if operation in ("commit", "legacy"):
+            return f"handsfree {operation}"
+        if operation == "switchless":
+            return "handsfree switchless " + ("on" if required_boolean(data, "enabled") else "off")
+        raise ValueError("Invalid hands-free request")
     if action in ("status", "calibrate", "cancel", "resume", "pause", "generic", "load", "corrupt"):
         return action
     if action in ("dwell", "scroll"):
@@ -117,6 +152,10 @@ class Handler(SimpleHTTPRequestHandler):
                     boolean(data, "hit")
                     boolean(data, "aborted")
                     integer(data, "trial", 1, 1, 1000000)
+                    if "interactionMode" in data and data["interactionMode"] not in MODES:
+                        raise ValueError("Unknown interaction mode")
+                    if "gestureInterruptions" in data:
+                        integer(data, "gestureInterruptions", 0, 0, 1000000)
                     context = data.get("blockContext")
                     if context is not None:
                         if (
@@ -124,7 +163,14 @@ class Handler(SimpleHTTPRequestHandler):
                             or context.get("profile") != data["profile"]
                         ):
                             raise ValueError("Trial profile differs from block context")
-                        for key in ("deviceSource", "inputSource", "condition", "selectionMethod"):
+                        for key in (
+                            "deviceSource",
+                            "inputSource",
+                            "condition",
+                            "selectionMethod",
+                            "interactionMode",
+                            "gestureConfigId",
+                        ):
                             if context.get(key) != data.get(key):
                                 raise ValueError("Trial differs from block context")
                     encoded = json.dumps(data["profile"], sort_keys=True, allow_nan=False)

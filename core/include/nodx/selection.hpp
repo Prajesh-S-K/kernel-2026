@@ -25,6 +25,10 @@ public:
     Selection update(bool rawSwitch, double x, double y, bool allowed, bool scrolling,
                      const UserProfile& p, uint32_t now);
     void reset(bool rawSwitch, uint32_t now);
+    // Cancel a pending dwell but keep the post-click lockout (recognition, drag).
+    void interrupt();
+    // Require meaningful movement from (x, y) before the next dwell click (resume, drag end).
+    void lockAt(double x, double y);
     DwellState dwell = DwellState::Idle;
     uint32_t cancellations = 0;
     float progress(uint32_t now, const UserProfile& p) const;

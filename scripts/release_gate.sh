@@ -12,4 +12,5 @@ cat "$gate_directory/firmware.log"
 cp "$gate_directory/software.log" evidence/software-checks.log
 cp "$gate_directory/firmware.log" evidence/firmware-build.log
 ./build/nodx_tests > evidence/control-tests.log
+./build/nodx_handsfree_tests > evidence/handsfree-tests.log
 python3 scripts/release.py
