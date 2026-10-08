@@ -50,5 +50,6 @@
 | `setControlSwitch` is driven every loop pass, not per sensor sample | OFF must release without waiting for a sample |
 | Alternative to a switch only by explicit helper qualification stored in the record | "Disabled switch configuration inhibits hands-free hardware mode" |
 | Legacy physical-switch logic kept as a compatibility mode and test fixture, ignored in hands-free | Existing regressions stay valid |
-| New protocol fields/commands are additive (`protocolRevision` 3) | Existing clients keep working |
+| New protocol fields/commands are additive (`protocolRevision` 3, then 4 for the enable-input kind and raw/latched fields) | Existing clients keep working |
+| 2026-10-08 | The enable input is one momentary push button by default (latch, never persisted, disabled at boot, held-at-boot ignored, stable release between presses, disabling press at its first edge, latch cleared by a fault); the maintained switch stays as an explicit stored option in flag bit 2 (clear = maintained) | The user's actual part is a four-pin momentary tactile button. A record written before the button existed keeps its original meaning byte-for-byte and is never reinterpreted; an older firmware reading the new bit fails closed. Disable at the first edge means a glitch can only disable control; a fault clearing the latch keeps the button from silently re-permitting after recovery |
 | Version strings are not changed in this revision | Release/version handling is a separate task |

@@ -83,9 +83,10 @@ skip motion/adaptation math. Physical connection/release behavior still needs ho
 Specification: [HANDS_FREE_SPEC](HANDS_FREE_SPEC.md). The frozen pipeline, `SafetyManager → HIDManager`
 ordering, 84-byte profile and bounded output are unchanged. Two interaction modes exist:
 
-* **HANDS_FREE** — dwell selection; a maintained control-enable switch permits or inhibits control (it
-  does not cut power and never resumes anything); a trained gesture toggles pause/resume and a second
-  toggles drag. No physical selection, pause or calibration button is read.
+* **HANDS_FREE** — dwell selection; one control-enable input permits or inhibits control. By default it is
+  one momentary push button that toggles a never-persisted latch; the maintained switch is an explicit
+  stored option. It does not cut power and never resumes anything. A trained gesture toggles
+  pause/resume and a second toggles drag. No physical selection, pause or calibration button is read.
 * **LEGACY_SWITCH** — the v0.2.0 behaviour (physical switch selection, optional dwell, physical
   pause/calibration inputs), kept only as an explicitly identified compatibility mode and test fixture.
 
@@ -111,7 +112,7 @@ healthy samples, connected, neutral output delivered). `SystemState` gains `TRAI
 | `ui/handsfree.js`, `ui/handsfree-view.js` | Setup steps, training view-model, recovery guidance and their DOM presentation |
 | `wokwi/handsfree-diagnostic/` | Paste-ready simulator diagnostic: sensor + one switch, no BLE output |
 
-Hardware: one maintained switch between a proposed GPIO (**GPIO4, START only**) and GND. With
+Hardware: one four-pin momentary tactile push button between a proposed GPIO (**GPIO4, START only**) and GND (one contact pair to each; no 3V3/5V; pairs identified by continuity testing). With
 `NODX_ENABLE=-1` (the default in every environment) hands-free control stays inhibited unless setup
 explicitly qualified a switchless configuration. The buzzer remains disconnected (`NODX_BUZZER=-1`).
 Gesture patterns, thresholds and the claim that they separate command from normal movement are

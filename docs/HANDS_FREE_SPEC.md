@@ -6,8 +6,9 @@ accidental-trigger rate, comfort or suitability for any user.
 
 ## 1. Scope and invariants
 
-Everyday operation uses no physical button. Hardware has at most **one maintained control-enable
-switch**. A helper may pair, calibrate and train. The frozen pipeline is unchanged:
+Everyday operation uses no selection, pause or calibration button. Hardware has at most **one
+control-enable input**: by default a **momentary four-pin tactile push button** (a debounced press
+toggles a permission latch), or, as an explicit stored option, the original maintained switch. A helper may pair, calibrate and train. The frozen pipeline is unchanged:
 `… → InteractionEngine/SelectionManager → SafetyManager → HIDManager → HIDTransport`.
 Unchanged: 84-byte `UserProfile` and CRC, two-slot repository, existing command names and fields
 (extensions are additive), sensor abstraction, bounded output, disabled GPIO defaults, buzzer
@@ -40,7 +41,7 @@ failed/torn write (the older/invalid slot is written, then read back and compare
 `ProfileRepository`.
 
 Record `HandsFreeConfig` v1, little-endian, fixed length, CRC32 (same polynomial as profiles):
-magic `0x4846444e`, version, generation, flags (bit0 enabled, bit1 switchlessQualified),
+magic `0x4846444e`, version, generation, flags (bit0 enabled, bit1 switchlessQualified, bit2 momentary enable button),
 `neutralRate`, two gesture templates, CRC. Hands-free requires **profile.dwellEnabled** at
 activation; a profile reload cannot leave a hands-free session without dwell (`resume` refuses and
 reports why).
@@ -48,20 +49,56 @@ reports why).
 A new hands-free profile is created by explicit conversion only. Existing profiles are never changed
 by boot, load or status. Calibration performed while hands-free is active forces `dwellEnabled`.
 
-## 3. Maintained control-enable switch
+## 3. Control-enable input (push button by default; maintained switch as an option)
 
-* Semantics: ON *permits* control; OFF *inhibits*. It never cuts power and never resumes anything.
-* `EnableGate` debounce is asymmetric: **OFF is accepted at the first OFF reading** (no wait);
-  ON is accepted only after 30 ms continuously ON. Unknown input at boot is OFF (fail closed).
-* The adapter feeds the gate **every loop iteration** (not only on fresh sensor samples) through
-  `System::setControlSwitch(on, now)`. On a permitted→inhibited edge in hands-free mode the system
-  emits a released stationary report through SafetyManager→HIDManager **at once** (no new sample),
-  drops drag, resets recognition/dwell and moves ACTIVE→PAUSED. ON afterwards leaves PAUSED/READY.
-* Unconfigured switch (`present=false`): in hands-free mode control is **inhibited** unless setup
-  explicitly stored `switchlessQualified=1`. Firmware: `NODX_ENABLE` default −1 ⇒ not present.
-  Proposed bench pin GPIO4 is a START value only. The desktop simulator has a simulated switch
-  (default ON); source labels remain SIMULATED / FIRMWARE_SIMULATED / HARDWARE.
-* Boot, reconnect, fault recovery and switch-ON all end in READY/PAUSED, never ACTIVE.
+The input only ever **permits or inhibits** control. It is not a selection button, never cuts power
+and never resumes anything. The adapter feeds the gate **every loop iteration** (not only on fresh
+sensor samples) through `System::setControlSwitch(active, now)`, where `active` is the RAW input
+(button pressed / switch ON). On a permitted→inhibited edge in hands-free mode the system emits a
+released stationary report through SafetyManager→HIDManager **at once** (no new sample, so a
+dropped neutral report becomes a fault), drops drag, resets recognition/dwell and moves
+ACTIVE→PAUSED. Boot, reconnect, fault recovery and enabling all end in READY/PAUSED, never ACTIVE;
+only the resume gesture (or the helper's explicit resume) starts control.
+
+**Kind** is stored in bit 2 of the record's flags word: `MOMENTARY` (bit set) or `MAINTAINED`
+(bit clear). A record written before the button existed has the bit clear, keeps its original
+maintained-switch meaning (byte-identical when re-encoded, tested against a golden record) and is
+never silently reinterpreted; retraining a maintained setup keeps `MAINTAINED`. Only a setup with no
+stored record stages `MOMENTARY`; the helper changes it with `handsfree enable maintained|momentary`,
+and it takes effect, with the rest of the setup, only at the explicit commit. Changing the kind at
+commit starts the gate disabled again. A firmware that does not know the bit classifies the record
+`OUT_OF_BOUNDS` and fails closed.
+
+### 3.1 Momentary push button (default)
+
+* Wiring: GPIO4 (`NODX_ENABLE`, a START assignment) to one internally connected contact pair and
+  GND to the other pair, `INPUT_PULLUP`, pressed = LOW. **No 3V3/5V.** Which pins form a pair is
+  established by continuity testing, never by appearance.
+* The permission is a latch that is **disabled at every boot and never persisted**.
+* **Boot / reboot:** disabled whatever the button is doing. A button held at boot enables nothing:
+  the gate must first see a **stable release (30 ms)**, and only a new press counts.
+* **Enable:** one press that stays down for the 30 ms debounce window latches permission. Exactly
+  one toggle per accepted press: holding does nothing more, and **a stable release is required before
+  another press is accepted** (bounce on release cannot look like a press).
+* **Disable:** the next press disables at its **first edge** (fail safe, no debounce wait); bounce
+  after that cannot re-enable (a stable release is needed). Deliberate consequence: a one-sample
+  glitch while permitted can only *disable* control, never enable it.
+* **Faults:** entering SAFE_STATE clears the latch. Pressing during or after a fault changes only the
+  latch; the fault, recovery (20 healthy samples), invalid-configuration, calibration and dwell
+  requirements are checked independently by `resume`, so no press can bypass them.
+* The raw pressed state and the latched permission are reported separately (`pressed`, `latched`).
+
+### 3.2 Maintained switch (compatibility option)
+
+ON *permits*; OFF *inhibits*. Debounce is asymmetric: **OFF is accepted at the first OFF reading**;
+ON only after 30 ms continuously ON. Unknown input at boot is OFF. There is no latch.
+
+### 3.3 Not configured
+
+Unconfigured input (`present=false`): in hands-free mode control is **inhibited** unless setup
+explicitly stored `switchlessQualified=1`. Firmware: `NODX_ENABLE` default −1 ⇒ not present; GPIO4 is a
+START value only. The desktop simulator and `NODX_SIMULATED` firmware have a simulated raw input
+that starts **released** (`enable 1` presses / turns ON, `enable 0` releases).
 
 ## 4. Gesture patterns
 
@@ -216,17 +253,17 @@ CONFIG_INVALID). `handsfree switchless on|off` stages the alternative-qualificat
 next commit. Existing `dwell`, `scroll`, `settings`, `generic`, `load` commands keep working;
 turning dwell **off** persistently is refused in hands-free mode (reported `ok:false`).
 
-## 9. Protocol additions (additive; `protocol:1` unchanged, `protocolRevision:3`)
+## 9. Protocol additions (additive; `protocol:1` unchanged, `protocolRevision:4`)
 
 New commands: `enable 0|1` (simulators only), `gesture <name> [scale]` (simulators only),
-`train start pause|drag | cancel | accept`, `handsfree commit | legacy | switchless on|off`;
+`train start pause|drag | cancel | accept`, `handsfree commit | legacy | switchless on|off | enable maintained|momentary`;
 `step` accepts an optional ninth integer `enable`. New telemetry object `handsFree` (mode, config
-state, `configId`, switch, gesture counters, drag, training, staged/stored flags, blocked reason).
+state, `configId`, switch (`kind`, `kindStaged`, `pressed`, `latched`, `armed`, `on`, `permitted`), gesture counters, drag, training, staged/stored flags, blocked reason).
 All numbers in telemetry are sanitised so the JSON stays valid and finite in every state.
 
 ## 10. Companion and Lab
 
-Helper-guided setup (calibrate → train pause/resume → train drag → qualify switch → commit →
+Helper-guided setup (calibrate → train pause/resume → train drag → choose and confirm the enable input → commit →
 resume), live status (READY, ACTIVE, PAUSED, SAFE_STATE, drag, switch), retry/cancel/error states
 and recovery guidance. Helper controls for calibration, pause and recovery remain. Legacy
 switch-hold control is labelled compatibility-only and disabled in hands-free mode. Lab blocks freeze
@@ -239,5 +276,5 @@ reasons. A drag toggle or any executed gesture during a block aborts it.
 Software tests prove deterministic logic on synthetic and replayed samples. They do **not** prove
 accidental-trigger rates, comfort, training burden or suitability. Hardware-required: sensor
 initialisation/data-ready, exact N16R8 memory and USB, BLE behaviour (including disconnect during
-drag), electrical enable-switch wiring and bounce, gesture comfort and accidental activation with
+drag), electrical enable-button wiring, continuity-identified contact pairs and real bounce, gesture comfort and accidental activation with
 real users, and all values above.

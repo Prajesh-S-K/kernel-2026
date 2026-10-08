@@ -56,15 +56,16 @@ HOST_CLICK trials on the desktop measure ordinary host pointing, not NodX adapta
 
 ## Revision 3 additions: hands-free (additive)
 
-`protocol` stays 1; `protocolRevision` is 3. Every existing command, field and the 84-byte profile
+`protocol` stays 1; `protocolRevision` is 4 (3 added the hands-free commands; 4 adds the enable-input kind and the raw-vs-latched fields; both additive). Every existing command, field and the 84-byte profile
 encoding are unchanged; old clients ignore the new object.
 
 **Commands** (native line protocol / serial; the bridge uses `action` objects):
 
 | Command | Bridge action | Notes |
 |---|---|---|
-| `enable 0\|1` | `{"action":"enable","enabled":bool}` | Simulated maintained switch (simulators only; refused by hardware firmware). `enabled` is required. OFF releases at once |
-| `step … fault [enable]` | `step` with optional `"enabled":bool` | Optional ninth integer 0/1; omitted keeps the current simulated switch state |
+| `enable 0\|1` | `{"action":"enable","enabled":bool}` | Simulated RAW enable input: button pressed / switch ON (simulators only; refused by hardware firmware). `enabled` is required. Starts released. A disabling edge releases at once |
+| `handsfree enable maintained\|momentary` | `{"action":"handsfree","op":"enable","kind":"momentary"}` | Stages the enable-input kind (default for a new setup: `momentary`); stored only by `handsfree commit`. `handsFree.switch` reports `kind`, `kindStaged`, `pressed` (raw), `latched` (button permission), `armed`, `on`, `permitted` |
+| `step … fault [enable]` | `step` with optional `"enabled":bool` | Optional ninth integer 0/1 (raw input); omitted keeps the current simulated input state |
 | `gesture <nod\|turn\|tilt><1-3> [scale]` | `{"action":"gesture","name":"nod2","scale":1}` | Scripted synthetic motion (simulators only); scale 0.25–3 |
 | `train start pause\|drag` | `{"action":"train","op":"start","gesture":"pause"}` | Stops and releases output; needs a valid profile |
 | `train cancel` / `train accept` | `{"action":"train","op":"cancel\|accept"}` | Cancel keeps all stored/staged data; accept needs a validated pattern, stages only |

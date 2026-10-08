@@ -36,4 +36,4 @@ The custom NodX cursor belongs to the companion. Standard BLE HID uses the host'
 
 Release gate: `sh scripts/release_gate.sh`. Package only its clean, committed source with `python3 scripts/package.py`. The prior release tag is preserved.
 
-Standalone Wokwi diagnostic (one slide switch, MPU6050, no buttons, no buzzer, no BLE): [wokwi/handsfree-diagnostic](wokwi/handsfree-diagnostic/README.md). It is a simulation aid, not hardware qualification.
+Standalone Wokwi diagnostic (one four-pin momentary pushbutton as the enable button, MPU6050, no other buttons, no buzzer, no BLE): [wokwi/handsfree-diagnostic](wokwi/handsfree-diagnostic/README.md). It is a simulation aid, not hardware qualification.

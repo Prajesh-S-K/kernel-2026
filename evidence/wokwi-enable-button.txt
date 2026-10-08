@@ -1,0 +1,32 @@
+Wokwi diagnostic with ONE four-pin momentary tactile pushbutton (wokwi-pushbutton-6mm, GPIO4 <-> GND).
+Observed in the Wokwi web editor (no sign-in, nothing saved or shared). Wokwi simulates contact bounce
+by default (the part's `bounce` attribute was left at its default). The button was pressed and released
+by dispatching mouse events on the part, with holds of 1.5-5 s of simulation time.
+The raw state ("button PRESSED / released") and the latched permission ("control ENABLED / DISABLED")
+are separate fields on every serial line; `toggles` counts accepted toggles.
+
+Boot with the button HELD:
+  CONTROL DISABLED
+  Button is HELD at boot: release it, then press once to enable.
+  ... button PRESSED | control DISABLED | toggles=0 | ok=16 fail=0      (held for several seconds: nothing)
+Released (no press yet):
+  ... button released | control DISABLED | toggles=0 | ok=201 fail=0   (release alone enables nothing)
+First press, held 2 s:
+  CONTROL ENABLED (latched; control is NOT resumed by this)
+  ... button PRESSED | control ENABLED | toggles=1 | ok=211 fail=0
+Still held, 5 s in total:
+  ... button PRESSED | control ENABLED | toggles=1 | ok=226 fail=0      (a long hold toggles once)
+Released:
+  ... button released | control ENABLED | toggles=1 | ok=236 fail=0    (permission outlives the press)
+Second press:
+  CONTROL DISABLED
+  ... button PRESSED | control DISABLED | toggles=2 | ok=246 fail=0
+Released, then a third press and release:
+  ... button released | control DISABLED | toggles=2 | ok=256 fail=0
+  CONTROL ENABLED (latched; control is NOT resumed by this)
+  ... button released | control ENABLED | toggles=3 | ok=271 fail=0
+
+Every accepted press toggled exactly once (toggles went 0,1,1,1,2,2,3). This is a simulation of an
+idealised part: it says nothing about a real tactile switch's bounce, contact resistance, wiring or
+which pins of the real component form a contact pair (continuity testing decides that).
+Screenshot: wokwi-enable-button.jpg

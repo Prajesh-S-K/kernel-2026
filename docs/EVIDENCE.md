@@ -56,25 +56,77 @@ Nothing below establishes hardware behaviour, accidental-trigger rates, comfort,
 
 | Group | Baseline (unchanged, still passing) | Added by this revision | Now |
 |---|---:|---:|---:|
-| C++ named checks (`nodx_tests` / `nodx_handsfree_tests`) | 42 | 116 | 158 |
-| Python (`unittest`) | 19 | 21 | 40 |
-| JavaScript (`node --test`) | 13 | 14 | 27 |
-| **Subtotal** | **74** | **151** | **225** |
-| Firmware command path, host-compiled (`nodx_firmware_sim_tests` / `nodx_firmware_hw_tests`) | 0 | 142 | 142 |
-| **Total named checks** | **74** | **293** | **367** |
+| C++ named checks (`nodx_tests` / `nodx_handsfree_tests`) | 42 | 137 | 179 |
+| Python (`unittest`) | 19 | 29 | 48 |
+| JavaScript (`node --test`) | 13 | 20 | 33 |
+| **Subtotal** | **74** | **186** | **260** |
+| Firmware command path, host-compiled (`nodx_firmware_sim_tests` / `nodx_firmware_hw_tests`) | 0 | 170 | 170 |
+| **Total named checks** | **74** | **356** | **430** |
 
 Each named check counts once; a test executable is not counted as one check. Logs:
 [software gate](../evidence/handsfree-software-checks.log) (formatting, lint, UBSAN native build, Python,
 JavaScript), [named C++ results](../evidence/handsfree-tests.log), [firmware builds](../evidence/handsfree-firmware-build.log).
-`ctest` reports 4 test programs; the 158 named C++ checks are inside the first two. The firmware command-path
-program is built twice from the same test file (simulated and hardware configuration): 129 + 51 check
-*executions*; counting the 38 checks that run identically in both configurations (37 parser checks and the
-boot-banner check) once gives the 142 in the table. Some check names repeat (a helper used at several call sites), so
+`ctest` reports 4 test programs; the 179 named C++ checks are inside the first two. The firmware command-path
+program is built twice from the same test file (simulated and hardware configuration): 157 + 56 check
+*executions*; counting the 43 checks that run identically in both configurations (42 parser checks and the
+boot-banner check) once gives the 170 in the table. Some check names repeat (a helper used at several call sites), so
 the table counts executed checks, not unique strings. Its log: [firmware command tests](../evidence/firmware-command-tests.log).
 
 Firmware: `esp32s3` (774,509 B flash), `esp32s3-sim` (781,841 B) and `esp32s3-n16r8-bench` (778,189 B) all built;
 GPIO defaults remain disabled and `NODX_ENABLE`/`NODX_BUZZER` default to -1. Compilation is not hardware
 qualification, and the DIO/QIO image-header question from the N16R8 note remains open.
+
+## Enable push button (momentary, four-pin tactile)
+
+The control-enable input is now, by default, one momentary push button (GPIO4 and GND on different contact
+pairs, START assignment, no 3V3/5V) whose debounced presses toggle a permission latch; the maintained switch
+remains as an explicit stored option. Rules: [HANDS_FREE_SPEC §3](HANDS_FREE_SPEC.md). Everything below is
+software and simulation; no real button, contact pair, bounce or wiring was measured.
+
+* **Core gate tests** (1 ms resolution, `tests/test_handsfree.cpp` section K): boot released, boot held for 5 s
+  (never enables; a 20 ms release is not a stable release), press and release bounce (24 ms of 2 ms chatter on
+  the press, the release and the disabling press: exactly one toggle each), a 30 s hold (one toggle) and 10
+  repeated presses (one toggle per press, permission alternates), a second press needing a stable release, a
+  one-sample glitch only ever disabling, clearing the latch (fault) needing a release and a new press.
+* **System tests**: pressed and latched reported separately (and in the telemetry JSON); reboot with the button
+  released and held starts disabled and never resumes; enabling never resumes and the resume gesture is a
+  separate step; the disabling press stops pointer movement, scrolling, a dwell in progress and a drag *at the
+  press edge with no further sample*; a failed neutral delivery is a fault, the latch is cleared and no number of
+  presses recovers it; a sensor fault is not bypassed by presses while the sensor is still bad; an invalid stored
+  configuration and an unwired input stay inhibited whatever the button does; a saved maintained-switch setup
+  keeps its kind across reboot and retraining; a record written before the button existed decodes as
+  maintained and re-encodes byte-identically (golden record from the previous revision's encoder); changing
+  the kind at commit starts disabled again.
+* **Firmware host harness** (real `runtime/commands/telemetry.cpp`): the new setup starts as the button kind,
+  disabled; a gesture and the helper resume are refused while disabled; one press latches without resuming;
+  raw pressed and latched permission differ after release; the disabling press pauses, releases a drag and
+  clears the latch in its own acknowledgement; holding after that does not toggle again; reboot with the
+  button held keeps the saved setup but not the permission; release alone enables nothing, a new press does;
+  a fault drops the latch and presses during it do not bypass it; the maintained kind can be staged, committed,
+  works without a latch and survives a reboot; malformed `handsfree enable` commands are refused.
+* **Python protocol tests** (8) and **companion logic tests** (6) cover the same flows through the native line
+  protocol and the Lab/setup view model.
+* **Mutation checks** (run, then reverted): enabling while the button is held at boot fails 8 or more checks (the
+  run listed the first 8), repeated toggling while held 6 or more, disabling only after the debounce fails 6, not clearing the latch on a fault
+  fails 1 core and 1 firmware-harness check, converting a maintained setup to the button on retraining fails 1,
+  a gate that starts enabled 6 or more; in the firmware harness not feeding the raw input every pass fails the
+  whole button flow, accepting a bogus kind fails 3.
+* **Browser** (companion, manual): the Studio shows *Hold to press the enable button*, chips read
+  `Control DISABLED · press enable button` / `Button released`; a held press shows `Button PRESSED` and
+  `Control PERMITTED · enable button latched`; after release the permission stays; the resume gesture then
+  gives ACTIVE; the second press gives PAUSED immediately; a gesture while disabled does nothing. The setup view
+  offers the input kind (button default, maintained switch compatibility). No horizontal overflow at 375 px.
+  [Screenshot](../evidence/handsfree-enable-button-studio.jpg).
+* **Wokwi**: the diagnostic uses one `wokwi-pushbutton-6mm` (its docs: pins `1.l/1.r/2.l/2.r`, `1.x` one contact,
+  `2.x` the other, bounce on by default). Held at boot stays disabled, release alone enables nothing, one
+  press enables with `toggles=1`, a 5 s hold stays 1, the second press disables, the third enables
+  (`toggles=3`): [transcript](../evidence/wokwi-enable-button.txt), [screenshot](../evidence/wokwi-enable-button.jpg).
+  The simulator ran at about 3 % speed while the browser pane was not displayed and at about 75-100 % when it
+  was; runs were done with the pane displayed.
+* **Decisions to review**: (1) the disabling press acts at its first edge (fail safe), so a one-sample glitch can
+  disable control; (2) a fault clears the latch, so the button must be pressed again after a fault; (3) the
+  simulated raw input now starts released (it used to start ON), so existing maintained-switch flows press or
+  tick it explicitly; (4) a new setup stages the button kind, a stored record keeps its own.
 
 ## Firmware command path (host-compiled)
 

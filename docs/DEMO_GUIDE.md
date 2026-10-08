@@ -34,8 +34,10 @@ scripted and that nothing here is hardware or user evidence.
 2. **Daily use, no buttons**: *Control studio*. Perform the pause/resume gesture (state ACTIVE). Press
    `D` briefly and hold still: ARMING → PROGRESS → click → LOCKOUT with no selection button. Perform the
    drag gesture (cursor DRAG), move, perform it again to release.
-3. **Switch**: untick *Control-enable switch ON*: control stops at once and a drag would be dropped.
-   Tick it again: nothing resumes. Perform the resume gesture.
+3. **Enable button**: hold *Hold to press the enable button* once: control stops at once and a drag would be
+   dropped. Press it again: permission returns but nothing resumes; perform the resume gesture. (A setup saved
+   with the maintained-switch option shows a checkbox instead.) The chips show the raw button and the latched
+   permission separately.
 4. **Faults**: inject a sensor fault; show SAFE_STATE, release and READY after recovery with no
    automatic resume or re-pressed button.
 5. **Errors**: block configuration writes on disk and *Save changes*: the UI shows the failure and that

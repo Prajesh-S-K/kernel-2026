@@ -139,11 +139,11 @@ An unpacked archive without Git can run builds/checks; packaging requires a vers
    train the drag gesture the same way with a *different, non-prefix* pattern; confirm the enable
    switch (or explicitly qualify a switchless alternative); *Convert and save setup*. The user, not the
    helper, chooses comfortable patterns; double nod and double sideways tilt are only examples.
-2. **Daily use**: switch the control-enable switch ON (this only *permits*), then perform the
-   pause/resume gesture. Pointing follows head motion; dwell clicks automatically after holding still
+2. **Daily use**: press the enable button once (this only *permits*; it is never saved, so after a
+   restart or fault press it again), then perform the pause/resume gesture. Pointing follows head motion; dwell clicks automatically after holding still
    (a click needs meaningful movement before the next one); the drag gesture presses and releases; the
-   pause gesture or switch OFF stops everything at once. After any fault, disconnect or switch-OFF,
-   control is READY/PAUSED and needs the resume gesture again.
+   pause gesture or the next press of the enable button stops everything at once. After any fault,
+   disconnect or disable, control is READY/PAUSED and needs the resume gesture again.
 3. **Helper-only** actions remain: calibration, training, saving, the helper Pause/Resume buttons and
    returning to legacy compatibility mode.
 
@@ -151,7 +151,8 @@ An unpacked archive without Git can run builds/checks; packaging requires a vers
 
 `python3 desktop/server.py` shows the *Hands-free setup* view. Native commands (also used by the
 tests): `train start pause|drag`, `train accept|cancel`, `handsfree commit|legacy`,
-`handsfree switchless on|off`, `enable 0|1` (simulated maintained switch),
+`handsfree switchless on|off`, `handsfree enable maintained|momentary`, `enable 0|1` (simulated raw
+enable input: button pressed / switch ON; starts released),
 `gesture <nod|turn|tilt><1-3> [scale]` (400 ms still, pattern, 400 ms still), and an optional ninth
 `step` field `enable`. Replay with `nodx_sim <runtime> --replay samples.csv --hands-free` keeps the stored
 profile/configuration and resumes only by recognised gesture; a ninth CSV column `enable` drives the
@@ -162,12 +163,12 @@ simulated switch (recordings now include it). Labels stay `SIMULATED`, `FIRMWARE
 
 | Connection | Candidate | Note |
 |---|---|---|
-| Control-enable switch | GPIO4 → maintained switch → GND (`NODX_ENABLE`, active low, internal pull-up) | **START only.** ON permits control; OFF inhibits. Default `-1` in every environment |
+| Control-enable button | GPIO4 → one contact pair of a four-pin momentary tactile button; GND → the other pair (`NODX_ENABLE`, active low, internal pull-up). **No 3V3/5V connection.** | **START only.** Identify the pairs by continuity testing, not appearance. One press permits, the next disables; never saved. Default `-1` in every environment |
 | MPU SDA / SCL | GPIO8 / GPIO9 | Unchanged candidate; pull-ups to 3.3 V |
 | Selection, pause, calibration buttons | none | Not used in hands-free mode |
 | Buzzer | none | Deferred; `NODX_BUZZER=-1` |
 
-With `NODX_ENABLE=-1` the maintained switch is not configured and hands-free control stays
+With `NODX_ENABLE=-1` the enable input is not configured and hands-free control stays
 inhibited. To bench-test, add `-DNODX_ENABLE=4` (with the SDA/SCL candidates) to a *separate bench
 environment* after the exact board's pins and the switch wiring are checked. Check the real MPU6050
 breakout's VCC arrangement and the exact N16R8 board pin availability from photos or schematics
@@ -177,6 +178,6 @@ first. Compiling proves nothing about the physical board.
 
 [`wokwi/handsfree-diagnostic`](../wokwi/handsfree-diagnostic/README.md): paste `diagram.json` and
 `sketch.ino` into a new ESP32-S3 project at wokwi.com. It shows an ESP32-S3, an MPU6050 on SDA GPIO8 /
-SCL GPIO9 powered from 3V3, and one slide switch on GPIO4. It prints sensor identity, values and the
-switch state, and never emits BLE or HID output. The Wokwi wiring is an idealised simulation, **not**
+SCL GPIO9 powered from 3V3, and one four-pin momentary pushbutton (GPIO4 and GND on different contact pairs). It prints sensor
+identity, values, the raw button state and the latched permission, and never emits BLE or HID output. The Wokwi wiring is an idealised simulation, **not**
 approved physical wiring.

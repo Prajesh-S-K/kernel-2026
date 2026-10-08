@@ -29,7 +29,7 @@ Dirty/stale release packaging is a refusal, not a usable artifact; rerun the ful
 
 | Trigger | Expected response | Recovery |
 |---|---|---|
-| Control-enable switch OFF (or bounce while ON) | Released stationary report at once, drag dropped, recognition reset, ACTIVE → PAUSED | Switch ON (permits only), then the resume gesture; never automatic |
+| Control-enable switch OFF, or an enable-button press while permitted (or bounce) | Released stationary report at once, drag dropped, recognition reset, ACTIVE → PAUSED; an undeliverable release is a fault (SAFE_STATE) | Switch ON / press the button once more (permits only; a button held at boot must be released first), then the resume gesture; never automatic. A fault or reboot clears the button's permission |
 | Switch unconfigured, disconnected or unknown at boot | Control inhibited; resume refused with the reason | Configure the switch, or a helper qualifies a switchless alternative in setup |
 | Fault, sensor loss, BLE loss, failed delivery while dragging | SAFE_STATE, button released (or first connected report released), nothing re-pressed | 20 healthy samples → READY; resume gesture; start drag again deliberately |
 | Gesture misfire or user cannot gesture | Pause gesture, switch OFF, or the helper Pause button all stop control | Retrain, or return to legacy compatibility mode |
