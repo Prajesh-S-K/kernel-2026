@@ -86,6 +86,65 @@ void beginDrag(HF& h) {
 }
 } // namespace
 
+// ---- ordinary pointing versus recognition candidates (observed in the Lab block) ----------------
+// What one run of synthetic pointing cost, measured against the same input on a legacy-mode system
+// (same default profile, plain resume) that has no recognizer to suppress anything.
+struct Pointing {
+    unsigned candidates = 0, rejected = 0, executed = 0, suppressedMs = 0, longestMs = 0;
+    float dx = 0, dy = 0, wheel = 0;
+    bool dragSeen = false, leftActive = false;
+    Reject lastReject = Reject::None;
+};
+Pointing pointing(HF& h, const std::vector<Rates>& input) {
+    Pointing result;
+    const auto before = h.s().recognizer;
+    const size_t mark = h.transport.reports.size();
+    unsigned run = 0;
+    for (const auto& rate : input) {
+        h.tick(rate);
+        if (h.s().recognizer.suppressing()) {
+            result.suppressedMs += 10;
+            run += 10;
+            result.longestMs = std::max(result.longestMs, run);
+        } else {
+            run = 0;
+        }
+        result.dragSeen = result.dragSeen || h.s().dragging;
+        result.leftActive = result.leftActive || h.s().state != SystemState::Active;
+    }
+    result.candidates = h.s().recognizer.candidates - before.candidates;
+    result.rejected = h.s().recognizer.rejected - before.rejected;
+    result.executed = h.s().recognizer.executed - before.executed;
+    result.lastReject = h.s().recognizer.lastReject;
+    for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+        result.dx += h.transport.reports[i].dx;
+        result.dy += h.transport.reports[i].dy;
+        result.wheel += h.transport.reports[i].wheel;
+    }
+    return result;
+}
+std::unique_ptr<HF> legacyActive() {
+    auto h = std::make_unique<HF>();
+    h->sw = false; // the enable switch is irrelevant in legacy mode
+    h->quiet(500);
+    require(h->s().resume(), "legacy resume");
+    h->quiet(400);
+    return h;
+}
+// Rest, a held movement on one axis, rest. A held key in the companion produces exactly this.
+std::vector<Rates> held(unsigned axis, float rate, unsigned holdMs, unsigned restBefore = 600,
+                        unsigned restAfter = 600) {
+    std::vector<Rates> out;
+    sim::neutral(out, restBefore);
+    Rates value{};
+    value[axis] = rate;
+    out.insert(out.end(), holdMs / 10, value);
+    sim::neutral(out, restAfter);
+    return out;
+}
+// Candidate suppression stops at the learned stroke limit (300 ms here) plus one sample.
+constexpr unsigned maxSuppressionMs = 320;
+
 int main() {
     unsigned passed = 0, failed = 0;
     auto test = [&](const std::string& label, const std::function<void()>& body) {
@@ -1692,6 +1751,188 @@ int main() {
                     "reports differ");
         }
         require(a.s().state == b.s().state && a.s().state == SystemState::Active, "end state");
+    });
+
+    // ------------------------------------------------ J: pointing versus candidates
+    // The first stroke of a pattern looks like the start of pointing in that direction. These cases
+    // reproduce what the Lab block showed (keyboard pointing at 20 deg/s opened rejected
+    // candidates) with the learned templates, and pin down the cost and the safety outcome.
+    test("held pointing in a pattern's first-stroke direction opens one bounded rejected candidate",
+         [] {
+             HF h;
+             h.active();
+             const auto input = held(1, 20.f, 1000); // pitch+, as the S key does
+             const auto base = legacyActive();
+             const Pointing hf = pointing(h, input), plain = pointing(*base, input);
+             require(hf.candidates == 1 && hf.rejected == 1, "one candidate, one rejection");
+             require(hf.lastReject == Reject::TooSlow, "a held movement is rejected as too slow");
+             require(hf.executed == 0, "a command executed on pointing");
+             require(hf.suppressedMs > 0 && hf.longestMs <= maxSuppressionMs,
+                     "suppression unbounded");
+             require(!hf.dragSeen && !hf.leftActive, "drag or pause on pointing");
+             require(h.s().recognizer.executed == 0 &&
+                         h.s().interaction == InteractionMode::HandsFree,
+                     "state changed");
+             // The cost is real: movement during the window is gone, and nothing is replayed after
+             // it.
+             require(plain.dy - hf.dy > 100.f, "no pointer movement was discarded");
+             const float discardedShare = (plain.dy - hf.dy) / plain.dy;
+             require(discardedShare < .4f, "discard exceeds the suppression window");
+             float biggestHF = 0, biggestPlain = 0;
+             for (size_t i = h.transport.reports.size() - 100; i < h.transport.reports.size();
+                  ++i) {
+                 biggestHF = std::max(biggestHF, std::abs(float(h.transport.reports[i].dy)));
+             }
+             for (size_t i = base->transport.reports.size() - 100;
+                  i < base->transport.reports.size(); ++i) {
+                 biggestPlain =
+                     std::max(biggestPlain, std::abs(float(base->transport.reports[i].dy)));
+             }
+             require(biggestHF <= biggestPlain, "suppressed movement was replayed as a burst");
+         });
+    test("the suppression window is the same at every pointing speed, the discard grows with speed",
+         [] {
+             float previous = 0;
+             for (float rate : {20.f, 30.f, 40.f, 60.f}) {
+                 HF h;
+                 h.active();
+                 const auto base = legacyActive();
+                 const auto input = held(1, rate, 1000);
+                 const Pointing hf = pointing(h, input), plain = pointing(*base, input);
+                 require(hf.candidates == 1 && hf.executed == 0 && hf.longestMs <= maxSuppressionMs,
+                         "speed changed the outcome");
+                 require(plain.dy - hf.dy > previous, "discard did not grow with speed");
+                 previous = plain.dy - hf.dy;
+             }
+         });
+    test("roll pointing in the second pattern's first-stroke direction is suppressed the same way",
+         [] {
+             HF h;
+             h.active();
+             const Pointing hf = pointing(h, held(2, 20.f, 1000)); // roll+
+             require(hf.candidates == 1 && hf.rejected == 1 && hf.lastReject == Reject::TooSlow,
+                     "roll+ candidate");
+             require(hf.executed == 0 && !hf.dragSeen && !hf.leftActive, "roll pointing acted");
+             require(hf.longestMs <= maxSuppressionMs, "suppression unbounded");
+         });
+    test("directions and speeds that cannot start a pattern never open a candidate", [] {
+        for (unsigned axis = 0; axis < 3; ++axis) {
+            for (float sign : {1.f, -1.f}) {
+                for (float rate : {5.f, 10.f, 15.f, 20.f, 40.f, 60.f}) {
+                    const bool firstStroke = sign > 0 && axis != 0 && rate >= 20.f;
+                    if (firstStroke) {
+                        continue; // covered above
+                    }
+                    HF h;
+                    h.active();
+                    const Pointing hf = pointing(h, held(axis, sign * rate, 1000));
+                    require(hf.candidates == 0 && hf.executed == 0 && hf.suppressedMs == 0,
+                            "unexpected candidate");
+                }
+            }
+        }
+    });
+    test("a slow onset (ramp) is treated as pointing and never opens a candidate", [] {
+        HF h;
+        h.active();
+        std::vector<Rates> input;
+        sim::neutral(input, 600);
+        for (unsigned t = 10; t <= 500; t += 10) {
+            input.push_back({0, 20.f * float(t) / 500.f, 0});
+        }
+        input.insert(input.end(), 100, Rates{0, 20.f, 0});
+        sim::neutral(input, 600);
+        const Pointing hf = pointing(h, input);
+        require(hf.candidates == 0 && hf.suppressedMs == 0 && hf.executed == 0, "ramp suppressed");
+    });
+    test("keyed pointing corpus: every candidate is rejected, bounded, and nothing executes", [] {
+        HF h;
+        h.active();
+        const auto base = legacyActive();
+        uint32_t seed = 987654321; // fixed LCG: the corpus is reproducible
+        auto next = [&] {
+            seed = seed * 1664525u + 1013904223u;
+            return seed >> 16;
+        };
+        unsigned candidates = 0, rejected = 0, suppressed = 0, longest = 0;
+        float discarded = 0, total = 0;
+        for (unsigned i = 0; i < 300; ++i) {
+            const unsigned axis = next() % 2;
+            const float sign = (next() % 2) ? 1.f : -1.f;
+            const unsigned hold = 200 + (next() % 19) * 100, rest = 100 + (next() % 20) * 50;
+            const auto input = held(axis, sign * 20.f, hold, 0, rest);
+            const Pointing hf = pointing(h, input), plain = pointing(*base, input);
+            require(hf.executed == 0, "a command executed on keyed pointing");
+            require(!hf.dragSeen && !hf.leftActive, "drag or pause on keyed pointing");
+            candidates += hf.candidates;
+            rejected += hf.rejected;
+            suppressed += hf.suppressedMs;
+            longest = std::max(longest, hf.longestMs);
+            discarded += std::hypot(plain.dx - hf.dx, plain.dy - hf.dy);
+            total += std::hypot(plain.dx, plain.dy);
+        }
+        require(candidates >= 40, "the corpus no longer reproduces the observed candidates");
+        require(candidates == rejected, "a candidate was left open or accepted");
+        require(longest <= maxSuppressionMs, "suppression unbounded");
+        require(suppressed <= candidates * maxSuppressionMs, "total suppression unbounded");
+        require(discarded > 0 && discarded < .10f * total, "discard share regressed");
+        require(h.s().recognizer.executed == 0 && h.s().state == SystemState::Active, "end state");
+    });
+    test("deliberate gestures still execute after pointing candidates were rejected", [] {
+        HF h;
+        h.active();
+        require(pointing(h, held(1, 30.f, 800)).candidates == 1, "setup candidate");
+        h.quiet(600);
+        h.run(script("nod2"));
+        h.quiet(400);
+        require(h.s().state == SystemState::Paused, "the pause gesture was lost");
+        h.quiet(400);
+        h.run(script("nod2"));
+        h.quiet(400);
+        require(h.s().state == SystemState::Active, "resume gesture was lost");
+    });
+    test("patterns that both start on roll leave yaw/pitch pointing completely untouched", [] {
+        // Mitigation for a helper to choose: when no pattern begins with a yaw or pitch stroke,
+        // pointing never opens a candidate. Pause = tilt + - + -, drag = tilt - + - +.
+        HF h;
+        auto reversed = script("tilt2");
+        for (auto& rate : reversed) {
+            rate[2] = -rate[2];
+        }
+        auto train = [&](GestureId id, const std::vector<Rates>& pattern) {
+            require(h.s().trainStart(id, h.now), "train start");
+            h.quiet(1100);
+            for (unsigned i = 0; i < start::trainExamples; ++i) {
+                h.quiet(400);
+                h.run(pattern);
+                h.quiet(500);
+            }
+            h.quiet(400);
+            h.run(pattern);
+            h.quiet(400);
+            require(h.s().trainAccept(), "train accept");
+        };
+        train(GestureId::PauseResume, script("tilt2"));
+        train(GestureId::Drag, reversed);
+        require(h.s().commitHandsFree(), "commit");
+        h.quiet(500);
+        require(h.s().resume(), "resume");
+        h.quiet(400);
+        const auto base = legacyActive();
+        for (unsigned axis : {0u, 1u}) {
+            for (float sign : {1.f, -1.f}) {
+                for (float rate : {20.f, 40.f, 60.f}) {
+                    const auto input = held(axis, sign * rate, 1000);
+                    const Pointing hf = pointing(h, input), plain = pointing(*base, input);
+                    require(hf.candidates == 0 && hf.suppressedMs == 0,
+                            "pointing opened a candidate");
+                    require(hf.dx == plain.dx && hf.dy == plain.dy, "pointing movement differs");
+                }
+            }
+        }
+        h.run(script("tilt2"));
+        h.quiet(400);
+        require(h.s().state == SystemState::Paused, "roll pattern no longer pauses");
     });
 
     std::cout << passed << " passed, " << failed << " failed\n";

@@ -56,17 +56,17 @@ Nothing below establishes hardware behaviour, accidental-trigger rates, comfort,
 
 | Group | Baseline (unchanged, still passing) | Added by this revision | Now |
 |---|---:|---:|---:|
-| C++ named checks (`nodx_tests` / `nodx_handsfree_tests`) | 42 | 108 | 150 |
+| C++ named checks (`nodx_tests` / `nodx_handsfree_tests`) | 42 | 116 | 158 |
 | Python (`unittest`) | 19 | 21 | 40 |
 | JavaScript (`node --test`) | 13 | 14 | 27 |
-| **Subtotal** | **74** | **143** | **217** |
+| **Subtotal** | **74** | **151** | **225** |
 | Firmware command path, host-compiled (`nodx_firmware_sim_tests` / `nodx_firmware_hw_tests`) | 0 | 142 | 142 |
-| **Total named checks** | **74** | **285** | **359** |
+| **Total named checks** | **74** | **293** | **367** |
 
 Each named check counts once; a test executable is not counted as one check. Logs:
 [software gate](../evidence/handsfree-software-checks.log) (formatting, lint, UBSAN native build, Python,
 JavaScript), [named C++ results](../evidence/handsfree-tests.log), [firmware builds](../evidence/handsfree-firmware-build.log).
-`ctest` reports 4 test programs; the 150 named C++ checks are inside the first two. The firmware command-path
+`ctest` reports 4 test programs; the 158 named C++ checks are inside the first two. The firmware command-path
 program is built twice from the same test file (simulated and hardware configuration): 129 + 51 check
 *executions*; counting the 38 checks that run identically in both configurations (37 parser checks and the
 boot-banner check) once gives the 142 in the table. Some check names repeat (a helper used at several call sites), so
@@ -140,8 +140,9 @@ pause/resume gesture. The persisted `trials.jsonl` rows were checked ([summary](
   **single** result card for the block (12 attempts, 12 hits, header naming the hands-free configuration).
 * Interruptions: one recognition candidate was deliberately injected during trial 5 (`gesture nod1`, rejected with
   `GAP_TIMEOUT`, nothing executed). `gestureInterruptions` per trial was `[0,1,0,0,1,0,1,0,0,1,0,0]`: the injected
-  candidate and three more that the *keyboard pointing itself* opened (constant-rate single-axis movement looks like a
-  stroke to the recogniser). Each was rejected, the block continued and no command executed. This is the suppression
+  candidate (trial 5, which needed an upward move) and three more that the *keyboard pointing itself* opened in trials
+  2, 7 and 10, every one a trial that needed a downward (pitch+) move; constant-rate single-axis movement looks like
+  the first stroke to the recogniser. Each was rejected, the block continued and no command executed. This is the suppression
   cost described in the limitations, observed on synthetic input; it says nothing about real heads.
 * Block 2: after two completed trials a pause/resume gesture was executed. The block aborted, a raw row was persisted with
   `aborted = true` and `abortReason = "gesture command executed"` (not counted in the metrics), and a second card
@@ -150,6 +151,52 @@ pause/resume gesture. The persisted `trials.jsonl` rows were checked ([summary](
 The result is the plumbing check the brief asked for. The hit rate and times are synthetic keyboard pointing and are not
 a performance result.
 
+
+## Pointing and rejected candidates
+
+The Lab block showed rejected recognition candidates during ordinary (keyboard) pointing. Investigated with the
+learned templates (pause = nod2, drag = tilt2, scale 1.0), deterministic synthetic input, against the same input on a
+legacy-mode system that has nothing to suppress. Full tables:
+[measurement](../evidence/pointing-candidates-measurement.txt) (one-off harness; the regression cases below pin it).
+
+* **When a candidate opens.** Only when the filtered rate reaches the learned entry rate (16.8 deg/s, i.e. a held
+  movement of about 20 deg/s or more), in the direction a pattern *starts*, after at least 300 ms of stillness. With these
+  templates that is pitch+ (the nod's first stroke) and roll+ (the tilt's first stroke). Yaw either way, pitch- and roll-
+  never open one, nor does anything at or below 15 deg/s. In the Lab the three trials that opened candidates were all
+  downward (pitch+) moves; three other downward trials did not (probably because the recogniser was not armed:
+  it needs 300 ms of stillness first; this was not traced per trial).
+* **How long it suppresses.** Always one rejection, `TOO_SLOW`, after 310 ms (the learned stroke limit of 300 ms plus
+  one sample), whatever the speed. A held movement never reaches the neutral rate, so no further candidate opens until
+  the user is still for 300 ms.
+* **What it costs.** The pointer movement of that first 310 ms is discarded and never replayed (checked: no burst of
+  movement afterwards): 259 px at 20 deg/s, 468 at 30, 680 at 40, 1035 at 60, out of 850 / 1576 / 2338 / 3543 px for
+  a one-second hold. Roll+ candidates cost scrolling instead. A ramped onset avoids it only when slow enough (20-30
+  deg/s over 500 ms); 40-60 deg/s still opens one at a 500 ms ramp. A 300-hold keyed corpus (fixed LCG, 20 deg/s,
+  yaw/pitch) opened 57 candidates (57 of the 69 pitch+ holds; the other 12 presumably followed too little stillness), 57 ms
+  of suppression per hold on average, and discarded 5.2 % of the pointer movement.
+* **Safety outcome.** In every case: **0 commands executed**, no drag, no pause, state stays `ACTIVE`. A command needs
+  four correctly ordered single-axis strokes of 75-300 ms with peaks of at least 33.6 deg/s and gaps of at most
+  150 ms; a held movement fails the first stroke. A deliberate double nod at 0.5-1.5x the trained amplitude still
+  executes, and still does after rejected candidates. Inherent limit: a real double nod made for another reason (for
+  example agreeing in conversation) *is* the pause gesture; nothing in software can tell them apart.
+* **Are adjustments justified? Not now, and not by raising a threshold.**
+  * Raising the entry rate only moves the cost: a higher entry spares 20-25 deg/s pointing but fast pointing, which
+    loses the most, is still hit, and gentle gestures (peaks near the 33.6 minimum) would be missed. The entry rate is
+    already derived from the user's own examples.
+  * Shortening the learned stroke limit (now 2x the longest example) or ending suppression early when a movement is
+    plainly held would cut the 310 ms window, but they change behaviour next to a safety rule and need real gyro
+    traces of both strokes and pointing to set safely. Recorded as follow-ups, not implemented.
+  * What helps without any code change, verified in the regression suite: if no pattern begins with a yaw or pitch
+    stroke (for example pause = tilt + - + -, drag = tilt - + - +), yaw/pitch pointing never opens a candidate
+    (identical output to the legacy system at 20-60 deg/s in all four directions) and deliberate gestures still work.
+    Whether such patterns are comfortable is a per-user hardware question. The setup view could warn when a pattern
+    starts in a pointing direction; not done here.
+* **Regression cases** (`tests/test_handsfree.cpp`, section J, 8 checks): bounded rejected candidate and discarded
+  (never replayed) movement; window independent of speed while the discard grows; roll+ suppression; no candidate
+  below the entry rate or in non-starting directions; ramped onset; the keyed corpus with 0 executions, every
+  candidate rejected and the discard share bounded below 10 %; gestures still work afterwards; roll-first patterns leave
+  pointing untouched. Mutation checks: removing the stroke limit fails 6 checks (4 new), removing the slow-onset disarm
+  fails 2 (1 new), lowering the entry rate breaks the existing suite.
 
 ## Wokwi diagnostic
 
@@ -174,8 +221,9 @@ Screenshots: [run](../evidence/wokwi-diagnostic-run.jpg), [missing sensor](../ev
   pointing. The suppression/discard design needs real-user accidental-activation measurement.
 * The firmware command path is now exercised on the host (see above), but only against stand-ins for the Arduino core,
   I2C, NVS and BLE. The NVS adapter's size classification is tested; real flash behaviour is not.
-* Keyboard pointing in the Lab opened rejected recognition candidates in 3 of 12 trials (above). The START stroke
-  thresholds may be too sensitive for ordinary pointing; accidental activation needs real-user measurement.
+* Keyboard pointing in the Lab opened rejected recognition candidates in 3 of 12 trials (above), each costing about
+  310 ms of pointing. They were investigated (next section); nothing executed and no parameter was changed.
+  Accidental activation and the real pointing cost need real-user measurement.
 * A torn first configuration write fails closed to CONFIG_INVALID until a helper repairs it; real NVS atomicity is untested.
 * Unchanged open items: MPU6050 data-ready/`INT_ENABLE` initialisation, exact N16R8 memory and USB configuration, BLE
   pairing/report behaviour including drag during disconnect, electrical enable-switch wiring and bounce, gesture comfort

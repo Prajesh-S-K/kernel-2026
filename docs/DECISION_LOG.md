@@ -44,6 +44,7 @@
 | Two commands only: pause/resume and drag toggle | Everything else stays dwell/pointer; fewer patterns to confuse |
 | Patterns must differ and neither may be a prefix of the other | A prefix would fire early inside the longer pattern |
 | A candidate suppresses pointer, scroll and dwell and its movement is discarded; neutral is required before re-arming | Prevents command motion from moving the pointer or replaying; costs up to about one stroke of pointing on a rejection |
+| 2026-10-08 | No recognition threshold or timing is changed after the Lab block showed rejected candidates on keyboard pointing | Measured: candidates open only on sustained pitch+ / roll+ movement of about 20 deg/s or more after 300 ms of stillness, always end `TOO_SLOW` after 310 ms, cost 259-1035 px of movement at 20-60 deg/s, and execute nothing. Raising the entry rate only moves the cost to faster pointing and risks missing gentle gestures; shortening the stroke limit or ending suppression early changes safety-adjacent behaviour. Both need real gyro data first. See EVIDENCE "Pointing and rejected candidates" |
 | Dwell lockout after resume and drag release | A user who is still after a gesture must not get a surprise click |
 | Enable switch: OFF immediate, ON debounced 30 ms, unknown/unconfigured = OFF; ON never resumes | Fail closed; the switch permits, it is not a power switch |
 | `setControlSwitch` is driven every loop pass, not per sensor sample | OFF must release without waiting for a sample |
