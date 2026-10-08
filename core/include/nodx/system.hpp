@@ -1,6 +1,7 @@
 #pragma once
 #include "calibration.hpp"
 #include "clickgesture.hpp"
+#include "quickgesture.hpp"
 #include "fault.hpp"
 #include "handsfree.hpp"
 #include "mapping.hpp"
@@ -140,6 +141,20 @@ public:
     bool clickGestureEnabled() const {
         return uncal_ && clickEnabled_;
     }
+    // Quick tilt-and-return click: practice in RAM (no saved profile needed), then enable explicitly
+    // while a session runs. Enabling it turns dwell and the trained gesture OFF, and vice versa.
+    bool quickPracticeStart(uint32_t now, bool configuredFrame);
+    void quickPracticeRetry(uint32_t now);
+    void quickPracticeCancel();
+    bool quickPracticeAccept();
+    void quickClear();
+    bool setQuickGesture(bool on, uint32_t now);
+    bool setQuickSettings(float sensitivity, float returnTolerance);
+    const char* quickBlocker() const;
+    QuickStatus quickStatus(uint32_t now) const;
+    bool quickGestureEnabled() const {
+        return uncal_ && quickEnabled_;
+    }
     bool uncalibratedDwell() const {
         return uncal_ && uncalDwell_;
     }
@@ -206,13 +221,21 @@ private:
     ControlProcessor controlProc_;
     Vec3 lastAccel_{0, 0, 1};
     // Optional gesture click (RAM only; off until explicitly enabled; cleared by every stop).
-    enum class TeachKind { Mapping, Click };
+    enum class TeachKind { Mapping, Click, Quick };
     TeachKind teachKind_ = TeachKind::Mapping;
     ClickTrainer clickTrainer_;
     ClickRecognizer clickRec_;
     ClickTemplate clickTemplate_;
     bool clickReady_ = false, clickConfiguredFrame_ = false, clickEnabled_ = false;
     bool clickTrainingConfigured_ = false;
+    // EXPERIMENTAL quick tilt-and-return click (RAM only; mutually exclusive with dwell and the trained
+    // gesture; off until explicitly enabled; cleared by every stop or fault).
+    QuickPractice quickPractice_;
+    QuickRecognizer quickRec_;
+    QuickProfile quickProfile_;
+    QuickSettings quickSettings_;
+    bool quickReady_ = false, quickConfiguredFrame_ = false, quickEnabled_ = false;
+    bool quickTrainingConfigured_ = false;
     bool uncalDwell_ = false;
     uint32_t uncalDwellMs_ = start::uncalDwellMs;
     float uncalDwellTolerance_ = start::uncalDwellTolerance;

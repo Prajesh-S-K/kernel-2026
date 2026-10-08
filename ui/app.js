@@ -5,6 +5,7 @@ import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
 import { mappingView } from './mapping.js';
 import { clickView } from './click.js';
+import { quickView } from './quick.js';
 import {
   BANNER,
   DWELL_NOTE,
@@ -216,6 +217,7 @@ function render(data, applyReports = true) {
   renderUncal(data);
   renderMapping(data);
   renderClick(data);
+  renderQuick(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -414,6 +416,37 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+function renderQuick(data) {
+  const view = quickView(data);
+  $('quickPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('quickTag').textContent = view.enabled ? 'ENABLED' : view.practising ? 'PRACTISING' : 'OFF';
+  $('quickTitle').textContent = view.title;
+  $('quickBig').textContent = view.big;
+  $('quickBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('quickInstruction').textContent = view.instruction;
+  $('quickPracticeLine').textContent = view.practiceLine;
+  $('quickPracticeFallback').disabled = !view.canPracticeFallback;
+  $('quickPracticeConfigured').disabled = !view.canPracticeConfigured;
+  $('quickAccept').disabled = !view.canAccept;
+  $('quickRetry').disabled = !view.canRetry;
+  $('quickCancel').disabled = !view.canCancel;
+  $('quickClear').disabled = !view.canClear;
+  $('quickEnable').disabled = !view.canEnable && !view.enabled;
+  $('quickEnable').checked = view.enabled;
+  for (const [id, value] of [
+    ['quickSens', view.q.sensitivity],
+    ['quickTol', view.q.returnTolerance],
+  ])
+    if (document.activeElement !== $(id)) $(id).value = value;
+  $('quickStats').textContent = view.stats;
+  $('quickBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+  if (view.enabled) {
+    // exclusive with the other click recognisers: the device turns them off, the page shows it
+    $('clickEnable').checked = false;
+    $('uncalDwell').checked = false;
+  }
+}
 function renderClick(data) {
   const view = clickView(data);
   $('clickPanel').hidden = !view.hardware;
@@ -523,6 +556,23 @@ $('reconnect').onclick = async () => {
     toast(`Reconnect failed: ${error.message}`);
   }
 };
+for (const [id, extra] of [
+  ['quickPracticeFallback', { op: 'practice', frame: 'fallback' }],
+  ['quickPracticeConfigured', { op: 'practice', frame: 'configured' }],
+  ['quickAccept', { op: 'accept' }],
+  ['quickRetry', { op: 'retry' }],
+  ['quickCancel', { op: 'cancel' }],
+  ['quickClear', { op: 'clear' }],
+])
+  $(id).onclick = () => action('quick', extra);
+$('quickEnable').onchange = () =>
+  action('quick', { op: 'enable', enabled: $('quickEnable').checked });
+$('quickApply').onclick = () =>
+  action('quick', {
+    op: 'set',
+    sensitivity: Number($('quickSens').value),
+    returnTolerance: Number($('quickTol').value),
+  });
 for (const [id, extra] of [
   ['clickTrainFallback', { op: 'train', frame: 'fallback' }],
   ['clickTrainConfigured', { op: 'train', frame: 'configured' }],

@@ -111,5 +111,25 @@ constexpr float clickThresholdMin = .25f;
 constexpr float clickThresholdMax = .5f;
 constexpr uint32_t clickConfusionWindowMs = 15000;
 constexpr uint32_t clickConfusionActivityMs = 5000; // ordinary pointing observed with no false click
+// Quick tilt-and-return click (EXPERIMENTAL START values; synthetic tuning only, no real wearable data yet).
+constexpr uint32_t quickNeutralMs = 250;     // calm needed before arming
+constexpr uint32_t quickMaxMs = 1000;        // onset to the start of the settled return
+constexpr uint32_t quickSettleMs = 150;      // settled confirmation
+constexpr uint32_t quickMinIntervalMs = 500; // minimum interval after a click
+constexpr float quickSensitivity = 1.f;      // adjustable 0.5 .. 2.0
+constexpr float quickReturnTolerance = .35f; // final residual / excursion, adjustable 0.15 .. 0.6
+constexpr float quickCrossRatio = .6f;       // candidate gate: off-direction rate / along-direction rate
+constexpr float quickCrossAngleRatio = .5f;  // off-direction excursion / outward excursion
+constexpr float quickEnterFloor = 12.f;      // deg/s
+constexpr float quickEnterCap = 60.f;
+constexpr float quickExitFloor = 6.f;
+constexpr float quickPracticeMinDeg = 8.f;   // smallest practice tilt that is accepted
+constexpr uint32_t quickPracticeMaxMs = 1500;
+constexpr float quickPracticeResidualRatio = .5f;
+constexpr float quickPracticeCrossRatio = .4f; // practice must be straighter than recognition tolerates
+constexpr float quickPlaneShareMax = .8f;    // practice direction share inside the pointing plane
+constexpr uint32_t quickRestMs = 1500;
+constexpr uint32_t quickRestWindowMs = 6000;
+constexpr uint32_t quickPreviewTimeoutMs = 120000;
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

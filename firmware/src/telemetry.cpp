@@ -117,6 +117,9 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     static char click[clickJsonCapacity];
     const size_t clickLength = clickJson(click, sizeof(click), s.clickStatus(now));
     append(buffer, sizeof(buffer), used, ",\"click\":%s", clickLength ? click : "{}");
+    static char quick[quickJsonCapacity];
+    const size_t quickLength = quickJson(quick, sizeof(quick), s.quickStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"quick\":%s", quickLength ? quick : "{}");
 #ifndef NODX_SIMULATED
     // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
     const auto& snap = sensorSnapshot;

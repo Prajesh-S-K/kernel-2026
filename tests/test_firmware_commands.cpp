@@ -431,7 +431,7 @@ void hardwareChecks() {
     // 5120-byte telemetry buffer, otherwise the firmware silently drops it.
     expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
            "hardware telemetry has the raw sensor block");
-    expect(ack.size() < 3800, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
+    expect(ack.size() < 4200, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
     std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
@@ -475,6 +475,22 @@ void hardwareChecks() {
     expect(ok(send("click cancel")) && ok(send("click clear")) && ok(send("click enable off")),
            "cancel, clear and disable are always accepted");
     expect(has(status(), "\"click\":{\"phase\":\"IDLE\""), "click status reported");
+    expect(refused(send("quick practice fallback")), "quick practice refused before the sensor is healthy");
+    expect(refused(send("quick practice configured")), "configured quick practice needs a learned mapping");
+    expect(refused(send("quick practice sideways")), "bad quick frame refused");
+    expect(refused(send("quick enable on")), "quick enable needs a practice and a session");
+    expect(refused(send("quick enable sideways")), "bad quick enable value refused");
+    expect(refused(send("quick accept")), "nothing to accept");
+    expect(refused(send("quick set 0.4 0.3")) && refused(send("quick set 1 0.7")) &&
+               refused(send("quick set 1")) && refused(send("quick set 1 0.3 1")),
+           "invalid quick settings refused");
+    expect(ok(send("quick set 1.5 0.25")) && has(status(), "\"sensitivity\":1.50,\"returnTolerance\":0.25"),
+           "valid quick settings accepted and reported");
+    expect(ok(send("quick set 1 0.35")), "defaults restored");
+    expect(ok(send("quick cancel")) && ok(send("quick clear")) && ok(send("quick retry")) &&
+               ok(send("quick enable off")),
+           "cancel, clear, retry and disable are always accepted");
+    expect(has(status(), "\"quick\":{\"phase\":\"IDLE\""), "quick status reported");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

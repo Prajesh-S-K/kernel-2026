@@ -185,6 +185,9 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     char click[clickJsonCapacity];
     const size_t clickLength = clickJson(click, sizeof click, s.clickStatus(now));
     std::cout << ",\"click\":" << (clickLength ? click : "{}");
+    char quick[quickJsonCapacity];
+    const size_t quickLength = quickJson(quick, sizeof quick, s.quickStatus(now));
+    std::cout << ",\"quick\":" << (quickLength ? quick : "{}");
     std::cout << ",\"reports\":[";
     for (size_t j = 0; j < hid.reports.size(); ++j) {
         const auto& r = hid.reports[j];
@@ -485,6 +488,36 @@ int main(int argc, char** argv) {
                     ok = sys.teachSave();
                 } else if (ok && verb == "clear") {
                     sys.clearLearned();
+                } else {
+                    ok = false;
+                }
+            } else if (op == "quick") {
+                std::string verb, value;
+                cmd >> verb;
+                if (verb == "practice") {
+                    cmd >> value;
+                    ok = (value == "fallback" || value == "configured") && (cmd >> std::ws).eof() &&
+                         sys.quickPracticeStart(now, value == "configured");
+                } else if (verb == "enable") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setQuickGesture(value == "on", now);
+                } else if (verb == "set") {
+                    float sensitivity = 0, tolerance = 0;
+                    ok = bool(cmd >> sensitivity >> tolerance) && (cmd >> std::ws).eof() &&
+                         sys.setQuickSettings(sensitivity, tolerance);
+                } else if (verb == "retry" || verb == "cancel" || verb == "accept" ||
+                           verb == "clear") {
+                    ok = (cmd >> std::ws).eof();
+                    if (ok && verb == "retry") {
+                        sys.quickPracticeRetry(now);
+                    } else if (ok && verb == "cancel") {
+                        sys.quickPracticeCancel();
+                    } else if (ok && verb == "accept") {
+                        ok = sys.quickPracticeAccept();
+                    } else if (ok) {
+                        sys.quickClear();
+                    }
                 } else {
                     ok = false;
                 }

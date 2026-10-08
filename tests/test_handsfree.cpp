@@ -3867,6 +3867,362 @@ int main() {
                 "documented limit: a turn about the gravity axis cannot be detected");
     });
 
+    // ------------------------------------------------ R: EXPERIMENTAL quick tilt-and-return click
+    struct Tilt {
+        std::array<float, 3> dir{0, 0, 1};
+        float excursionDeg = 13.f;
+        unsigned ms = 600;
+        float returnFrac = 1.f;
+    };
+    auto tiltRate = [](const Tilt& g, float t) {
+        std::array<float, 3> out{0, 0, 0};
+        if (t < 0 || t > float(g.ms)) {
+            return out;
+        }
+        const float half = float(g.ms) / 2.f;
+        const float amp = g.excursionDeg * 3.14159265f / (half / 1000.f) / 2.f;
+        const float level = t < half ? amp * std::sin(3.14159265f * t / half)
+                                     : -g.returnFrac * amp * std::sin(3.14159265f * (t - half) / half);
+        return std::array<float, 3>{g.dir[0] * level, g.dir[1] * level, g.dir[2] * level};
+    };
+    // cue-driven practice through the System; ends in the preview
+    auto quickPractice = [=](HF& h, const M3& m, bool configuredFrame,
+                             const std::function<Tilt(unsigned)>& shape = nullptr) {
+        require(h.s().quickPracticeStart(h.now, configuredFrame), "practice refused");
+        QuickCue last = QuickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        Tilt current;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const QuickStatus st = h.s().quickStatus(h.now);
+            if (st.phase == QuickPhase::Preview) {
+                break;
+            }
+            if (st.cue == QuickCue::Go && last != QuickCue::Go) {
+                ++attempt;
+                current = shape ? shape(attempt) : Tilt{};
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (moving && h.now >= moveStart) {
+                if (h.now - moveStart > current.ms) {
+                    moving = false;
+                } else {
+                    b = tiltRate(current, float(h.now - moveStart));
+                }
+            }
+            rawTick(h, m, b);
+        }
+        return h.s().quickStatus(h.now).phase == QuickPhase::Preview;
+    };
+    auto quickSession = [=]() {
+        HF h = uncalRig();
+        require(quickPractice(h, mountIdentity, false) && h.s().quickPracticeAccept(), "practice");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        h.quiet(300);
+        return h;
+    };
+    auto doQuick = [=](HF& h, const Tilt& g, unsigned tailMs, const M3* mount = nullptr) {
+        const M3& m = mount ? *mount : mountIdentity;
+        for (unsigned t = 0; t <= g.ms; t += 10) {
+            rawTick(h, m, tiltRate(g, float(t)));
+        }
+        for (unsigned t = 0; t < tailMs; t += 10) {
+            rawTick(h, m, {0, 0, 0});
+        }
+    };
+    test("quick gesture: off by default; practice needs no saved profile; enabling is explicit", [=] {
+        HF h = quickSession();
+        require(!h.s().quickGestureEnabled(), "must start disabled");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty() &&
+                    h.controlStorage.slots[0].empty(),
+                "practice must not write any storage");
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 1000);
+        require(clicksSince(h, mark) == 0, "a click before the gesture was enabled");
+        HF fresh = uncalRig();
+        require(!fresh.s().setQuickGesture(true, fresh.now), "enabled without practice or session");
+        require(quickPractice(fresh, mountIdentity, false) && fresh.s().quickPracticeAccept(), "p");
+        require(!fresh.s().setQuickGesture(true, fresh.now), "enabled without a running session");
+        require(fresh.s().startUncalibratedDemo(fresh.now), "session");
+        require(fresh.s().setQuickGesture(true, fresh.now), "enable refused after practice");
+        require(h.s().quickStatus(h.now).ready && !h.s().quickStatus(h.now).enabled, "status");
+    });
+    test("quick gesture: an ambiguous practice is explained and never silently enabled", [=] {
+        HF h = uncalRig();
+        auto shape = [](unsigned attempt) {
+            Tilt g;
+            if (attempt == 1) {
+                g.excursionDeg = 3; // tiny
+            } else if (attempt == 2) {
+                g.dir = {1, 0, 0}; // a pointing movement
+            }
+            return g;
+        };
+        std::string seen;
+        require(h.s().quickPracticeStart(h.now, false), "start");
+        QuickCue last = QuickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        Tilt cur;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const QuickStatus st = h.s().quickStatus(h.now);
+            seen += std::string(st.reason) + "|";
+            if (st.phase == QuickPhase::Preview) {
+                break;
+            }
+            if (st.cue == QuickCue::Go && last != QuickCue::Go) {
+                cur = shape(++attempt);
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (moving && h.now >= moveStart && h.now - moveStart <= cur.ms) {
+                b = tiltRate(cur, float(h.now - moveStart));
+            }
+            rawTick(h, mountIdentity, b);
+        }
+        require(seen.find("too small") != std::string::npos, "tiny tilt not explained");
+        require(seen.find("ordinary pointing") != std::string::npos, "pointing-like tilt not explained");
+        require(!h.s().quickStatus(h.now).ready, "ready before the practice was accepted");
+        require(h.s().quickStatus(h.now).phase == QuickPhase::Preview, "recovered on the third tilt");
+    });
+    test("quick gesture: one press and release, pointer frozen during the candidate, nothing replayed", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        Tilt leaky;
+        leaky.dir = {.2f, 0, .98f}; // a tilt with some yaw in it: pointer-moving, but still a tilt
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, leaky, 300);
+        h.quiet(1500);
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not sent last");
+        float during = 0, total = 0;
+        unsigned downs = 0;
+        size_t clickAt = h.transport.reports.size();
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            total += std::abs(float(r.dx)) + std::abs(float(r.dy));
+            if (r.down) {
+                ++downs;
+                clickAt = std::min(clickAt, i);
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click report");
+            }
+        }
+        for (size_t i = mark; i < clickAt; ++i) {
+            during += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(downs == 1, "one press report only");
+        // Before candidate detection nothing can be undone; once it opens, movement is discarded.
+        require(total <= 12.f, "the pointer jumped around the gesture (frozen movement replayed?)");
+        const QuickStatus st = h.s().quickStatus(h.now);
+        require(st.accepted == 1 && st.suppressedMs > 300 && st.lastDurationMs > 400,
+                "accepted/suppressed/duration must be reported");
+        require(st.lastExcursionDeg > 8.f, "excursion must be reported");
+        (void)during;
+        // control: the same yaw alone (no gesture) DOES move the pointer
+        HF g = quickSession();
+        const size_t markG = g.transport.reports.size();
+        g.run(hold(0, 20, 600));
+        float moved = 0;
+        for (size_t i = markG; i < g.transport.reports.size(); ++i) {
+            moved += std::abs(float(g.transport.reports[i].dx));
+        }
+        require(moved > 15.f, "precondition: yaw moves the pointer");
+    });
+    test("quick gesture: no repeat while still, a fresh neutral period and the interval rearm it", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 250);
+        doQuick(h, Tilt{}, 100); // immediately again: not armed
+        h.quiet(20000);
+        require(clicksSince(h, mark) == 1, "repeat or early second click");
+        doQuick(h, Tilt{}, 400);
+        require(clicksSince(h, mark) == 2, "rearmed after neutral and the minimum interval");
+    });
+    test("quick gesture: ordinary pointing, reversals and tremor never click", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        std::mt19937 rng(12);
+        std::uniform_real_distribution<float> u(0.f, 1.f);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        bool reversal = false;
+        for (unsigned i = 0; i < 30000; ++i) { // 300 s
+            if (h.now >= until) {
+                from = h.now;
+                until = from + 250 + unsigned(1200 * u(rng));
+                const float a = 2 * 3.14159265f * u(rng);
+                dir = {std::cos(a), std::sin(a), .25f * (u(rng) - .5f) * 2.f};
+                peak = 15 + 90 * u(rng);
+                reversal = u(rng) < .3f;
+            }
+            const float x = float(h.now - from) / float(until - from);
+            const float level = reversal ? peak * std::sin(2 * 3.14159265f * x)
+                                         : peak * std::sin(3.14159265f * x);
+            const float tremor = 4.f * std::sin(2 * 3.14159265f * 9.f * float(h.now) / 1000.f);
+            rawTick(h, mountIdentity, {dir[0] * level + tremor, dir[1] * level + tremor, dir[2] * level + tremor});
+        }
+        const QuickStatus st = h.s().quickStatus(h.now);
+        std::printf("INFO synthetic (System): 300 s of pointing: %lu clicks, %lu candidates, %lu ms suppressed\n",
+                    static_cast<unsigned long>(clicksSince(h, mark)), static_cast<unsigned long>(st.candidates),
+                    static_cast<unsigned long>(st.suppressedMs));
+        require(clicksSince(h, mark) == 0, "false click while pointing");
+        require(h.s().uncalibratedDemo(), "pointing must not stop the session");
+    });
+    test("quick gesture: a release failure faults, stops the session and disables it", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const uint32_t faultsBefore = h.s().diagnostics.faults;
+        h.transport.failRelease = true;
+        doQuick(h, Tilt{}, 170); // settled confirmation at 150 ms; recovery needs 200 ms more
+        require(h.s().state == SystemState::SafeState && h.s().diagnostics.faults == faultsBefore + 1,
+                "no fault after a failed release");
+        require(!h.s().uncalibratedDemo() && !h.s().quickGestureEnabled(), "session survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 900);
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "output continued after the fault");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        require(h.s().startUncalibratedDemo(h.now) && !h.s().quickGestureEnabled(),
+                "an explicit restart must come back with the gesture off");
+    });
+    test("quick gesture: button, website stop, fault, disconnect, calibration and practice cancel it", [=] {
+        for (int how = 0; how < 7; ++how) {
+            HF h = quickSession();
+            require(h.s().setQuickGesture(true, h.now), "enable");
+            h.quiet(800);
+            const size_t mark = h.transport.reports.size();
+            for (unsigned t = 0; t <= 250; t += 10) {
+                rawTick(h, mountIdentity, tiltRate(Tilt{}, float(t)));
+            }
+            require(h.s().quickStatus(h.now).suppressing, "candidate not open");
+            if (how == 0) {
+                h.sw = true;
+                h.tick();
+                h.sw = false;
+            } else if (how == 1) {
+                h.s().stopUncalibratedDemo("website stop");
+            } else if (how == 2) {
+                h.now += 10;
+                h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+            } else if (how == 3) {
+                h.transport.online = false;
+                h.quiet(50);
+            } else if (how == 4) {
+                h.s().calibrate(h.now);
+            } else if (how == 5) {
+                h.s().quickPracticeStart(h.now, false);
+            } else {
+                h.s().pause();
+            }
+            require(!h.s().quickGestureEnabled() && !h.s().uncalibratedDemo(), "still enabled");
+            h.transport.online = true;
+            h.s().cancelCalibration();
+            h.s().quickPracticeCancel();
+            h.quiet(1500);
+            for (unsigned t = 250; t <= 600; t += 10) {
+                rawTick(h, mountIdentity, tiltRate(Tilt{}, float(t)));
+            }
+            h.quiet(900);
+            require(clicksSince(h, mark) == 0, "a click after a cancelled candidate");
+            require(h.s().state != SystemState::Active, "something restarted control");
+        }
+    });
+    test("quick gesture: a reboot or a mode change never leaves it enabled", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.boot();
+        h.quiet(600);
+        require(!h.s().quickGestureEnabled() && !h.s().quickStatus(h.now).ready,
+                "a reboot kept the gesture or its practice (RAM only)");
+        HF g = teachRig();
+        require(teachAll(g, mountSideways) && g.s().teachAccept(), "mapping");
+        g.quiet(300);
+        require(quickPractice(g, mountSideways, true) && g.s().quickPracticeAccept(), "configured practice");
+        g.quiet(300);
+        require(g.s().startConfiguredControl(g.now) && g.s().setQuickGesture(true, g.now), "configured");
+        g.s().stopUncalibratedDemo("mode change");
+        require(g.s().startUncalibratedDemo(g.now), "fallback session");
+        require(!g.s().quickGestureEnabled(), "the gesture survived a mode change");
+        require(!g.s().setQuickGesture(true, g.now) &&
+                    std::string(g.s().diagnostics.reason).find("configured") != std::string::npos,
+                "a configured practice must not enable in the fallback");
+    });
+    test("quick gesture: mutually exclusive with dwell and the trained gesture", [=] {
+        HF h = quickSession();
+        h.s().stopUncalibratedDemo("test");
+        require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "trained gesture");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell on");
+        require(h.s().setQuickGesture(true, h.now), "quick on");
+        require(!h.s().handsFreeStatus().uncalDwellEnabled && h.s().quickGestureEnabled(),
+                "enabling the quick gesture must turn dwell off");
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell on again");
+        require(!h.s().quickGestureEnabled(), "enabling dwell must turn the quick gesture off");
+        require(h.s().setQuickGesture(true, h.now) && h.s().setClickGesture(true, h.now),
+                "enabling the trained gesture");
+        require(!h.s().quickGestureEnabled() && h.s().clickGestureEnabled(),
+                "the trained gesture must turn the quick one off");
+        require(h.s().setQuickGesture(true, h.now) && !h.s().clickGestureEnabled(),
+                "and vice versa");
+    });
+    test("quick gesture: works in configured pointing for a rotated mounting, no saved profile", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "mapping");
+        h.quiet(300);
+        require(quickPractice(h, mountSideways, true) && h.s().quickPracticeAccept(), "practice");
+        h.quiet(300);
+        require(h.s().startConfiguredControl(h.now) && h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 400, &mountSideways);
+        require(clicksSince(h, mark) == 1, "configured quick click");
+        require(h.profileStorage.read(0).empty() && h.controlStorage.slots[0].empty(),
+                "nothing may be saved by the practice");
+        h.s().stopUncalibratedDemo("test");
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "relearn");
+        require(!h.s().quickStatus(h.now).ready, "a practice from the old learned frame survived");
+    });
+    test("quick gesture: settings are validated and shown; status JSON is bounded", [=] {
+        HF h = quickSession();
+        require(!h.s().setQuickSettings(.4f, .35f) && !h.s().setQuickSettings(1.f, .7f) &&
+                    !h.s().setQuickSettings(NAN, .3f) && !h.s().setQuickSettings(1.f, .1f),
+                "an invalid setting was accepted");
+        require(h.s().setQuickSettings(1.5f, .25f), "valid setting refused");
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        const QuickStatus st = h.s().quickStatus(h.now);
+        require(std::abs(st.sensitivity - 1.5f) < .001f && std::abs(st.returnTolerance - .25f) < .001f,
+                "settings not reported");
+        char buffer[quickJsonCapacity];
+        const size_t n = quickJson(buffer, sizeof buffer, st);
+        require(n > 100 && n < quickJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        for (const char* key : {"\"state\":\"", "\"suppressedMs\"", "\"lastReject\"", "\"excursion\"",
+                                "\"residual\"", "\"durationMs\"", "\"sensitivity\""}) {
+            require(std::strstr(buffer, key), key);
+        }
+    });
+
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;
 }

@@ -348,3 +348,41 @@ compares the current gravity direction with it:
   (worst case over 3 speeds x 7 seeds: EMA 50 ms, One Euro 60 ms). The first parameter set did NOT meet it
   (100 ms) and was replaced. Not yet checked on hardware.
 * Jitter, drift, gentle-motion response on real recordings: not measured. No acceptance is claimed.
+
+## EXPERIMENTAL quick tilt-and-return click (software complete; real recordings pending)
+
+Replaces the template-training requirement for the bench demo; the trained recognizer stays as an alternative.
+Companion Setup page, "Quick gesture click": practise once (stillness, then one comfortable sideways tilt and
+return; the 3-D direction and size are learned, no raw axis needed), try it in a preview that never clicks,
+retry or accept, then enable it while control runs. The label "EXPERIMENTAL QUICK GESTURE CLICK" is shown in the
+banner and the panel. Off by default, memory only, exclusive with dwell and the trained gesture, no saved
+profile needed, works in the fallback and in configured pointing (a practice is bound to the frame it was
+done in).
+
+Recognizer: neutral (250 ms calm) -> outward stroke -> return stroke -> settled confirmation (150 ms) -> click ->
+rearm (fresh neutral period and 500 ms since the click). The bias-corrected gyro is integrated over the real
+sample intervals; a click needs a clear outward excursion, an opposite return stroke and a small FINAL
+three-axis residual (gravity is never used to prove the return). Rejections: tiny noise, too much off-direction
+motion, no or partial return, more than 1000 ms from onset to the settled return, irregular or invalid samples.
+The pointer is frozen from candidate detection until acceptance or rejection and the frozen movement is
+discarded, never replayed. Movement before detection (the first part of the outward stroke) cannot be undone,
+and no global pointing delay is added to hide it.
+
+Reported in the companion: practice cues and a preview with the recognizer state (ready, outward, return,
+settling, accepted or rejected), rejection reasons, candidate duration, excursion, return residual, click
+count and the total time the pointer was paused.
+
+Attended demo over a harmless test target (needs a firmware upload; do not flash without authorisation):
+1. Start without calibration (or configured control); confirm pointing as before.
+2. "Practise for the fallback": hold still, one tilt and return on GO, try it in the preview, Accept.
+3. Park the cursor over a harmless target (an empty editor or a click counter). Tick "Enable quick gesture click".
+4. Make the gesture: one click; stay still: no repeat; point around normally: no clicks; make it again after a
+   pause: a second click. Watch "pointer paused" while a candidate is open.
+5. Untick it (pointing stays active), then Stop demo or press the enable button: everything stops.
+Never test drag, held buttons or disconnects with a button held.
+
+Evidence status: all numbers are synthetic (modelled noise and idealised tilts). On synthetic data: 75 of 75
+comfortable tilts (5 orientations x 5 speeds x 3 amplitudes) clicked once; 600 s of pointing with fast
+reversals and tremor gave 0 false clicks and 0 candidates (so 0 ms of suppression); incomplete returns,
+wandering, tiny tilts and timeouts were rejected with reasons. Real wearable recordings, false clicks, missed
+gestures and suppression time on a person are NOT measured yet and are reported separately when they are.

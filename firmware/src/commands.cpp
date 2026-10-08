@@ -113,6 +113,35 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "quick") {
+        std::string verb, value;
+        input >> verb;
+        if (verb == "practice") {
+            input >> value;
+            ok = (value == "fallback" || value == "configured") && (input >> std::ws).eof() &&
+                 system.quickPracticeStart(now, value == "configured");
+        } else if (verb == "enable") {
+            input >> value;
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setQuickGesture(value == "on", now);
+        } else if (verb == "set") {
+            float sensitivity = 0, tolerance = 0;
+            ok = bool(input >> sensitivity >> tolerance) && (input >> std::ws).eof() &&
+                 system.setQuickSettings(sensitivity, tolerance);
+        } else if (verb == "retry" || verb == "cancel" || verb == "accept" || verb == "clear") {
+            ok = (input >> std::ws).eof();
+            if (ok && verb == "retry") {
+                system.quickPracticeRetry(now);
+            } else if (ok && verb == "cancel") {
+                system.quickPracticeCancel();
+            } else if (ok && verb == "accept") {
+                ok = system.quickPracticeAccept();
+            } else if (ok) {
+                system.quickClear();
+            }
+        } else {
+            ok = false;
+        }
     } else if (ok && operation == "click") {
         std::string verb, value;
         input >> verb;

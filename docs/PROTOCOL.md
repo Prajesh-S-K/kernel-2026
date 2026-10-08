@@ -73,6 +73,10 @@ encoding are unchanged; old clients ignore the new object.
 | `click train fallback\|configured` | `{"action":"click","op":"train","frame":"fallback"}` | Teach the optional gesture click (RAM only). `fallback` uses the default axis mapping; `configured` uses the learned frame and needs a learned mapping. Refused while control is active, a fault is present or the sensor is not healthy |
 | `click cancel\|accept\|clear` | `{"action":"click","op":"accept"}` | `accept` only after the ordinary-pointing check (phase READY); `clear` forgets the gesture. A gesture is bound to the frame it was taught in; relearning the mapping invalidates a configured-frame gesture |
 | `click enable on\|off` | `{"action":"click","op":"enable","enabled":bool}` | Enable the gesture click while a control session runs (refused otherwise, or for a gesture of the other frame). Off at every start, cleared by every stop or fault |
+| `quick practice fallback\|configured` | `{"action":"quick","op":"practice","frame":"fallback"}` | EXPERIMENTAL quick tilt-and-return click, step 1: guided practice (stillness, one tilt, preview). Needs no saved profile; ends a running session first; the practice is RAM only and bound to the frame it was done in |
+| `quick retry\|cancel\|accept\|clear` | `{"action":"quick","op":"accept"}` | `retry` captures another tilt from the preview; `accept` (only in the preview) keeps the practice in memory; `clear` forgets it |
+| `quick enable on\|off` | `{"action":"quick","op":"enable","enabled":bool}` | Enable the quick gesture click while a session runs (refused otherwise or for a practice of the other frame). Turns dwell and the trained gesture OFF, and enabling either of them turns it off. Off at every start; cleared by every stop, fault, disconnect, calibration or practice start |
+| `quick set <sensitivity> <tolerance>` | `{"action":"quick","op":"set","sensitivity":1.0,"returnTolerance":0.35}` | Validated settings (0.5-2.0, 0.15-0.6); RAM only; restarts a running recognizer's neutral period |
 | `control start\|stop` | `{"action":"control","op":"start"}` | Configured control with the learned mapping: healthy sensor, valid mapping, BLE and the physical enable-button permission (unchanged product-mode behaviour; never automatic), plus a valid learned mapping and no gross re-orientation (gravity direction within 75 degrees of the taught one). Movement only. `stop` is always accepted |
 | `handsfree uncal dwell on\|off` | `{"action":"handsfree","op":"uncaldwell","enabled":bool}` | Explicitly enable dwell clicking inside the RUNNING uncalibrated demo (refused when the demo is not running). Off at every start; cleared by every stop. One primary-button click per completed dwell; no drag, double-click, right-click or scrolling |
 | `handsfree uncal dwell set <ms> <tolerance>` | `{"action":"handsfree","op":"uncaldwellset","ms":int,"tolerance":number}` | Temporary dwell settings, RAM only, validated (500-5000 ms, tolerance 2-50). A running dwell restarts. Reported in `handsFree.uncalDemo.dwell` `{enabled, ms, tolerance, state, progress, clicks}`; `dwellProgress` (top level) follows the profile in use |
@@ -137,3 +141,9 @@ ready, enabled, frame, state, suppressing, accepted, rejected, candidates, click
 `handsFree.uncalDemo.permission` is NONE, WEBSITE_START (the temporary fallback) or ENABLE_BUTTON (configured
 control). `mapping` also reports `mountingDeg` (angle between the gravity direction now and while teaching)
 and `mountingWarning` (above 35 degrees).
+
+Status frames carry `quick` `{phase, cue, cueMs, progress, reason, practice{excursion,residual,cross,planeShare},
+ready, enabled, frame, state, suppressing, accepted, rejected, candidates, clicks, suppressedMs, lastReject,
+last{excursion,residual,durationMs}, sensitivity, returnTolerance, blocked}`. `state` is OFF, NEUTRAL, READY,
+OUTWARD, RETURN or SETTLING (the last three pause the pointer); `lastReject` is NONE, TOO_SMALL, CROSS_AXIS,
+NO_RETURN, NOT_BACK_TO_START, TIMEOUT or INVALID_SAMPLE.

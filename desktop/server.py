@@ -115,6 +115,26 @@ def command_for(data):
         raise ValueError("Invalid hands-free request")
     if action == "calibrate":
         return "calibrate guided" if data.get("guided") is True else "calibrate"
+    if action == "quick":
+        operation = data.get("op")
+        if operation == "practice" and data.get("frame") in ("fallback", "configured"):
+            return f"quick practice {data['frame']}"
+        if operation in ("retry", "cancel", "accept", "clear"):
+            return f"quick {operation}"
+        if operation == "enable":
+            return "quick enable " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "set":
+            sensitivity, tolerance = data.get("sensitivity"), data.get("returnTolerance")
+            for value, low, high, label in (
+                (sensitivity, 0.5, 2.0, "Sensitivity"),
+                (tolerance, 0.15, 0.6, "Return tolerance"),
+            ):
+                if type(value) not in (int, float) or isinstance(value, bool):
+                    raise ValueError(f"{label} must be a number")
+                if not low <= value <= high:
+                    raise ValueError(f"{label} must be {low} to {high}")
+            return f"quick set {float(sensitivity):.2f} {float(tolerance):.2f}"
+        raise ValueError("Invalid quick gesture request")
     if action == "click":
         operation = data.get("op")
         if operation == "train" and data.get("frame") in ("fallback", "configured"):

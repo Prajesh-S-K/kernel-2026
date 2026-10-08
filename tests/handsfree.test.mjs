@@ -897,3 +897,50 @@ test("guided setup: a mounting warning explains head tilt versus a remount", () 
   assert.equal(mappingView(mapDev({ learnedValid: true, mountingDeg: 5 })).mountingNote, "");
   assert.equal(mappingView(mapDev({ mountingWarning: true })).mountingNote, "");
 });
+
+import { quickView, quickOf, QUICK_LABEL } from "../ui/quick.js";
+const quickDev = (q, extra = {}) => ({ source: "HARDWARE", connected: true, mapping: { learnedValid: false }, quick: { phase: "IDLE", cue: "NONE", cueMs: 0, progress: 0, reason: "idle", practice: { excursion: 0, residual: 0, cross: 0, planeShare: 0 }, ready: false, enabled: false, frame: "FALLBACK", state: "OFF", suppressing: false, accepted: 0, rejected: 0, candidates: 0, clicks: 0, suppressedMs: 0, lastReject: "NONE", last: { excursion: 0, residual: 0, durationMs: 0 }, sensitivity: 1, returnTolerance: 0.35, blocked: "", ...q }, ...extra });
+test("quick gesture: hardware only, off by default, enabling is explicit", () => {
+  assert.equal(quickView({ source: "SIMULATED", quick: {} }).hardware, false);
+  const idle = quickView(quickDev({}));
+  assert.equal(idle.enabled, false);
+  assert.equal(idle.canEnable, false);
+  assert.equal(idle.canPracticeFallback, true);
+  assert.equal(idle.canPracticeConfigured, false);
+  assert.match(idle.instruction, /EXPERIMENTAL/);
+  assert.equal(quickView(quickDev({ ready: true, blocked: "start the control session first" })).canEnable, false);
+  assert.equal(quickView(quickDev({ ready: true })).canEnable, true);
+  assert.equal(quickView(quickDev({ ready: true, enabled: true })).canEnable, false);
+  assert.equal(quickView(quickDev({}, { mapping: { learnedValid: true } })).canPracticeConfigured, true);
+});
+test("quick gesture: practice cues, retry and preview states", () => {
+  assert.equal(quickView(quickDev({ phase: "REST", cue: "HOLD_STILL" })).big, "HOLD STILL");
+  const countdown = quickView(quickDev({ phase: "TILT", cue: "COUNTDOWN", cueMs: 2100 }));
+  assert.equal(countdown.big, "3");
+  assert.match(countdown.instruction, /tilt sideways/);
+  assert.equal(quickView(quickDev({ phase: "TILT", cue: "GO" })).big, "GO");
+  const retry = quickView(quickDev({ phase: "TILT", cue: "COUNTDOWN", cueMs: 900, reason: "that tilt was too small: tilt further, then come back" }));
+  assert.match(retry.instruction, /Last attempt: that tilt was too small/);
+  const preview = quickView(quickDev({ phase: "PREVIEW", cue: "PREVIEW", progress: 1, state: "RETURN", accepted: 1, rejected: 2, lastReject: "NOT_BACK_TO_START", practice: { excursion: 12.5, residual: 1.5, cross: 1, planeShare: 0.3 } }));
+  assert.equal(preview.canAccept, true);
+  assert.equal(preview.canRetry, true);
+  assert.match(preview.stats, /Return — pointer paused/);
+  assert.match(preview.stats, /did not return to the start orientation/);
+  assert.match(preview.practiceLine, /excursion 12\.5°/);
+  assert.match(preview.practiceLine, /70% outside the pointing plane/);
+  assert.match(quickView(quickDev({ phase: "FAILED", reason: "that tilt looks like ordinary pointing" })).instruction, /ordinary pointing/);
+});
+test("quick gesture: statistics and the experimental banner", () => {
+  const on = quickView(quickDev({ ready: true, enabled: true, state: "READY", accepted: 3, rejected: 1, clicks: 3, suppressedMs: 4200, lastReject: "TIMEOUT", last: { excursion: 11.2, residual: 2.1, durationMs: 780 } }));
+  assert.match(on.stats, /accepted 3/);
+  assert.match(on.stats, /candidate 780 ms, excursion 11\.2°, return residual 2\.1°/);
+  assert.match(on.stats, /clicks 3/);
+  assert.match(on.stats, /paused for 4\.2 s/);
+  assert.match(on.stats, /longer than a second/);
+  const device = (extra, mode) => ({ ...hw({ active: true, ...extra }), mapping: { mode }, click: { enabled: false }, quick: { enabled: true } });
+  assert.equal(uncalView(device({}, "OFF")).banner, "UNCALIBRATED DEMO — EXPERIMENTAL QUICK GESTURE CLICK");
+  assert.equal(uncalView(device({}, "CONFIGURED")).banner, "CONFIGURED CONTROL — EXPERIMENTAL QUICK GESTURE CLICK");
+  assert.equal(QUICK_LABEL, "EXPERIMENTAL QUICK GESTURE CLICK");
+  assert.equal(quickOf({ quick: { ready: "yes", progress: 9 } }).ready, false);
+  assert.equal(quickOf({ quick: { progress: 9 } }).progress, 1);
+});

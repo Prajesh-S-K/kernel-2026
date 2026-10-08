@@ -51,7 +51,16 @@ export function uncalView(device) {
         : 'No saved profile. This is not a calibration and nothing is saved.';
   const dwellOn = active && u.dwell.enabled;
   const gestureOn = active && device?.click?.enabled === true;
-  const kind = dwellOn && gestureOn ? 'DWELL + GESTURE CLICK' : gestureOn ? 'GESTURE CLICK' : dwellOn ? 'DWELL CLICK' : 'LIVE SENSOR';
+  const quickOn = active && device?.quick?.enabled === true;
+  const kind = quickOn
+    ? 'EXPERIMENTAL QUICK GESTURE CLICK'
+    : dwellOn && gestureOn
+      ? 'DWELL + GESTURE CLICK'
+      : gestureOn
+        ? 'GESTURE CLICK'
+        : dwellOn
+          ? 'DWELL CLICK'
+          : 'LIVE SENSOR';
   const dwellStatus = !active
     ? 'Dwell clicking needs the demo running.'
     : !dwellOn

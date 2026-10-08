@@ -171,7 +171,7 @@ class SetupAndDailyWorkflow(HandsFreeCase):
             encoded = json.dumps(state, allow_nan=False, separators=(",", ":"))
             self.assertIn("handsFree", state)
             # Firmware frames are bounded at 5120 bytes; keep real headroom for longer reasons.
-            self.assertLess(len(encoded), 3800)  # firmware frame buffer is 5120 bytes
+            self.assertLess(len(encoded), 4200)  # firmware frame buffer is 5120 bytes
 
 
 class CommandValidation(HandsFreeCase):
@@ -263,6 +263,38 @@ class CommandValidation(HandsFreeCase):
             "click enable on",
         )
         self.assertEqual(SERVER.command_for({"action": "click", "op": "accept"}), "click accept")
+        self.assertEqual(
+            SERVER.command_for({"action": "quick", "op": "practice", "frame": "fallback"}),
+            "quick practice fallback",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "quick", "op": "enable", "enabled": True}),
+            "quick enable on",
+        )
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "quick", "op": "set", "sensitivity": 1.5, "returnTolerance": 0.25}
+            ),
+            "quick set 1.50 0.25",
+        )
+        for operation in ("retry", "cancel", "accept", "clear"):
+            self.assertEqual(
+                SERVER.command_for({"action": "quick", "op": operation}), f"quick {operation}"
+            )
+        for bad in (
+            {"action": "quick"},
+            {"action": "quick", "op": "practice"},
+            {"action": "quick", "op": "practice", "frame": "x"},
+            {"action": "quick", "op": "enable", "enabled": 1},
+            {"action": "quick", "op": "set", "sensitivity": 0.4, "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": 1, "returnTolerance": 0.7},
+            {"action": "quick", "op": "set", "sensitivity": True, "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": "1", "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": 1},
+            {"action": "quick", "op": "start"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
         for bad in (
             {"action": "click"},
             {"action": "click", "op": "train"},

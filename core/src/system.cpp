@@ -78,6 +78,7 @@ void System::resetInteraction(uint32_t now) {
     processor_.reset();
     controlProc_.reset();
     clickRec_.reset(now);
+    quickRec_.reset(now);
     hid_.reset();
     diagnostics_.motion = {};
     dragging_ = false;
@@ -109,8 +110,12 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     if (state_ == SystemState::Teaching && teachKind_ == TeachKind::Click) {
         clickTrainer_.cancel();
     }
+    if (state_ == SystemState::Teaching && teachKind_ == TeachKind::Quick) {
+        quickPractice_.cancel();
+    }
     configured_ = false;
     clickEnabled_ = false;
+    quickEnabled_ = false;
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
     uncalDwell_ = false;
@@ -130,6 +135,7 @@ void System::stop(SystemState next, uint32_t now) {
     }
     configured_ = false;
     clickEnabled_ = false;
+    quickEnabled_ = false;
     uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
     uncalDwell_ = false; // dwell clicking never outlives the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
@@ -298,7 +304,14 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         lastAccel_ = {raw.accel[0], raw.accel[1], raw.accel[2]};
     }
     const MotionSample mapped = axes.apply(raw);
-    if (state_ == SystemState::Teaching && inputsValid && teachKind_ == TeachKind::Click) {
+    if (state_ == SystemState::Teaching && inputsValid && teachKind_ == TeachKind::Quick) {
+        quickPractice_.tick(clickFrame(raw, mapped, quickTrainingConfigured_), now);
+        if (quickPractice_.phase() == QuickPhase::Failed) {
+            const char* why = quickPractice_.status(now).reason;
+            stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, now);
+            diagnostics_.reason = why;
+        }
+    } else if (state_ == SystemState::Teaching && inputsValid && teachKind_ == TeachKind::Click) {
         clickTrainer_.tick(clickFrame(raw, mapped, clickTrainingConfigured_), now);
         if (clickTrainer_.phase() == ClickPhase::Failed) {
             const char* why = clickTrainer_.status(now).reason;
@@ -325,6 +338,14 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (clickActive) {
         gestureClick = clickRec_.update(clickFrame(raw, mapped, configured_), now).accepted;
         recognizing = recognizing || clickRec_.suppressing(); // candidate: pointer stops, no replay
+    }
+    const bool quickActive = uncal_ && quickEnabled_ && inputsValid && state_ == SystemState::Active;
+    if (quickActive) {
+        // Candidate detection freezes the pointer from this very sample until accept or reject; what
+        // is frozen is discarded, never replayed. Movement before detection cannot be undone.
+        const auto event = quickRec_.update(clickFrame(raw, mapped, configured_), now);
+        gestureClick = gestureClick || event.accepted;
+        recognizing = recognizing || quickRec_.suppressing();
     }
 
     // Defensive: control never stays active while the maintained switch inhibits it.
@@ -393,7 +414,7 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (handsFree && outputAllowed && dragging_) {
         selected.down = true;
     }
-    const bool gestureClicking = gestureClick && outputAllowed;
+    const bool gestureClicking = gestureClick && outputAllowed; // trained or quick recognizer
     if (gestureClicking) {
         selection_.interrupt();
         selected.pulse = true; // exactly one press/release pair through the normal pipeline
@@ -828,6 +849,7 @@ bool System::startSession(uint32_t now, bool configured) {
     }
     uncalDwell_ = false; // every start is movement-only until dwell is enabled again
     clickEnabled_ = false; // ... and until the gesture click is enabled again
+    quickEnabled_ = false; // ... or the quick gesture click
     configured_ = configured;
     uncalProfile_ = uncalibratedDemoProfile();
     if (!emitStationary()) {
@@ -933,6 +955,12 @@ bool System::setClickGesture(bool on, uint32_t now) {
     clickRec_.configure(clickTemplate_); // needs a neutral stretch before it arms
     clickRec_.reset(now);
     clickEnabled_ = true;
+    quickEnabled_ = false; // one click recognizer at a time
+    if (uncalDwell_) {
+        uncalDwell_ = false; // ... and not together with dwell
+        uncalProfile_ = uncalibratedDemoProfile();
+        selection_.reset(false, now);
+    }
     diagnostics_.reason = "gesture click enabled";
     return true;
 }
@@ -953,6 +981,145 @@ ClickStatus System::clickStatus(uint32_t now) const {
     st.candidates = clickRec_.candidates;
     st.clicks = uncalClicks_;
     const char* blocker = clickBlocker();
+    st.blocked = st.enabled ? "" : (blocker ? blocker : "");
+    return st;
+}
+
+const char* System::quickBlocker() const {
+    if (!uncal_ || state_ != SystemState::Active) {
+        return "start the control session first";
+    }
+    if (!quickReady_) {
+        return "practice the quick gesture first";
+    }
+    if (quickConfiguredFrame_ != configured_) {
+        return quickConfiguredFrame_ ? "this practice was done for configured control"
+                                     : "this practice was done for the uncalibrated fallback";
+    }
+    return nullptr;
+}
+bool System::quickPracticeStart(uint32_t now, bool configuredFrame) {
+    if (configuredFrame && !learnedValid_) {
+        diagnostics_.reason = "no learned mapping: teach the movements first";
+        return false;
+    }
+    if (uncal_) {
+        // An explicit practice start ends a running session first: pending gestures are cancelled
+        // and held output is released through the normal stop path.
+        stopUncalibratedDemo("session stopped: starting the quick gesture practice");
+    }
+    if (const char* blocker = teachBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    stop(SystemState::Teaching, now); // a practice start cancels any pending gesture and output
+    if (state_ != SystemState::Teaching) {
+        return false;
+    }
+    teachKind_ = TeachKind::Quick;
+    quickTrainingConfigured_ = configuredFrame;
+    quickPractice_.begin(now, quickSettings_);
+    diagnostics_.reason = "quick gesture practice: hold the assembly completely still";
+    return true;
+}
+void System::quickPracticeRetry(uint32_t now) {
+    if (state_ == SystemState::Teaching && teachKind_ == TeachKind::Quick) {
+        quickPractice_.retry(now);
+    }
+}
+void System::quickPracticeCancel() {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Quick) {
+        return;
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ != SystemState::SafeState) {
+        diagnostics_.reason = "quick gesture practice cancelled";
+    }
+}
+bool System::quickPracticeAccept() {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Quick ||
+        !quickPractice_.accept()) {
+        return false;
+    }
+    const QuickProfile profile = quickPractice_.profile();
+    const bool frame = quickTrainingConfigured_;
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ == SystemState::SafeState || !profile.valid()) {
+        return false;
+    }
+    quickProfile_ = profile;
+    quickReady_ = true;
+    quickConfiguredFrame_ = frame;
+    diagnostics_.reason = "quick gesture practised (memory only); enable it explicitly while control runs";
+    return true;
+}
+void System::quickClear() {
+    quickEnabled_ = false;
+    quickReady_ = false;
+}
+bool System::setQuickSettings(float sensitivity, float returnTolerance) {
+    const QuickSettings candidate{sensitivity, returnTolerance};
+    if (!candidate.valid()) {
+        return false;
+    }
+    quickSettings_ = candidate;
+    if (uncal_ && quickEnabled_) {
+        quickRec_.configure(quickProfile_, quickSettings_); // restarts: a fresh neutral period
+        quickRec_.reset(lastTick_);
+    }
+    return true;
+}
+bool System::setQuickGesture(bool on, uint32_t now) {
+    if (!on) {
+        quickEnabled_ = false;
+        quickRec_.reset(now);
+        return true;
+    }
+    if (const char* blocker = quickBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    uncalDwell_ = false; // mutually exclusive with dwell and with the trained gesture
+    clickEnabled_ = false;
+    uncalProfile_ = uncalibratedDemoProfile();
+    selection_.reset(false, now);
+    quickRec_.configure(quickProfile_, quickSettings_);
+    quickRec_.reset(now); // needs a neutral period before it arms
+    quickEnabled_ = true;
+    diagnostics_.reason = "EXPERIMENTAL quick gesture click enabled";
+    return true;
+}
+QuickStatus System::quickStatus(uint32_t now) const {
+    QuickStatus st = quickPractice_.status(now);
+    st.ready = quickReady_;
+    st.enabled = uncal_ && quickEnabled_;
+    st.configuredFrame = quickReady_ ? quickConfiguredFrame_ : quickTrainingConfigured_;
+    st.sensitivity = quickSettings_.sensitivity;
+    st.returnTolerance = quickSettings_.returnTolerance;
+    if (st.enabled) {
+        st.suppressing = quickRec_.suppressing();
+        st.accepted = quickRec_.accepted;
+        st.rejected = quickRec_.rejected;
+        st.candidates = quickRec_.candidates;
+        st.suppressedMs = quickRec_.suppressedMs;
+        st.lastReject = name(quickRec_.lastReject);
+        st.lastExcursionDeg = quickRec_.lastExcursionDeg;
+        st.lastResidualDeg = quickRec_.lastResidualDeg;
+        st.lastDurationMs = quickRec_.lastDurationMs;
+        st.practiceDeg = quickProfile_.practiceDeg;
+        using S = QuickRecognizer::State;
+        const S state = quickRec_.state();
+        st.state = state == S::Armed      ? "READY"
+                   : state == S::Outward  ? "OUTWARD"
+                   : state == S::Return   ? "RETURN"
+                   : state == S::Settling ? "SETTLING"
+                                          : "NEUTRAL";
+    } else if (st.phase == QuickPhase::Idle || st.phase == QuickPhase::Done ||
+               st.phase == QuickPhase::Failed) {
+        st.state = "OFF";
+    }
+    st.clicks = uncalClicks_;
+    const char* blocker = quickBlocker();
     st.blocked = st.enabled ? "" : (blocker ? blocker : "");
     return st;
 }
@@ -1032,6 +1199,9 @@ bool System::teachAccept() {
     if (clickConfiguredFrame_) {
         clickReady_ = false; // a gesture taught in the old learned frame no longer applies
     }
+    if (quickConfiguredFrame_) {
+        quickReady_ = false;
+    }
     saveResult_ = "";
     diagnostics_.reason = "mapping accepted and active in memory; not saved yet";
     return true;
@@ -1070,6 +1240,9 @@ void System::clearLearned() {
     saveResult_ = "";
     if (clickConfiguredFrame_) {
         clickReady_ = false;
+    }
+    if (quickConfiguredFrame_) {
+        quickReady_ = false;
     }
 }
 MappingStatus System::mappingStatus(uint32_t now) const {
@@ -1114,6 +1287,10 @@ bool System::setUncalibratedDwell(bool on, uint32_t now) {
         return true;
     }
     uncalDwell_ = on;
+    if (on) {
+        quickEnabled_ = false; // dwell and the recognizers are mutually exclusive
+        clickEnabled_ = false;
+    }
     uncalProfile_ = uncalibratedDemoProfile();
     selection_.reset(false, now); // fresh dwell: progress 0, nothing carried over
     diagnostics_.reason = on ? "uncalibrated demo: dwell clicking enabled"

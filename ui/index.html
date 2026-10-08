@@ -128,6 +128,44 @@
               </div>
               <p id="mapBlocked" class="uncal-note"></p>
             </article>
+            <article class="panel uncal" id="quickPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">EXPERIMENTAL · OFF BY DEFAULT · MEMORY ONLY</span>
+                  <h2>Quick gesture click</h2>
+                </div>
+                <span class="tag" id="quickTag">OFF</span>
+              </div>
+              <p>
+                One quick sideways tilt and return clicks once. Practise it once (any comfortable tilt;
+                the direction is learned in 3-D). While a possible gesture is being recognised the
+                pointer pauses and that movement is thrown away, never replayed. Movement that
+                happened before the gesture was detected cannot be undone. It is exclusive with dwell
+                and with the trained gesture, and drag, scrolling, right-click and double-click stay
+                off.
+              </p>
+              <h3 id="quickTitle"></h3>
+              <div class="map-big" id="quickBig"></div>
+              <div class="uncal-bar"><i id="quickBar"></i></div>
+              <p id="quickInstruction" class="uncal-status"></p>
+              <p id="quickPracticeLine" class="uncal-note"></p>
+              <div class="uncal-actions">
+                <button id="quickPracticeFallback" class="primary">Practise for the fallback</button>
+                <button id="quickPracticeConfigured" class="quiet">Practise for configured control</button>
+                <button id="quickAccept" class="primary">Accept</button>
+                <button id="quickRetry" class="quiet">Retry tilt</button>
+                <button id="quickCancel" class="quiet">Cancel</button>
+                <button id="quickClear" class="quiet">Forget</button>
+              </div>
+              <label><input type="checkbox" id="quickEnable" disabled /> Enable quick gesture click (EXPERIMENTAL)</label>
+              <div class="uncal-actions">
+                <label>Sensitivity (0.5–2.0) <input type="number" id="quickSens" min="0.5" max="2" step="0.05" value="1" /></label>
+                <label>Return tolerance (0.15–0.6) <input type="number" id="quickTol" min="0.15" max="0.6" step="0.05" value="0.35" /></label>
+                <button id="quickApply" class="quiet">Apply</button>
+              </div>
+              <p id="quickStats" class="uncal-note"></p>
+              <p id="quickBlocked" class="uncal-note"></p>
+            </article>
             <article class="panel uncal" id="clickPanel" hidden>
               <div class="panel-head">
                 <div>

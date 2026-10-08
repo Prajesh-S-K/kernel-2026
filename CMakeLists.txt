@@ -24,6 +24,7 @@ add_library(nodx
     core/src/handsfree.cpp
     core/src/mapping.cpp
     core/src/clickgesture.cpp
+    core/src/quickgesture.cpp
 )
 target_include_directories(nodx PUBLIC core/include)
 target_compile_options(nodx PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -37,6 +38,8 @@ add_executable(nodx_mapping_tests tests/test_mapping.cpp)
 target_link_libraries(nodx_mapping_tests PRIVATE nodx)
 add_executable(nodx_click_tests tests/test_click.cpp)
 target_link_libraries(nodx_click_tests PRIVATE nodx)
+add_executable(nodx_quick_tests tests/test_quick.cpp)
+target_link_libraries(nodx_quick_tests PRIVATE nodx)
 # IMU identity, initialisation, read-back and conversion (MPU-6050 and MPU-6500 variants).
 add_executable(nodx_imu_tests tests/test_imu.cpp)
 target_link_libraries(nodx_imu_tests PRIVATE nodx)
@@ -64,6 +67,7 @@ add_test(NAME handsfree_invariants COMMAND nodx_handsfree_tests)
 add_test(NAME bench_diag_helpers COMMAND nodx_diag_tests)
 add_test(NAME mapping_invariants COMMAND nodx_mapping_tests)
 add_test(NAME click_gesture_invariants COMMAND nodx_click_tests)
+add_test(NAME quick_gesture_invariants COMMAND nodx_quick_tests)
 add_test(NAME imu_support COMMAND nodx_imu_tests)
 add_test(NAME firmware_commands_simulated COMMAND nodx_firmware_sim_tests)
 add_test(NAME firmware_commands_hardware_config COMMAND nodx_firmware_hw_tests)
