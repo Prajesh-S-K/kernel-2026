@@ -83,6 +83,7 @@ void System::resetInteraction(uint32_t now) {
 bool System::emitStationary() {
     // Stop commands use the same final safety boundary as ordinary motion.
     hid_.reset();
+    hid_.requireReport(); // an explicit stop always sends its release
     Command stationary = safety_.gate({}, false, false, false, transport_.connected());
     return hid_.emit(stationary);
 }
@@ -100,7 +101,6 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     }
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
-    uncalGate_.clearLatch();
     enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
@@ -288,10 +288,6 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         stop(SystemState::Paused, now);
         diagnostics_.reason = "control switch OFF; explicit resume required";
     }
-    // The physical enable button also governs the uncalibrated demo (fail safe at the press edge).
-    if (uncal_ && !uncalGate_.permitted()) {
-        stopUncalibratedDemo("demo stopped: enable button pressed or not present");
-    }
     const bool movementOnly = demoMovementOnly_ || uncal_;
     const UserProfile& control = uncal_ ? uncalProfile_ : profile_;
     const bool profileOk = uncal_ || (hasProfile_ && profile_.valid());
@@ -412,15 +408,15 @@ const char* System::activationBlocker() const {
 
 void System::configureEnableInput(bool present) {
     enablePresent_ = present;
-    uncalGate_.configure(present, false, EnableKind::Momentary);
     enable_.configure(present, config_.switchlessQualified, config_.enableKind);
 }
 
 void System::setControlSwitch(bool active, uint32_t now) {
-    uncalGate_.update(active, now);
-    if (uncal_ && !uncalGate_.permitted()) {
-        // Disable at the press edge: release now, without waiting for another sensor sample.
-        stopUncalibratedDemo("demo stopped by the enable button; explicit restart required");
+    const bool pressEdge = active && !uncalPrevPress_;
+    uncalPrevPress_ = active;
+    if (uncal_ && pressEdge) {
+        // Stop-only: release now, without waiting for another sensor sample. Not needed to start.
+        stopUncalibratedDemo("demo stopped by the button; explicit restart required");
     }
     const bool before = enable_.permitted();
     enable_.update(active, now);
@@ -705,12 +701,6 @@ const char* System::uncalibratedDemoBlocker() const {
     if (healthyChecks_ < start::recoverySamples) {
         return "waiting for healthy sensor samples";
     }
-    if (!uncalGate_.present()) {
-        return "enable button not present";
-    }
-    if (!uncalGate_.permitted()) {
-        return "press the enable button first";
-    }
     if (!uncalibratedDemoProfile().valid()) {
         return "demo configuration invalid";
     }
@@ -789,8 +779,6 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.blocked = blocker ? blocker : "";
     const char* uncalBlocker = uncalibratedDemoBlocker();
     s.uncalActive = uncal_;
-    s.uncalPresent = uncalGate_.present();
-    s.uncalPermitted = uncalGate_.permitted();
     s.uncalBlocked = uncal_ ? "" : (uncalBlocker ? uncalBlocker : "");
     s.profileState = name(profileState());
     const UserProfile shown = uncalibratedDemoProfile();

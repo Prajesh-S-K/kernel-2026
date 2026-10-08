@@ -705,7 +705,7 @@ import { BANNER, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUID
 const hw = (uncal, extra = {}) => ({
   source: "HARDWARE",
   connected: true,
-  handsFree: { uncalDemo: { active: false, present: true, permitted: true, blocked: "", profileState: "MISSING", gain: 12, deadzone: 2.5, maxStep: 4, ...uncal } },
+  handsFree: { uncalDemo: { active: false, blocked: "", profileState: "MISSING", gain: 12, deadzone: 2.5, maxStep: 4, ...uncal } },
   axes: { valid: true, gyro: [2, 0, 1], gyroSigns: [1, 1, 1], accel: [1, 0, 2], accelSigns: [1, 1, -1] },
   ...extra,
 });
@@ -713,7 +713,7 @@ test("uncalibrated demo: only offered for live hardware and never started by the
   assert.equal(uncalView({ source: "SIMULATED", handsFree: {} }).hardware, false);
   assert.equal(uncalView(undefined).canStart, false);
   assert.equal(uncalView(hw({})).canStart, true);
-  assert.equal(uncalView(hw({ blocked: "press the enable button first" })).canStart, false);
+  assert.equal(uncalView(hw({ blocked: "waiting for healthy sensor samples" })).canStart, false);
   assert.equal(uncalView(hw({}, { connected: false })).canStart, false);
   assert.match(uncalView(hw({ blocked: "BLE link unavailable" })).status, /BLE link unavailable/);
 });

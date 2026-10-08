@@ -203,13 +203,12 @@ allow-listed diagnostic commands, never flashes and never guesses a port.
 Purpose: show the real sensor moving the Mac pointer while calibration is missing or FAILED. It is not a
 calibration, saves nothing and never reports a profile. Start values are in `docs/PARAMETERS.md`.
 
-* Start: companion, Setup page, "Start uncalibrated pointer demo" (hardware device only). Press the enable
-  button first; the demo has its own momentary latch (disabled at every boot, held-at-boot ignored,
-  cleared by every fault). Starting needs a healthy sensor (20 good samples), a valid axis mapping,
-  an unfaulted BLE link and no calibration, training or active control in progress.
+* Start: companion, Setup page, "Start uncalibrated pointer demo" (hardware device only). No enable
+  button is needed (it is deferred); starting needs a healthy sensor (20 good samples), a valid axis
+  mapping, an unfaulted BLE link and no calibration, training or active control in progress.
 * Real sensor -> AxisTransform -> filtering -> bounded output -> SafetyManager -> HIDManager. Clicks,
   dwell, drag and wheel are removed; pointer steps are at most 4 px per report.
-* Stop: "Stop demo" (banner and panel), the enable button (at the press edge, no sample needed),
+* Stop: "Stop demo" (banner and panel), any press of the enable button (stop-only, at the press edge, no sample needed),
   starting a calibration, pause, any fault (sensor, mapping, timing, calculation), BLE disconnect or
   delivery failure. After any stop the demo stays off until started again; reconnecting or rebooting
   never starts it. Pause-on-focus-loss is suspended only while this demo runs, so the pointer can be
@@ -232,3 +231,11 @@ shown on the panel from the `axes` telemetry (gyro axes 2,0,1 signs +,+,+ for th
 | Sideways roll | nothing (no scrolling) |
 
 A different mounting needs a new measured mapping, never an inferred one.
+
+### BLE report rate (found while preparing the demo)
+
+The control loop used to hand the BLE adapter a report on every 10 ms sensor tick, including all-zero
+reports while idle (about 100 notifications per second). A BLE link carries far fewer; this matched the
+repeated "HID connection or delivery failed" faults and may be linked to the serial stalls (unproven).
+Now the core sends an idle zero report only once (a stop always sends its release) and the adapter
+coalesces movement to one notification per 20 ms; a button change or an all-zero report is sent at once.

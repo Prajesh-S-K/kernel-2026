@@ -131,7 +131,7 @@ struct HandsFreeStatus {
     std::array<bool, gestureCount> staged{}, stored{};
     const char* blocked = "";
     // Temporary uncalibrated pointer demo (RAM only; never a calibration, never saved).
-    bool uncalActive = false, uncalPermitted = false, uncalPresent = false;
+    bool uncalActive = false;
     const char* uncalBlocked = "";
     const char* profileState = "MISSING";
     float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;

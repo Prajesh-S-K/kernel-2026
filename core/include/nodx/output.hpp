@@ -33,10 +33,16 @@ public:
     explicit HIDManager(HIDTransport& transport) : transport_(transport) {}
     bool emit(Command safeCommand);
     void reset();
+    // The next emit() must reach the transport even if it is an idle (all-zero) report. Used by
+    // explicit stops so a release is always sent.
+    void requireReport() {
+        idleSent_ = false;
+    }
     Report last;
 
 private:
     HIDTransport& transport_;
     float remainderX_ = 0, remainderY_ = 0, remainderWheel_ = 0;
+    bool idleSent_ = false; // the host already holds an all-zero report: do not repeat it
 };
 } // namespace nodx

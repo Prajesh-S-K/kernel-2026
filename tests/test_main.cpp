@@ -617,15 +617,17 @@ int main() {
     test("recovery resets when a second fault interrupts qualification", [] {
         Rig rig;
         rig.active();
-        rig.transport.fail = true;
+        // Link faults are seen on every pass (an idle link carries no repeated zero reports, so a
+        // failed delivery needs movement to send); use disconnects for both interrupting faults.
+        rig.transport.online = false;
         rig.tick();
-        rig.transport.fail = false;
+        rig.transport.online = true;
         for (int i = 0; i < 19; ++i) {
             rig.tick();
         }
-        rig.transport.fail = true;
+        rig.transport.online = false;
         rig.tick();
-        rig.transport.fail = false;
+        rig.transport.online = true;
         rig.tick();
         require(rig.system.state == SystemState::SafeState, "partial recovery retained");
         for (int i = 0; i < 19; ++i) {

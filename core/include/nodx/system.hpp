@@ -80,8 +80,8 @@ public:
         return demoMovementOnly_;
     }
     // Temporary UNCALIBRATED pointer demo: real sensor, AxisTransform, filtering, output bounds,
-    // SafetyManager -> HIDManager and the physical enable button, but a validated RAM-only demo
-    // profile instead of a user profile. Movement only. Never saved, never a calibration, never
+    // SafetyManager -> HIDManager, but a validated RAM-only demo profile instead of a user profile.
+    // The enable button is NOT required to start it; a press only stops it (stop-only safety). Movement only. Never saved, never a calibration, never
     // started by a connection or a reboot; any stop needs an explicit restart.
     bool startUncalibratedDemo(uint32_t now);
     void stopUncalibratedDemo(const char* reason);
@@ -141,7 +141,7 @@ private:
     bool uncal_ = false;
     bool profileInvalidated_ = false;
     UserProfile uncalProfile_;
-    EnableGate uncalGate_; // always the momentary button; independent of the hands-free record
+    bool uncalPrevPress_ = false; // the button only STOPS the demo (rising edge); it is not required
     uint32_t refused_ = 0;
 
     void enterSafe(FaultCode fault, uint32_t now);

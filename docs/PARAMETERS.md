@@ -80,6 +80,7 @@ qualification; a held switch must release and the user must resume explicitly.
 | Enable GPIO | -1 (disabled); candidate GPIO4 (button contact pair to GND, no 3V3/5V) | pin | Board schematic, wiring, continuity test of the button pairs |
 | Dwell in hands-free | existing dwell values; lockout after resume/drag | ms / px | Unwanted-click rate, comfort |
 | Uncalibrated demo profile | gain 12 px/° (all four directions), deadzone 2.5 °/s, filter α 0.3, bias 0, dwell and scroll off | px/°, °/s | START, RAM only. Bias is unknown without a rest measurement, so the deadzone must exceed the idle gyro bias (bench MPU-6500 idle about -1.3/-0.9/0.1 °/s); whether 12 px/° and 2.5 °/s are comfortable and drift-free |
+| BLE movement notification gap | 20 ms (idle zero reports sent once) | ms | START; whether 50 Hz movement is smooth enough on the Mac |
 | Uncalibrated demo step bound | 4 px per report, both axes | px | START; stricter than the 6 px movement-only demo bound |
 
 Templates learned in training are also START values: they are stored per user and marked unvalidated

@@ -190,11 +190,38 @@ public:
     bool connected() const override {
         return secured && subscribed;
     }
+    // Movement reports are coalesced to at most one notification per kMinGapMs (a BLE link carries
+    // far fewer than the 100 Hz tick rate; flooding it fails deliveries). A button change or an
+    // all-zero (stop/release) report is sent at once and discards any held-back movement.
+    static constexpr uint32_t kMinGapMs = 20;
     bool send(const Report& r) override {
         if (!connected()) {
+            pendingX_ = pendingY_ = pendingWheel_ = 0;
             return false;
         }
-        uint8_t bytes[] = {uint8_t(r.down ? 1 : 0), uint8_t(r.dx), uint8_t(r.dy), uint8_t(r.wheel)};
+        const bool zero = r.dx == 0 && r.dy == 0 && r.wheel == 0 && !r.down;
+        const uint32_t now = millis();
+        pendingX_ += r.dx;
+        pendingY_ += r.dy;
+        pendingWheel_ += r.wheel;
+        if (zero || r.down != lastDown_) {
+            if (zero) {
+                pendingX_ = pendingY_ = pendingWheel_ = 0; // a stop never replays held-back motion
+            }
+        } else if (uint32_t(now - lastNotifyMs_) < kMinGapMs) {
+            return true; // held back; added to the next notification
+        }
+        auto clamp = [](int v) { return uint8_t(int8_t(v < -127 ? -127 : v > 127 ? 127 : v)); };
+        uint8_t bytes[] = {uint8_t(r.down ? 1 : 0), clamp(pendingX_), clamp(pendingY_),
+                           clamp(pendingWheel_)};
+        pendingX_ = pendingY_ = pendingWheel_ = 0;
+        lastDown_ = r.down;
+        lastNotifyMs_ = now;
         return input->notify(bytes, sizeof(bytes));
     }
+
+private:
+    int pendingX_ = 0, pendingY_ = 0, pendingWheel_ = 0;
+    bool lastDown_ = false;
+    uint32_t lastNotifyMs_ = 0;
 };

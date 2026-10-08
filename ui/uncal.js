@@ -10,8 +10,6 @@ export function uncalOf(device) {
   return {
     reported: !!raw,
     active: raw?.active === true,
-    present: raw?.present === true,
-    permitted: raw?.permitted === true,
     blocked: typeof raw?.blocked === 'string' ? raw.blocked : '',
     profileState: typeof raw?.profileState === 'string' ? raw.profileState : 'MISSING',
     gain: Number(raw?.gain) || 0,

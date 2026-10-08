@@ -32,13 +32,22 @@ bool HIDManager::emit(Command command) {
     if (!transport_.connected()) {
         reset();
         last = {};
+        idleSent_ = false;
         return false;
     }
+    const bool idle = last.dx == 0 && last.dy == 0 && last.wheel == 0 && !last.down;
+    if (idle && idleSent_ && !command.pulse) {
+        // Nothing changed since the all-zero report the host already has. Repeating it every
+        // 10 ms floods a BLE link that carries far fewer notifications per second.
+        return true;
+    }
     bool sent = transport_.send(last);
+    idleSent_ = sent && idle;
     if (command.pulse) {
         Report release{};
         bool released = transport_.send(release);
         sent = sent && released;
+        idleSent_ = released;
     }
     return sent;
 }
