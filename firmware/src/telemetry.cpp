@@ -5,7 +5,7 @@
 #include <cstring>
 
 namespace {
-constexpr size_t telemetryBytes = 3072; // an oversize frame is dropped, so keep real headroom
+constexpr size_t telemetryBytes = 4096; // an oversize frame is dropped, so keep real headroom
 constexpr size_t transmitBudgetBytes = 64;
 struct Frame {
     char data[telemetryBytes]{};
@@ -108,7 +108,7 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            p.gain[2], p.gain[3], p.alpha, p.precisionThreshold, p.fastThreshold, p.dwellTolerance,
            (unsigned long)p.dwellMs, p.scrollThreshold, p.scrollGain,
            p.dwellEnabled ? "true" : "false", p.scrollEnabled ? "true" : "false");
-    static char hands[1024]; // static: keeps the loop task stack small
+    static char hands[handsFreeJsonCapacity]; // static: keeps the loop task stack small
     const size_t handsLength = handsFreeJson(hands, sizeof(hands), s.handsFreeStatus());
     append(buffer, sizeof(buffer), used, ",\"handsFree\":%s", handsLength ? hands : "{}");
 #ifndef NODX_SIMULATED

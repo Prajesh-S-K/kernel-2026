@@ -114,7 +114,15 @@ void command(const std::string& line, uint32_t now, bool truncated) {
                  system.setDemoMovementOnly(value == "on");
         } else if (verb == "uncal") {
             input >> value;
-            if (value == "dwell") {
+            if (value == "reverse") {
+                // reverse <horizontal 0|1> <vertical 0|1>   (RAM only)
+                int horizontal = -1, vertical = -1;
+                ok = bool(input >> horizontal >> vertical) && (input >> std::ws).eof() &&
+                     (horizontal == 0 || horizontal == 1) && (vertical == 0 || vertical == 1);
+                if (ok) {
+                    system.setUncalibratedReversal(horizontal == 1, vertical == 1);
+                }
+            } else if (value == "dwell") {
                 // dwell on|off  |  dwell set <ms> <tolerance>   (RAM only, demo must be running)
                 std::string action;
                 input >> action;

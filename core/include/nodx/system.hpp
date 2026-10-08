@@ -81,7 +81,7 @@ public:
     }
     // Temporary UNCALIBRATED pointer demo: real sensor, AxisTransform, filtering, output bounds,
     // SafetyManager -> HIDManager, but a validated RAM-only demo profile instead of a user profile.
-    // The enable button is NOT required to start it; a press only stops it (stop-only safety). Movement only. Never saved, never a calibration, never
+    // It needs the physical enable button's permission (momentary latch) and is stopped by it. Movement only. Never saved, never a calibration, never
     // started by a connection or a reboot; any stop needs an explicit restart.
     bool startUncalibratedDemo(uint32_t now);
     void stopUncalibratedDemo(const char* reason);
@@ -94,6 +94,12 @@ public:
     // dwell; no drag, double-click, right-click or scrolling. Settings are RAM only.
     bool setUncalibratedDwell(bool on, uint32_t now);
     bool setUncalibratedDwellSettings(uint32_t dwellMs, float tolerance);
+    // Fallback pointing controls (RAM only): swap the sign of horizontal and/or vertical movement.
+    void setUncalibratedReversal(bool horizontal, bool vertical);
+    // Physical enable permission for the fallback demo. On by default; only tests relax it.
+    void setUncalibratedNeedsEnable(bool required) {
+        uncalNeedsEnable_ = required;
+    }
     bool uncalibratedDwell() const {
         return uncal_ && uncalDwell_;
     }
@@ -155,7 +161,10 @@ private:
     uint32_t uncalClicks_ = 0;
     bool profileInvalidated_ = false;
     UserProfile uncalProfile_;
-    bool uncalPrevPress_ = false; // the button only STOPS the demo (rising edge); it is not required
+    EnableGate uncalGate_; // the momentary enable button's permission latch for the fallback demo
+    bool uncalNeedsEnable_ = true; // physical enable permission is required (tests may relax it)
+    bool uncalPrevPress_ = false;  // without the requirement a press still only STOPS the demo
+    bool uncalReverseX_ = false, uncalReverseY_ = false; // RAM only, user controls
     uint32_t refused_ = 0;
 
     void enterSafe(FaultCode fault, uint32_t now);

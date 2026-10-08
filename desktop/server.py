@@ -92,6 +92,11 @@ def command_for(data):
             return "handsfree demo " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "uncal":
             return "handsfree uncal " + ("start" if required_boolean(data, "enabled") else "stop")
+        if operation == "uncalreverse":
+            return (
+                f"handsfree uncal reverse {int(required_boolean(data, 'horizontal'))} "
+                f"{int(required_boolean(data, 'vertical'))}"
+            )
         if operation == "uncaldwell":
             return "handsfree uncal dwell " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "uncaldwellset":

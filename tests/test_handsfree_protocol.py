@@ -243,6 +243,14 @@ class CommandValidation(HandsFreeCase):
         with self.assertRaises(ValueError):
             SERVER.command_for({"action": "handsfree", "op": "uncal"})
         self.assertEqual(
+            SERVER.command_for(
+                {"action": "handsfree", "op": "uncalreverse", "horizontal": True, "vertical": False}
+            ),
+            "handsfree uncal reverse 1 0",
+        )
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "uncalreverse", "horizontal": True})
+        self.assertEqual(
             SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": True}),
             "handsfree uncal dwell on",
         )

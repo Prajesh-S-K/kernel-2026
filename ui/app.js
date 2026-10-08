@@ -422,6 +422,8 @@ function renderUncal(data) {
   $('uncalStart').disabled = !view.canStart;
   $('uncalStop').disabled = !view.active;
   $('uncalStopBanner').disabled = !view.active;
+  if (document.activeElement !== $('uncalRevX')) $('uncalRevX').checked = view.u.reverseX;
+  if (document.activeElement !== $('uncalRevY')) $('uncalRevY').checked = view.u.reverseY;
   $('uncalDwell').disabled = !view.canEnableDwell;
   $('uncalDwell').checked = view.dwellOn;
   $('uncalDwellBar').style.width = `${Math.round(view.u.dwell.progress * 100)}%`;
@@ -444,6 +446,13 @@ function renderUncal(data) {
     `at most ${view.u.maxStep} px per report.`;
 }
 const baseTitle = document.title;
+for (const id of ['uncalRevX', 'uncalRevY'])
+  $(id).onchange = () =>
+    action('handsfree', {
+      op: 'uncalreverse',
+      horizontal: $('uncalRevX').checked,
+      vertical: $('uncalRevY').checked,
+    });
 $('uncalDwell').onchange = () =>
   action('handsfree', { op: 'uncaldwell', enabled: $('uncalDwell').checked });
 $('uncalDwellApply').onclick = () =>

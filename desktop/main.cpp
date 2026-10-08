@@ -146,7 +146,7 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
               << "],\"connected\":" << (hid.online ? "true" : "false")
               << ",\"hasProfile\":" << (s.hasProfile ? "true" : "false") << ",\"profile\":";
     profileJson(s.profile);
-    char hands[1024];
+    char hands[handsFreeJsonCapacity];
     const size_t handsLength = handsFreeJson(hands, sizeof hands, s.handsFreeStatus());
     std::cout << ",\"handsFree\":" << (handsLength ? hands : "{}");
     std::cout << ",\"reports\":[";
@@ -450,7 +450,15 @@ int main(int argc, char** argv) {
                          sys.setDemoMovementOnly(value == "on");
                 } else if (verb == "uncal") {
                     cmd >> value;
-                    if (value == "dwell") {
+                    if (value == "reverse") {
+                        int horizontal = -1, vertical = -1;
+                        ok = bool(cmd >> horizontal >> vertical) && (cmd >> std::ws).eof() &&
+                             (horizontal == 0 || horizontal == 1) &&
+                             (vertical == 0 || vertical == 1);
+                        if (ok) {
+                            sys.setUncalibratedReversal(horizontal == 1, vertical == 1);
+                        }
+                    } else if (value == "dwell") {
                         std::string action;
                         cmd >> action;
                         if (action == "on" || action == "off") {

@@ -131,7 +131,8 @@ struct HandsFreeStatus {
     std::array<bool, gestureCount> staged{}, stored{};
     const char* blocked = "";
     // Temporary uncalibrated pointer demo (RAM only; never a calibration, never saved).
-    bool uncalActive = false;
+    bool uncalActive = false, uncalNeedsEnable = true, uncalPresent = false, uncalPermitted = false;
+    bool uncalReverseX = false, uncalReverseY = false;
     const char* uncalBlocked = "";
     const char* profileState = "MISSING";
     float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;
@@ -140,6 +141,8 @@ struct HandsFreeStatus {
     float uncalDwellTolerance = 0, uncalDwellProgress = 0;
     const char* uncalDwellState = "IDLE";
 };
+// Buffer size every adapter uses for handsFreeJson(); an overflow returns 0, so keep real headroom.
+constexpr size_t handsFreeJsonCapacity = 2048;
 // Writes one JSON object (no trailing newline). Returns the length, or 0 if it does not fit.
 size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& status);
 } // namespace nodx

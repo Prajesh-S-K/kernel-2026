@@ -705,7 +705,7 @@ import { BANNER, BANNER_DWELL, DWELL_NOTE, mappingLines, pauseOnBlur, labBlocked
 const hw = (uncal, extra = {}) => ({
   source: "HARDWARE",
   connected: true,
-  handsFree: { uncalDemo: { active: false, blocked: "", profileState: "MISSING", gain: 12, deadzone: 2.5, maxStep: 4, ...uncal } },
+  handsFree: { uncalDemo: { active: false, needsEnable: true, present: true, permitted: true, reverseX: false, reverseY: false, blocked: "", profileState: "MISSING", gain: 12, deadzone: 2.5, maxStep: 4, ...uncal } },
   axes: { valid: true, gyro: [2, 0, 1], gyroSigns: [1, 1, 1], accel: [1, 0, 2], accelSigns: [1, 1, -1] },
   ...extra,
 });
@@ -761,4 +761,14 @@ test("uncalibrated demo: dwell label, progress and the pixel caveat", () => {
   assert.equal(uncalView(hw({ active: false, dwell: { enabled: true } })).dwellOn, false);
   assert.equal(uncalView(hw({ active: true, dwell: { enabled: true, progress: 7 } })).u.dwell.progress, 1);
   assert.match(DWELL_NOTE, /NOT verified screen pixels/);
+});
+
+test("fallback: permission, reversal and the Start without calibration wording", () => {
+  const ready = uncalView(hw({}));
+  assert.match(ready.status, /Start without calibration/);
+  assert.equal(ready.u.needsEnable, true);
+  assert.equal(uncalView(hw({ blocked: "press the enable button first", permitted: false })).canStart, false);
+  assert.equal(uncalView(hw({ reverseX: true, reverseY: true })).u.reverseX, true);
+  assert.equal(uncalView(hw({ profileState: "CORRUPT" })).canStart, true);
+  assert.match(uncalView(hw({ profileState: "CORRUPT" })).calibration, /CORRUPT/);
 });

@@ -150,6 +150,7 @@ struct HF {
     // Existing tests exercise the maintained-switch compatibility configuration; button tests build
     // the rig with EnableKind::Momentary (input released at power-up).
     EnableKind kind = EnableKind::Maintained;
+    bool uncalNeedsEnable = false; // most demo tests relax it; permission tests set it true
     explicit HF(bool saveProfile = true, EnableKind enableKind = EnableKind::Maintained)
         : kind(enableKind) {
         sw = kind == EnableKind::Maintained;
@@ -164,6 +165,7 @@ struct HF {
         sys->axes.accelAxes = {0, 1, 2};
         sys->axes.accelSigns = {1, 1, 1};
         sys->configureEnableInput(true);
+        sys->setUncalibratedNeedsEnable(uncalNeedsEnable);
     }
     System& s() {
         return *sys;

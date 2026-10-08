@@ -98,21 +98,28 @@
               <div class="panel-head">
                 <div>
                   <span class="eyebrow">TEMPORARY BENCH DEMO</span>
-                  <h2>Uncalibrated pointer demo</h2>
+                  <h2>Start without calibration</h2>
                 </div>
                 <span class="tag" id="uncalTag">OFF</span>
               </div>
               <p>
                 The real sensor moves the Mac pointer with conservative fixed settings, even
                 without a calibration. Pointer movement only: no clicks, dwell, drag or scrolling.
-                No enable button is needed to start. Any fault, disconnect or button press stops it, and you
-                must start it again yourself.
+                Press the physical enable button first, then start. The next button press, any fault, a
+                disconnect or a calibration stops it, and you must start it again yourself. It also works
+                when calibration is missing or failed, or the saved profile is corrupt (reported
+                separately, never used or overwritten).
               </p>
               <p id="uncalStatus" class="uncal-status"></p>
               <p id="uncalCalibration" class="uncal-note"></p>
               <div class="uncal-actions">
-                <button id="uncalStart" class="primary">Start uncalibrated pointer demo</button>
+                <button id="uncalStart" class="primary">Start without calibration</button>
                 <button id="uncalStop" class="uncal-stop">Stop demo</button>
+              </div>
+              <div class="uncal-dwell">
+                <span class="eyebrow">POINTER DIRECTION (TEMPORARY)</span>
+                <label><input type="checkbox" id="uncalRevX" /> Reverse horizontal</label>
+                <label><input type="checkbox" id="uncalRevY" /> Reverse vertical</label>
               </div>
               <div class="uncal-dwell">
                 <label

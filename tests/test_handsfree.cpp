@@ -730,7 +730,8 @@ int main() {
         h.tick();
         char buffer[2048];
         const size_t length = handsFreeJson(buffer, sizeof buffer, h.s().handsFreeStatus());
-        require(length > 100 && length < 900, "length");
+        require(length > 100 && length < handsFreeJsonCapacity * 3 / 4,
+                "the hands-free JSON needs headroom in the adapters' buffer");
         for (const char* bad : {"nan", "NaN", "inf", "Inf", "null"}) {
             require(!contains(buffer, bad), "nonfinite or null token");
         }
@@ -3095,6 +3096,91 @@ int main() {
         require(fresh.s().handsFreeStatus().uncalDwellMs == start::uncalDwellMs &&
                     fresh.s().handsFreeStatus().uncalDwellTolerance == start::uncalDwellTolerance,
                 "defaults are the named START values");
+    });
+
+    // ------------------------------------------------ O: fallback permission and reversal
+    auto permRig = [] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.uncalNeedsEnable = true; // the default for real use: physical enable permission required
+        h.boot();
+        h.quiet(400);
+        return h;
+    };
+    test("fallback: needs the physical enable permission, healthy sensor and BLE", [=] {
+        HF h = permRig();
+        require(!h.s().startUncalibratedDemo(h.now), "started without the button");
+        require(std::string(h.s().diagnostics.reason) == "press the enable button first", "reason");
+        require(std::string(h.s().handsFreeStatus().uncalBlocked) == "press the enable button first",
+                "status reason");
+        h.click();
+        h.quiet(300);
+        require(!h.s().uncalibratedDemo(), "the press alone started the demo");
+        require(h.s().handsFreeStatus().uncalPermitted, "permission not shown");
+        h.transport.online = false;
+        require(!h.s().startUncalibratedDemo(h.now), "started without BLE");
+        h.transport.online = true;
+        require(h.s().startUncalibratedDemo(h.now), "start with permission refused");
+        h.run(hold(0, 60, 300));
+        h.click(); // the next press disables
+        require(!h.s().uncalibratedDemo() && h.released(), "disable did not stop at the press edge");
+        require(!h.s().startUncalibratedDemo(h.now), "restarted without a new permission");
+        h.click();
+        require(h.s().startUncalibratedDemo(h.now), "restart after a new press");
+    });
+    test("fallback: no wired button means no start; a fault or reboot drops the permission", [=] {
+        HF h = permRig();
+        h.s().configureEnableInput(false);
+        h.click();
+        require(!h.s().startUncalibratedDemo(h.now), "started with no enable input wired");
+        require(std::string(h.s().diagnostics.reason) == "enable button not present", "reason");
+        HF g = permRig();
+        g.click();
+        require(g.s().startUncalibratedDemo(g.now), "start");
+        g.now += 10;
+        g.s().tick({g.now, {NAN, 0, 0}, {0, 0, 1}, true}, g.now, false);
+        g.quiet(600);
+        require(!g.s().uncalibratedDemo() && !g.s().handsFreeStatus().uncalPermitted,
+                "permission survived a fault");
+        g.click();
+        g.boot();
+        g.quiet(400);
+        require(!g.s().uncalibratedDemo() && !g.s().handsFreeStatus().uncalPermitted,
+                "permission or demo survived a reboot");
+    });
+    test("fallback: horizontal and vertical reversal flip the pointer, RAM only", [=] {
+        auto move = [&](bool rx, bool ry, unsigned axis, float rate) {
+            HF h = uncalRig();
+            h.s().setUncalibratedReversal(rx, ry);
+            require(h.s().startUncalibratedDemo(h.now), "start");
+            h.quiet(300);
+            const size_t mark = h.transport.reports.size();
+            h.run(hold(axis, rate, 400));
+            float dx = 0, dy = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                dx += h.transport.reports[i].dx;
+                dy += h.transport.reports[i].dy;
+            }
+            return std::array<float, 2>{dx, dy};
+        };
+        const auto plainX = move(false, false, 0, 60), plainY = move(false, false, 1, 60);
+        const auto revX = move(true, false, 0, 60), revY = move(false, true, 1, 60);
+        require(plainX[0] > 5 && revX[0] < -5, "horizontal reversal");
+        require(plainY[1] > 5 && revY[1] < -5, "vertical reversal");
+        const auto mixed = move(true, false, 1, 60); // reversing X must not touch Y
+        require(mixed[1] > 5, "vertical changed by the horizontal setting");
+        HF h = uncalRig();
+        h.s().setUncalibratedReversal(true, true);
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"reverseX\":true") && std::strstr(buffer, "\"reverseY\":true"),
+                "reversal not reported");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                "reversal was saved");
+        h.boot();
+        require(!std::strstr(buffer, "\"reverseX\":false"), "sanity");
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"reverseX\":false"), "reversal survived a reboot");
     });
 
     std::cout << passed << " passed, " << failed << " failed\n";

@@ -102,6 +102,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
     uncalDwell_ = false;
+    uncalGate_.clearLatch(); // a button permission never survives a fault; press again after recovery
     enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
@@ -290,6 +291,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         stop(SystemState::Paused, now);
         diagnostics_.reason = "control switch OFF; explicit resume required";
     }
+    if (uncal_ && uncalNeedsEnable_ && !uncalGate_.permitted()) {
+        stopUncalibratedDemo("demo stopped: enable permission lost; explicit restart required");
+    }
     const bool movementOnly = demoMovementOnly_ || uncal_;
     const UserProfile& control = uncal_ ? uncalProfile_ : profile_;
     const bool profileOk = uncal_ || (hasProfile_ && profile_.valid());
@@ -308,6 +312,10 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         scrolling = false;
     }
     intent = intent_.resolve(intent, active, scrolling);
+    if (uncal_) {
+        intent.dx = uncalReverseX_ ? -intent.dx : intent.dx;
+        intent.dy = uncalReverseY_ ? -intent.dy : intent.dy;
+    }
     if (movementOnly) {
         intent.wheel = 0; // scrolling still suppresses pointing, but nothing is scrolled
     }
@@ -420,15 +428,17 @@ const char* System::activationBlocker() const {
 
 void System::configureEnableInput(bool present) {
     enablePresent_ = present;
+    uncalGate_.configure(present, false, EnableKind::Momentary);
     enable_.configure(present, config_.switchlessQualified, config_.enableKind);
 }
 
 void System::setControlSwitch(bool active, uint32_t now) {
+    uncalGate_.update(active, now);
     const bool pressEdge = active && !uncalPrevPress_;
     uncalPrevPress_ = active;
-    if (uncal_ && pressEdge) {
-        // Stop-only: release now, without waiting for another sensor sample. Not needed to start.
-        stopUncalibratedDemo("demo stopped by the button; explicit restart required");
+    if (uncal_ && ((uncalNeedsEnable_ && !uncalGate_.permitted()) || pressEdge)) {
+        // Disable at the press edge: release now, without waiting for another sensor sample.
+        stopUncalibratedDemo("demo stopped by the enable button; explicit restart required");
     }
     const bool before = enable_.permitted();
     enable_.update(active, now);
@@ -715,6 +725,12 @@ const char* System::uncalibratedDemoBlocker() const {
     if (healthyChecks_ < start::recoverySamples) {
         return "waiting for healthy sensor samples";
     }
+    if (uncalNeedsEnable_ && !uncalGate_.present()) {
+        return "enable button not present";
+    }
+    if (uncalNeedsEnable_ && !uncalGate_.permitted()) {
+        return "press the enable button first";
+    }
     if (!uncalibratedDemoProfile().valid()) {
         return "demo configuration invalid";
     }
@@ -750,6 +766,11 @@ void System::stopUncalibratedDemo(const char* reason) {
         diagnostics_.reason = reason;
     }
     feedback_.update(state_, lastTick_);
+}
+
+void System::setUncalibratedReversal(bool horizontal, bool vertical) {
+    uncalReverseX_ = horizontal;
+    uncalReverseY_ = vertical;
 }
 
 bool System::setUncalibratedDwell(bool on, uint32_t now) {
@@ -836,6 +857,11 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.uncalGain = shown.gain[0];
     s.uncalDeadzone = shown.deadzone[0];
     s.uncalMaxStep = start::uncalDemoMaxStep;
+    s.uncalNeedsEnable = uncalNeedsEnable_;
+    s.uncalPresent = uncalGate_.present();
+    s.uncalPermitted = uncalGate_.permitted();
+    s.uncalReverseX = uncalReverseX_;
+    s.uncalReverseY = uncalReverseY_;
     s.uncalDwellEnabled = uncal_ && uncalDwell_;
     s.uncalDwellMs = uncalDwellMs_;
     s.uncalDwellTolerance = uncalDwellTolerance_;

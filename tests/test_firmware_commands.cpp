@@ -428,10 +428,10 @@ void hardwareChecks() {
     expect(has(ack, "\"source\":\"HARDWARE\""), "hardware build is not labelled simulated");
     expect(!has(ack, "FIRMWARE_SIMULATED"), "no simulated label");
     // Hardware frames carry the raw sensor view; the whole frame must stay well inside the
-    // 3072-byte telemetry buffer, otherwise the firmware silently drops it.
+    // 4096-byte telemetry buffer, otherwise the firmware silently drops it.
     expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
            "hardware telemetry has the raw sensor block");
-    expect(ack.size() < 2300, "hardware telemetry frame leaves headroom in the 3072-byte buffer");
+    expect(ack.size() < 3000, "hardware telemetry frame leaves headroom in the 4096-byte buffer");
     std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
@@ -449,6 +449,11 @@ void hardwareChecks() {
     expect(refused(send("handsfree uncal dwell set 1200 8 9")), "trailing value refused");
     expect(ok(send("handsfree uncal dwell set 1500 10")), "valid dwell settings accepted");
     expect(has(status(), "\"ms\":1500,\"tolerance\":10.0"), "settings reported");
+    expect(ok(send("handsfree uncal reverse 1 0")), "reversal accepted");
+    expect(has(status(), "\"reverseX\":true,\"reverseY\":false"), "reversal reported");
+    expect(refused(send("handsfree uncal reverse 2 0")), "bad reversal value refused");
+    expect(refused(send("handsfree uncal reverse 1")), "missing reversal value refused");
+    expect(ok(send("handsfree uncal reverse 0 0")), "reversal cleared");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

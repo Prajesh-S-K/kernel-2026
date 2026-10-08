@@ -11,6 +11,11 @@ export function uncalOf(device) {
   return {
     reported: !!raw,
     active: raw?.active === true,
+    needsEnable: raw?.needsEnable !== false,
+    present: raw?.present === true,
+    permitted: raw?.permitted === true,
+    reverseX: raw?.reverseX === true,
+    reverseY: raw?.reverseY === true,
     blocked: typeof raw?.blocked === 'string' ? raw.blocked : '',
     profileState: typeof raw?.profileState === 'string' ? raw.profileState : 'MISSING',
     gain: Number(raw?.gain) || 0,
@@ -36,7 +41,7 @@ export function uncalView(device) {
   if (!hardware) status = 'Available only with the live hardware device.';
   else if (active) status = 'Active: the pointer follows the real sensor. Movement only.';
   else if (u.blocked) status = `Not started: ${u.blocked}.`;
-  else status = 'Ready: press Start to begin. Nothing starts by itself.';
+  else status = 'Ready: press Start without calibration to begin. Nothing starts by itself.';
   const calibration =
     u.profileState === 'CORRUPT'
       ? 'The saved profile is CORRUPT. The demo does not use or repair it.'

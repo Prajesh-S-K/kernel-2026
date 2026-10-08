@@ -203,12 +203,16 @@ allow-listed diagnostic commands, never flashes and never guesses a port.
 Purpose: show the real sensor moving the Mac pointer while calibration is missing or FAILED. It is not a
 calibration, saves nothing and never reports a profile. Start values are in `docs/PARAMETERS.md`.
 
-* Start: companion, Setup page, "Start uncalibrated pointer demo" (hardware device only). No enable
-  button is needed (it is deferred); starting needs a healthy sensor (20 good samples), a valid axis
-  mapping, an unfaulted BLE link and no calibration, training or active control in progress.
+* Start: companion, Setup page, "Start without calibration" (hardware device only). It needs the physical
+  enable button's permission (its own momentary latch: disabled at every boot, a button held at boot is
+  ignored, cleared by every fault, the next press disables), a healthy sensor (20 good samples), a valid axis
+  mapping, an unfaulted BLE link and no calibration, training or active control in progress. It works when
+  calibration is missing or failed, or the saved profile is corrupt (reported separately).
+* Reversal: "Reverse horizontal" / "Reverse vertical" flip the default mapping's pointer direction (RAM only,
+  cleared by a reboot). The fallback uses the default axis mapping and promises nothing for other mountings.
 * Real sensor -> AxisTransform -> filtering -> bounded output -> SafetyManager -> HIDManager. Clicks,
   dwell, drag and wheel are removed; pointer steps are at most 4 px per report.
-* Stop: "Stop demo" (banner and panel), any press of the enable button (stop-only, at the press edge, no sample needed),
+* Stop: "Stop demo" (banner and panel), the next press of the enable button (at the press edge, no sample needed),
   starting a calibration, pause, any fault (sensor, mapping, timing, calculation), BLE disconnect or
   delivery failure. After any stop the demo stays off until started again; reconnecting or rebooting
   never starts it. Pause-on-focus-loss is suspended only while this demo runs, so the pointer can be
