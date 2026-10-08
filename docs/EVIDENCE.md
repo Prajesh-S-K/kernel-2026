@@ -48,8 +48,8 @@ behavior remain physical tests. Cross-compilation does not establish real-time h
 
 # Hands-free revision (unreleased) — evidence
 
-Verified on the committed branch `claude/hands-free-revision` (on top of `8454580`; the tip is named in the pull request)
-in a clean clone under a neutral path. This revision is **software and simulation only**.
+Verified on the committed branch `claude/hands-free-revision` (on top of `8454580`) in a clean clone under a neutral path.
+The logs below were produced from the commit `59eb08b`; the only later commit adds those logs. This revision is **software and simulation only**.
 Nothing below establishes hardware behaviour, accidental-trigger rates, comfort, training burden or suitability.
 
 ## Checks

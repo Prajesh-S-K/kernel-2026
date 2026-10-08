@@ -19,35 +19,51 @@ All matched files use Prettier code style!
 -- Configuring done (0.3s)
 -- Generating done (0.0s)
 -- Build files have been written to: <project>/build
-[ 18%] Building CXX object CMakeFiles/nodx.dir/core/src/calibration.cpp.o
-[ 18%] Building CXX object CMakeFiles/nodx.dir/core/src/selection.cpp.o
-[ 18%] Building CXX object CMakeFiles/nodx.dir/core/src/motion.cpp.o
-[ 25%] Building CXX object CMakeFiles/nodx.dir/core/src/output.cpp.o
-[ 37%] Building CXX object CMakeFiles/nodx.dir/core/src/system.cpp.o
-[ 37%] Building CXX object CMakeFiles/nodx.dir/core/src/profile.cpp.o
-[ 43%] Building CXX object CMakeFiles/nodx.dir/core/src/sensor.cpp.o
-[ 50%] Building CXX object CMakeFiles/nodx.dir/core/src/gesture.cpp.o
-[ 56%] Building CXX object CMakeFiles/nodx.dir/core/src/handsfree.cpp.o
-[ 62%] Linking CXX static library libnodx.a
-[ 62%] Built target nodx
-[ 81%] Building CXX object CMakeFiles/nodx_tests.dir/tests/test_main.cpp.o
-[ 81%] Building CXX object CMakeFiles/nodx_handsfree_tests.dir/tests/test_handsfree.cpp.o
-[ 81%] Building CXX object CMakeFiles/nodx_sim.dir/desktop/main.cpp.o
-[ 87%] Linking CXX executable nodx_sim
-[ 87%] Built target nodx_sim
-[ 93%] Linking CXX executable nodx_tests
-[ 93%] Built target nodx_tests
+[  3%] Building CXX object CMakeFiles/nodx.dir/core/src/calibration.cpp.o
+[  7%] Building CXX object CMakeFiles/nodx.dir/core/src/selection.cpp.o
+[ 11%] Building CXX object CMakeFiles/nodx.dir/core/src/output.cpp.o
+[ 15%] Building CXX object CMakeFiles/nodx.dir/core/src/motion.cpp.o
+[ 19%] Building CXX object CMakeFiles/nodx.dir/core/src/system.cpp.o
+[ 23%] Building CXX object CMakeFiles/nodx.dir/core/src/profile.cpp.o
+[ 26%] Building CXX object CMakeFiles/nodx.dir/core/src/sensor.cpp.o
+[ 30%] Building CXX object CMakeFiles/nodx.dir/core/src/gesture.cpp.o
+[ 34%] Building CXX object CMakeFiles/nodx.dir/core/src/handsfree.cpp.o
+[ 38%] Linking CXX static library libnodx.a
+[ 38%] Built target nodx
+[ 42%] Building CXX object CMakeFiles/nodx_sim.dir/desktop/main.cpp.o
+[ 46%] Building CXX object CMakeFiles/nodx_tests.dir/tests/test_main.cpp.o
+[ 50%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/tests/test_firmware_commands.cpp.o
+[ 53%] Building CXX object CMakeFiles/nodx_handsfree_tests.dir/tests/test_handsfree.cpp.o
+[ 57%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/runtime.cpp.o
+[ 61%] Linking CXX executable nodx_sim
+[ 61%] Built target nodx_sim
+[ 65%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/tests/test_firmware_commands.cpp.o
+[ 69%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/commands.cpp.o
+[ 73%] Linking CXX executable nodx_tests
+[ 73%] Built target nodx_tests
+[ 76%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/runtime.cpp.o
+[ 80%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/commands.cpp.o
+[ 84%] Building CXX object CMakeFiles/nodx_firmware_sim_tests.dir/firmware/src/telemetry.cpp.o
+[ 88%] Building CXX object CMakeFiles/nodx_firmware_hw_tests.dir/firmware/src/telemetry.cpp.o
+[ 92%] Linking CXX executable nodx_firmware_sim_tests
+[ 92%] Built target nodx_firmware_sim_tests
+[ 96%] Linking CXX executable nodx_firmware_hw_tests
+[ 96%] Built target nodx_firmware_hw_tests
 [100%] Linking CXX executable nodx_handsfree_tests
 [100%] Built target nodx_handsfree_tests
 Test project <project>/build
     Start 1: control_invariants
-1/2 Test #1: control_invariants ...............   Passed    0.69 sec
+1/4 Test #1: control_invariants ..................   Passed    0.30 sec
     Start 2: handsfree_invariants
-2/2 Test #2: handsfree_invariants .............   Passed    0.81 sec
+2/4 Test #2: handsfree_invariants ................   Passed    0.44 sec
+    Start 3: firmware_commands_simulated
+3/4 Test #3: firmware_commands_simulated .........   Passed    0.51 sec
+    Start 4: firmware_commands_hardware_config
+4/4 Test #4: firmware_commands_hardware_config ...   Passed    0.37 sec
 
-100% tests passed out of 2
+100% tests passed out of 4
 
-Total Test time (real) =   1.49 sec
+Total Test time (real) =   1.62 sec
 test_native_commands_reject_malformed_input (test_handsfree_protocol.CommandValidation.test_native_commands_reject_malformed_input) ... ok
 test_server_validates_new_actions (test_handsfree_protocol.CommandValidation.test_server_validates_new_actions) ... ok
 test_training_requires_a_profile_and_accept_requires_validation (test_handsfree_protocol.CommandValidation.test_training_requires_a_profile_and_accept_requires_validation) ... ok
@@ -90,144 +106,144 @@ test_temporary_settings_preserve_saved_profile (test_protocol.ProtocolTests.test
 test_dirty_stale_and_hash_mismatch_are_rejected (test_release.ReleaseTests.test_dirty_stale_and_hash_mismatch_are_rejected) ... ok
 
 ----------------------------------------------------------------------
-Ran 40 tests in 1.819s
+Ran 40 tests in 1.605s
 
 OK
 TAP version 13
 # Subtest: a device without hands-free telemetry is legacy and keeps its old identity
 ok 1 - a device without hands-free telemetry is legacy and keeps its old identity
   ---
-  duration_ms: 1.414958
+  duration_ms: 1.810792
   ...
 # Subtest: identity freezes the configuration only in hands-free mode
 ok 2 - identity freezes the configuration only in hands-free mode
   ---
-  duration_ms: 0.117833
+  duration_ms: 0.225041
   ...
 # Subtest: setup steps follow the helper workflow and mark the next step
 ok 3 - setup steps follow the helper workflow and mark the next step
   ---
-  duration_ms: 0.264958
+  duration_ms: 0.311625
   ...
 # Subtest: an unconfigured switch is never presented as ready
 ok 4 - an unconfigured switch is never presented as ready
   ---
-  duration_ms: 0.179791
+  duration_ms: 0.189834
   ...
 # Subtest: training view reports examples, retry, validation and accept rules
 ok 5 - training view reports examples, retry, validation and accept rules
   ---
-  duration_ms: 0.155709
+  duration_ms: 0.215458
   ...
 # Subtest: simulated patterns offered to the helper are distinct and non-empty
 ok 6 - simulated patterns offered to the helper are distinct and non-empty
   ---
-  duration_ms: 0.075709
+  duration_ms: 0.078292
   ...
 # Subtest: recovery guidance names the cause and never promises automatic resume
 ok 7 - recovery guidance names the cause and never promises automatic resume
   ---
-  duration_ms: 0.338166
+  duration_ms: 0.402875
   ...
 # Subtest: a failed save stays visible as an error with the earlier setup kept
 ok 8 - a failed save stays visible as an error with the earlier setup kept
   ---
-  duration_ms: 0.052875
+  duration_ms: 0.054792
   ...
 # Subtest: hands-free blocks freeze mode and configuration identity with dwell selection
 ok 9 - hands-free blocks freeze mode and configuration identity with dwell selection
   ---
-  duration_ms: 0.402
+  duration_ms: 0.619583
   ...
 # Subtest: configuration, mode and gesture changes invalidate an active block
 ok 10 - configuration, mode and gesture changes invalidate an active block
   ---
-  duration_ms: 0.390125
+  duration_ms: 0.535625
   ...
 # Subtest: legacy and hands-free results are never pooled into one block
 ok 11 - legacy and hands-free results are never pooled into one block
   ---
-  duration_ms: 0.150209
+  duration_ms: 0.155666
   ...
 # Subtest: raw export keeps interaction identity, gesture interruptions and abort reasons
 ok 12 - raw export keeps interaction identity, gesture interruptions and abort reasons
   ---
-  duration_ms: 0.182333
+  duration_ms: 0.1935
   ...
 # Subtest: setup commands are queued, never coalesced like polls
 ok 13 - setup commands are queued, never coalesced like polls
   ---
-  duration_ms: 1.448333
+  duration_ms: 1.553708
   ...
 # Subtest: the Lab logs interaction identity, gesture interruptions and the abort reason
 ok 14 - the Lab logs interaction identity, gesture interruptions and the abort reason
   ---
-  duration_ms: 7.5925
+  duration_ms: 8.238667
   ...
 # Subtest: frozen block captures profile source selection and geometry
 ok 15 - frozen block captures profile source selection and geometry
   ---
-  duration_ms: 1.444791
+  duration_ms: 0.98775
   ...
 # Subtest: blocks are separate and comparison settings preserve profile
 ok 16 - blocks are separate and comparison settings preserve profile
   ---
-  duration_ms: 0.371333
+  duration_ms: 0.732417
   ...
 # Subtest: desktop and firmware simulation labels never claim live readings
 ok 17 - desktop and firmware simulation labels never claim live readings
   ---
-  duration_ms: 0.171084
+  duration_ms: 0.22825
   ...
 # Subtest: polls coalesce and trial persistence runs outside the command queue
 ok 18 - polls coalesce and trial persistence runs outside the command queue
   ---
-  duration_ms: 0.8605
+  duration_ms: 1.03
   ...
 # Subtest: malformed acknowledgement and persistence failure are visible
 ok 19 - malformed acknowledgement and persistence failure are visible
   ---
-  duration_ms: 0.266333
+  duration_ms: 0.403958
   ...
 # Subtest: browser timeout aborts a stalled request
 ok 20 - browser timeout aborts a stalled request
   ---
-  duration_ms: 5.944916
+  duration_ms: 5.115208
   ...
 # Subtest: reused block IDs cannot pool different profiles or device sources
 ok 21 - reused block IDs cannot pool different profiles or device sources
   ---
-  duration_ms: 0.155459
+  duration_ms: 0.15325
   ...
 # Subtest: Lab applies matched temporary settings, freezes trials and retains persistence failures
 ok 22 - Lab applies matched temporary settings, freezes trials and retains persistence failures
   ---
-  duration_ms: 4.143667
+  duration_ms: 4.954041
   ...
 # Subtest: empty trials never invent metrics
 ok 23 - empty trials never invent metrics
   ---
-  duration_ms: 1.482959
+  duration_ms: 0.690542
   ...
 # Subtest: misses affect accuracy and time but not nominal successful rate
 ok 24 - misses affect accuracy and time but not nominal successful rate
   ---
-  duration_ms: 0.109292
+  duration_ms: 0.177875
   ...
 # Subtest: aborted trials are retained raw but excluded from metrics
 ok 25 - aborted trials are retained raw but excluded from metrics
   ---
-  duration_ms: 0.118792
+  duration_ms: 0.138291
   ...
 # Subtest: aggregate uses summed ID over summed time, not average trial rate
 ok 26 - aggregate uses summed ID over summed time, not average trial rate
   ---
-  duration_ms: 0.061584
+  duration_ms: 0.147875
   ...
 # Subtest: CSV quotes nested profile and multiline text
 ok 27 - CSV quotes nested profile and multiline text
   ---
-  duration_ms: 0.144667
+  duration_ms: 0.371459
   ...
 1..27
 # tests 27
@@ -237,4 +253,4 @@ ok 27 - CSV quotes nested profile and multiline text
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 74.764375
+# duration_ms 81.584667
