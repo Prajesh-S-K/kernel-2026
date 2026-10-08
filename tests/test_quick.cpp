@@ -103,6 +103,22 @@ struct Practice {
     Shape shape;
     std::vector<std::string> reasons;
     std::function<Vec3(uint32_t)> preview = [](uint32_t) { return Vec3{0, 0, 0}; };
+    // Ordinary pointing shown during the pointing sample: yaw/pitch sweeps in random directions, in
+    // the frame's axes 0 and 1 unless a test overrides it (e.g. a different, rotated plane).
+    std::function<Vec3(uint32_t)> pointing = [rng = std::mt19937(2026), until = uint32_t(0),
+                                              from = uint32_t(0), dir = Vec3{1, 0, 0},
+                                              peak = 40.f](uint32_t now) mutable {
+        std::uniform_real_distribution<float> u(0.f, 1.f);
+        if (now >= until) {
+            from = now;
+            until = now + 300 + unsigned(900 * u(rng));
+            const float a = 2 * kPi * u(rng);
+            dir = {std::cos(a), std::sin(a), 0.f};
+            peak = 25 + 50 * u(rng);
+        }
+        const float level = peak * std::sin(kPi * float(now - from) / float(until - from));
+        return Vec3{dir[0] * level, dir[1] * level, dir[2] * level};
+    };
     explicit Practice(std::function<Shape(unsigned)> b = [](unsigned) { return Shape{}; })
         : behavior(std::move(b)) {}
     void step() {
@@ -118,6 +134,8 @@ struct Practice {
         Vec3 body{};
         if (st.phase == QuickPhase::Preview) {
             body = preview(sim.now);
+        } else if (st.phase == QuickPhase::Pointing) {
+            body = pointing(sim.now);
         } else if (moving && sim.now >= moveStart) {
             if (sim.now - moveStart > shape.ms) {
                 moving = false;
@@ -245,9 +263,9 @@ int main() {
         require(p.until(QuickPhase::Preview, 400000), "should recover with the sixth, good tilt");
         require(p.saw("too small"), "tiny tilt not explained");
         require(p.saw("did not come back") || p.saw("not come back"), "missing return not explained");
-        require(p.saw("wandered"), "diagonal movement not explained");
+        require(p.saw("wandered"), "wandering movement not explained");
         require(p.saw("too slow"), "slow tilt not explained");
-        require(p.saw("ordinary pointing"), "pointing-like tilt not explained");
+        require(p.saw("ordinary pointing"), "pointing-like tilt not explained (measured, not assumed)");
         require(p.attempt == 6, "five rejected attempts then one good");
         require(p.practice.profile().valid(), "profile after the retries");
     });
@@ -659,6 +677,253 @@ int main() {
         QuickStatus none;
         quickJson(buffer, sizeof buffer, none);
         require(std::strstr(buffer, "\"designated\":false"), "no direction before a practice");
+    });
+
+    // ------------------------------------------------ the pointing check is MEASURED
+    // A pointing sample in an arbitrary plane. `a` and `b` are orthonormal in the control frame.
+    auto planarPointing = [](Vec3 a, Vec3 b) {
+        return [=, rng = std::mt19937(7), until = uint32_t(0), from = uint32_t(0), angle = 0.f,
+                peak = 40.f](uint32_t now) mutable {
+            std::uniform_real_distribution<float> u(0.f, 1.f);
+            if (now >= until) {
+                from = now;
+                until = now + 300 + unsigned(900 * u(rng));
+                angle = 2 * kPi * u(rng);
+                peak = 25 + 50 * u(rng);
+            }
+            const float level = peak * std::sin(kPi * float(now - from) / float(until - from));
+            const float c = std::cos(angle) * level, sn = std::sin(angle) * level;
+            return Vec3{a[0] * c + b[0] * sn, a[1] * c + b[1] * sn, a[2] * c + b[2] * sn};
+        };
+    };
+    auto practiceWith = [&](const Vec3& dir, std::function<Vec3(uint32_t)> pointing) {
+        auto p = std::make_unique<Practice>([=](unsigned) {
+            Shape s;
+            s.dir = dir;
+            return s;
+        });
+        p->pointing = std::move(pointing);
+        p->practice.begin(p->sim.now);
+        p->until(QuickPhase::Preview, 150000);
+        return p;
+    };
+    test("pointing check: independent of the default pointing plane (axes 0 and 1)", [&] {
+        // Ordinary pointing happens in the plane of axes 0 and 2 here (a different mounting), so a
+        // direction along axis 2 IS the user's pointing, and a direction along axis 1 is not.
+        const auto plane = planarPointing({1, 0, 0}, {0, 0, 1});
+        auto along2 = practiceWith({0, 0, 1}, plane);
+        require(along2->practice.phase() != QuickPhase::Preview,
+                "a direction inside the user's measured pointing was accepted");
+        require(along2->saw("ordinary pointing"), "the rejection must name ordinary pointing");
+        auto along1 = practiceWith({0, 1, 0}, plane);
+        require(along1->practice.phase() == QuickPhase::Preview,
+                "a direction outside the measured pointing was refused (the old default-plane rule)");
+        require(along1->practice.status(along1->sim.now).pointingShare < .1f,
+                "the measured share of pointing along the direction should be small");
+    });
+    test("pointing check: the designated direction is compared with what the user actually does", [&] {
+        const auto defaultPlane = planarPointing({1, 0, 0}, {0, 1, 0});
+        auto ok = practiceWith(unitOf({.3f, 0, 1.f}), defaultPlane);
+        require(ok->practice.phase() == QuickPhase::Preview, "a clearly separate direction was refused");
+        const QuickStatus st = ok->practice.status(ok->sim.now);
+        require(st.pointingShare < start::quickPointingShareMax && st.pointingMs >= 5000,
+                "the pointing share and the observed pointing time must be reported");
+        auto in = practiceWith(unitOf({1, .1f, 0}), defaultPlane);
+        require(in->practice.phase() != QuickPhase::Preview, "a pointing direction was accepted");
+        require(in->saw("% of your ordinary pointing"), "the share of pointing must be reported");
+    });
+    test("pointing check: too little or one-directional pointing cannot confirm a direction", [&] {
+        auto none = practiceWith({0, 0, 1}, [](uint32_t) { return Vec3{0, 0, 0}; });
+        require(none->practice.phase() == QuickPhase::Failed, "still sensor must not pass the check");
+        require(none->saw("not enough varied ordinary pointing"), "reason");
+        // pointing in one direction only proves nothing about the others
+        auto oneWay = practiceWith({0, 0, 1}, [t0 = uint32_t(0)](uint32_t now) mutable {
+            const float level = 45.f * std::sin(2 * kPi * float(now) / 700.f);
+            return Vec3{level, 0, 0};
+        });
+        require(oneWay->saw("more different directions"), "one-way pointing must ask for variety");
+    });
+    test("pointing check: a gesture the measured pointing triggers is refused with the pointer-pause cost", [&] {
+        // ordinary pointing that now and then contains the designated tilt-and-return itself
+        const Vec3 d = unitOf({.1f, 0, 1.f});
+        auto base = planarPointing({1, 0, 0}, {0, 1, 0});
+        auto p = practiceWith(d, [=](uint32_t now) mutable {
+            Shape s;
+            s.dir = d;
+            // a designated tilt-and-return every 2.5 s, on top of NORMAL pointing in the other axes
+            const uint32_t phase = now % 2500;
+            const Vec3 tilt = phase < 700 ? rateAt(s, float(phase)) : Vec3{0, 0, 0};
+            const Vec3 point = phase < 1100 ? Vec3{0, 0, 0} : base(now); // pause pointing around it
+            return Vec3{tilt[0] + point[0], tilt[1] + point[1], tilt[2] + point[2]};
+        });
+        require(p->practice.phase() != QuickPhase::Preview, "a gesture present in the pointing was accepted");
+        require(p->saw("triggered this gesture") || p->saw("% of your ordinary pointing"),
+                "the confusion must be explained");
+    });
+    test("pointing check: the replay catches a rare embedded gesture even when its variance share is small", [&] {
+        // Strong ordinary pointing with ONE designated tilt-and-return every 4 s: the tilt is only a few
+        // percent of the pointing variance, so only replaying the sample through the recognizer finds it.
+        const Vec3 d = unitOf({.1f, 0, 1.f});
+        auto base = planarPointing({1, 0, 0}, {0, 1, 0});
+        auto p = practiceWith(d, [=](uint32_t now) mutable {
+            Shape s;
+            s.dir = d;
+            const uint32_t phase = now % 4000;
+            const Vec3 tilt = phase < 700 ? rateAt(s, float(phase)) : Vec3{0, 0, 0};
+            // pointing in [1200, 3400) ms of each cycle: a calm gap precedes the tilt (armed again)
+            const Vec3 point = (phase < 1200 || phase >= 3400) ? Vec3{0, 0, 0} : base(now);
+            return Vec3{tilt[0] + 1.8f * point[0], tilt[1] + 1.8f * point[1], tilt[2] + 1.8f * point[2]};
+        });
+        require(p->practice.phase() != QuickPhase::Preview, "an embedded gesture was accepted");
+        require(p->saw("triggered this gesture"), "the replay must be what rejects it");
+        require(p->saw("pointer paused"), "the pointer-pause cost must be reported");
+    });
+    test("pointing check: a retried tilt reuses the measured pointing and is checked again", [&] {
+        auto p = std::make_unique<Practice>([](unsigned attempt) {
+            Shape s;
+            s.dir = attempt == 1 ? Vec3{1, 0, 0} : unitOf({.2f, 0, 1.f}); // first a pointing direction
+            return s;
+        });
+        p->practice.begin(p->sim.now);
+        require(p->until(QuickPhase::Preview, 200000), "second tilt should pass");
+        require(p->attempt == 2, "exactly one retried tilt");
+        require(p->saw("ordinary pointing"), "the first tilt was rejected against measured pointing");
+    });
+
+    // ------------------------------------------------ opposite-direction return and near-zero settling
+    test("return: overshoot, slow return, wrong order and detours are not accepted", [&] {
+        const Vec3 d = unitOf({.2f, 0, 1.f});
+        const QuickProfile profile = practiceFor(d);
+        auto outcome = [&](const Shape& s, unsigned tail = 1500) {
+            Run run(profile);
+            run.quiet(800);
+            run.perform(s, tail);
+            return std::pair<unsigned, QuickReject>{run.clicks, run.rec.lastReject};
+        };
+        Shape good;
+        good.dir = profile.direction;
+        require(outcome(good, 400).first == 1, "the designated gesture must click");
+        Shape overshoot = good;
+        overshoot.returnFrac = 1.7f; // goes past the start, into the opposite side
+        auto r = outcome(overshoot);
+        require(r.first == 0 && r.second == QuickReject::Residual, "an overshooting return was accepted");
+        Shape slow = good;
+        slow.returnFrac = 0.f; // outward only...
+        slow.drift = {0, 0, 0};
+        r = outcome(slow);
+        require(r.first == 0, "no return clicked");
+        // a creeping, sub-threshold return (about 3 deg/s) is not a return stroke
+        Run creep(profile);
+        creep.quiet(800);
+        for (unsigned t = 0; t <= 400; t += 10) {
+            Shape slowOut;
+            slowOut.dir = profile.direction;
+            slowOut.ms = 800;
+            slowOut.returnFrac = 0.f;
+            creep.feed(rateAt(slowOut, float(t)));
+        }
+        for (unsigned t = 0; t < 2500; t += 10) {
+            creep.feed({-3.f * profile.direction[0], -3.f * profile.direction[1], -3.f * profile.direction[2]});
+        }
+        require(creep.clicks == 0 && creep.rec.rejected >= 1, "a creeping return was accepted");
+        // the opposite stroke FIRST, then the designated one straight after: wrong order, no candidate
+        Run wrong(profile);
+        wrong.quiet(800);
+        for (unsigned t = 0; t <= 600; t += 10) {
+            const Vec3 v = rateAt(good, float(t));
+            wrong.feed({-v[0], -v[1], -v[2]}); // out the opposite way, back the designated way
+        }
+        wrong.quiet(1500);
+        require(wrong.clicks == 0 && wrong.rec.candidates == 0, "opposite-first order opened a candidate");
+        // out along the direction, back along a DIFFERENT path (a detour): cross-axis rejection
+        Shape loop = good;
+        loop.lShape = true;
+        r = outcome(loop);
+        require(r.first == 0, "a detouring return was accepted");
+    });
+    test("settling: the final residual boundary follows the return tolerance", [&] {
+        const QuickProfile profile = practiceFor(unitOf({0, .1f, 1.f}));
+        auto clicksFor = [&](float returnFrac, float tolerance) {
+            Run run(profile, QuickSettings{1.f, tolerance});
+            run.quiet(800);
+            Shape s;
+            s.dir = profile.direction;
+            s.returnFrac = returnFrac;
+            run.perform(s, 800);
+            return run.clicks;
+        };
+        // residual = (1 - returnFrac) of the excursion; default tolerance 0.35
+        require(clicksFor(1.0f, .35f) == 1 && clicksFor(.85f, .35f) == 1 && clicksFor(.75f, .35f) == 1,
+                "residuals up to 25 percent must settle");
+        require(clicksFor(.6f, .35f) == 0 && clicksFor(.5f, .35f) == 0,
+                "residuals of 40 percent and more must not");
+        require(clicksFor(.6f, .5f) == 1, "the boundary must move with the tolerance setting");
+        require(clicksFor(.85f, .15f) == 1 && clicksFor(.7f, .15f) == 0, "tight tolerance");
+    });
+    test("settling: the 150 ms calm must be unbroken and genuinely quiet", [&] {
+        const QuickProfile profile = practiceFor(unitOf({0, 0, 1.f}));
+        Shape s;
+        s.dir = profile.direction;
+        auto withBump = [&](unsigned bumpAfterMs, float bumpRate) {
+            Run run(profile);
+            run.quiet(800);
+            for (unsigned t = 0; t <= s.ms; t += 10) {
+                run.feed(rateAt(s, float(t)));
+            }
+            for (unsigned t = 0; t < 1500; t += 10) {
+                // after the return a short disturbance, then calm again
+                const bool bump = t >= bumpAfterMs && t < bumpAfterMs + 30;
+                run.feed(bump ? Vec3{bumpRate, 0, 0} : Vec3{0, 0, 0});
+            }
+            return run.clicks;
+        };
+        std::printf("INFO synthetic: calm broken at 100 ms by a 30 deg/s bump: %u clicks (the calm restarts); at 400 ms: %u click(s)\n",
+                    withBump(100, 30.f), withBump(400, 30.f));
+        // a bump inside the confirmation window restarts the calm: the click is delayed, not lost
+        require(withBump(100, 30.f) <= 1, "more than one click");
+        // a bump AFTER the click does not undo it
+        require(withBump(400, 30.f) == 1, "a late bump must not remove an accepted gesture");
+        // creeping around the exit threshold never settles: no click, a timeout/no-return rejection
+        Run creeping(profile);
+        creeping.quiet(800);
+        for (unsigned t = 0; t <= s.ms; t += 10) {
+            creeping.feed(rateAt(s, float(t)));
+        }
+        for (unsigned t = 0; t < 2500; t += 10) {
+            creeping.feed({0, 0, 11.f * std::sin(2 * kPi * float(t) / 400.f)}); // 11 deg/s, above exit
+        }
+        require(creeping.clicks == 0, "a never-settling return clicked");
+        // genuinely quiet (below the exit threshold) after the return settles in 150 ms
+        Run quiet(profile);
+        quiet.quiet(800);
+        const uint32_t startAt = quiet.sim.now;
+        for (unsigned t = 0; t <= s.ms; t += 10) {
+            quiet.feed(rateAt(s, float(t)));
+        }
+        quiet.quiet(400);
+        require(quiet.clicks == 1 && quiet.clickTimes[0] - startAt <= s.ms + 300,
+                "the settled return should confirm about 150 ms after it ends");
+    });
+    test("settling: bias estimate error drifts the integrated residual; the documented limit", [&] {
+        const QuickProfile base = practiceFor(unitOf({0, 0, 1.f}));
+        auto clicksWithBiasError = [&](float errorDps) {
+            QuickProfile p = base;
+            for (float& b : p.bias) {
+                b += errorDps; // the stored bias is wrong by this much on every axis
+            }
+            Run run(p);
+            run.quiet(800);
+            Shape s;
+            s.dir = base.direction;
+            run.perform(s, 500);
+            return run.clicks;
+        };
+        require(clicksWithBiasError(0.f) == 1 && clicksWithBiasError(1.f) == 1,
+                "a 1 deg/s bias error must still settle");
+        std::printf("INFO synthetic: bias error 2 deg/s: %u click(s); 3: %u; 6: %u\n",
+                    clicksWithBiasError(2.f), clicksWithBiasError(3.f), clicksWithBiasError(6.f));
+        require(clicksWithBiasError(6.f) == 0,
+                "a large bias error must not be silently accepted as a settled return");
     });
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

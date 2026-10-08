@@ -496,16 +496,16 @@ void hardwareChecks() {
                ok(send("quick enable off")),
            "cancel, clear, retry and disable are always accepted");
     expect(has(status(), "\"quick\":{\"phase\":\"IDLE\""), "quick status reported");
-    expect(refused(send("capture start 0")) && refused(send("capture start 11")) &&
+    expect(refused(send("capture start 0")) && refused(send("capture start 21")) &&
                refused(send("capture start")) && refused(send("capture start 5 now")),
-           "capture length is bounded to 1-10 seconds");
+           "capture length is bounded to 1-20 seconds");
     expect(refused(send("capture get 0")), "nothing to read before a capture");
     expect(refused(send("capture sideways")), "bad capture verb refused");
     expect(ok(send("capture start 5")) && has(status(), "\"capture\":{\"active\":true"),
            "capture starts and is reported");
     expect(ok(send("capture stop")) && has(status(), "\"capture\":{\"active\":false,\"count\":0"),
            "capture stops");
-    expect(has(status(), "\"capacity\":1000"), "capture capacity reported");
+    expect(has(status(), "\"capacity\":2000"), "capture capacity reported");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

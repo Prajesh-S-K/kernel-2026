@@ -220,6 +220,8 @@ const char* name(QuickPhase p) {
         return "REST";
     case QuickPhase::Tilt:
         return "TILT";
+    case QuickPhase::Pointing:
+        return "POINTING";
     case QuickPhase::Preview:
         return "PREVIEW";
     case QuickPhase::Done:
@@ -243,6 +245,8 @@ const char* name(QuickCue c) {
         return "RECORDING";
     case QuickCue::ReturnToCentre:
         return "RETURN_TO_CENTRE";
+    case QuickCue::PointNormally:
+        return "POINT_NORMALLY";
     case QuickCue::Preview:
         return "PREVIEW";
     }
@@ -278,7 +282,7 @@ void QuickPractice::retry(uint32_t now) {
     if (phase_ == QuickPhase::Preview) {
         phase_ = QuickPhase::Tilt;
         beginTilt(now);
-        reason_ = "try another tilt: sideways, then back to centre";
+        reason_ = "try another movement in your chosen direction, then back to the start";
     }
 }
 void QuickPractice::beginTilt(uint32_t now) {
@@ -297,6 +301,8 @@ void QuickPractice::tick(const Vec3& frame, uint32_t now) {
         tickRest(frame, now);
     } else if (phase_ == QuickPhase::Tilt) {
         tickTilt(frame, now);
+    } else if (phase_ == QuickPhase::Pointing) {
+        tickPointing(frame, now);
     } else if (phase_ == QuickPhase::Preview) {
         if (uint32_t(now - phaseStart_) > start::quickPreviewTimeoutMs) {
             fail("the preview timed out; start the practice again");
@@ -447,15 +453,10 @@ bool QuickPractice::analyze() {
     crossDeg_ = cross;
     residualDeg_ = residual;
     if (cross > start::quickPracticeCrossRatio * best) {
-        return again("that movement wandered sideways and diagonally: make one clean tilt and return");
+        return again("that movement wandered off its line: make one clean movement in one direction and return");
     }
     if (residual > start::quickPracticeResidualRatio * best) {
         return again("you did not come back to the start: tilt, then return fully to centre");
-    }
-    // The control frame's pointing plane is axes 0 and 1; a tilt mostly inside it is a pointing move.
-    planeShare_ = std::sqrt(d[0] * d[0] + d[1] * d[1]);
-    if (planeShare_ > start::quickPlaneShareMax) {
-        return again("that tilt looks like ordinary pointing: tilt sideways (roll), not left/right or up/down");
     }
     profile_ = QuickProfile{};
     profile_.direction = d;
@@ -464,12 +465,148 @@ bool QuickPractice::analyze() {
     profile_.practiceDeg = best;
     profile_.practicePeak = std::clamp(peakRate, 10.f, 240.f);
     if (!profile_.valid()) {
-        return again("that practice could not be used: try another sideways tilt");
+        return again("that practice could not be used: try another movement in your chosen direction");
+    }
+    if (!pointCaptured_) {
+        // Next: a short sample of the user's ORDINARY pointing, measured, not assumed.
+        phase_ = QuickPhase::Pointing;
+        pointStart_ = lastMs_;
+        activityMs_ = 0;
+        activityTarget_ = start::quickPointingActivityMs;
+        pointFrames_.clear();
+        pointTimes_.clear();
+        covCount_ = 0;
+        for (double& c : cov_) {
+            c = 0;
+        }
+        reason_ = "now move the pointer around in different directions, as you normally would";
+        return true;
+    }
+    return evaluatePointing(lastMs_);
+}
+namespace {
+// Eigenvalues of a symmetric 3x3 matrix (Jacobi rotations), sorted descending; also the Rayleigh
+// quotient helper below uses the matrix itself.
+void eigenvalues(const double c[6], double out[3]) {
+    double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
+    for (int sweep = 0; sweep < 20; ++sweep) {
+        for (int p = 0; p < 2; ++p) {
+            for (int q = p + 1; q < 3; ++q) {
+                if (std::abs(a[p][q]) < 1e-12) {
+                    continue;
+                }
+                const double theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                const double t = (theta >= 0 ? 1.0 : -1.0) / (std::abs(theta) + std::sqrt(theta * theta + 1.0));
+                const double cs = 1.0 / std::sqrt(t * t + 1.0), sn = t * cs;
+                for (int k = 0; k < 3; ++k) {
+                    const double akp = a[k][p], akq = a[k][q];
+                    a[k][p] = cs * akp - sn * akq;
+                    a[k][q] = sn * akp + cs * akq;
+                }
+                for (int k = 0; k < 3; ++k) {
+                    const double apk = a[p][k], aqk = a[q][k];
+                    a[p][k] = cs * apk - sn * aqk;
+                    a[q][k] = sn * apk + cs * aqk;
+                }
+            }
+        }
+    }
+    out[0] = a[0][0];
+    out[1] = a[1][1];
+    out[2] = a[2][2];
+    std::sort(out, out + 3, [](double x, double y) { return x > y; });
+}
+} // namespace
+void QuickPractice::tickPointing(const Vec3& frame, uint32_t now) {
+    if (uint32_t(now - pointStart_) > start::quickPointingWindowMs) {
+        fail("not enough varied ordinary pointing to check the gesture against: start the practice again");
+        return;
+    }
+    const Vec3 r = minus(frame, bias_);
+    const uint32_t gap = std::min<uint32_t>(50, uint32_t(now - lastMs_));
+    if (pointFrames_.size() < 2000) {
+        pointFrames_.push_back(frame);
+        pointTimes_.push_back(now);
+    }
+    if (norm(r) > start::quickPointingActiveRate) {
+        activityMs_ += gap;
+        ++covCount_;
+        cov_[0] += double(r[0]) * r[0];
+        cov_[1] += double(r[0]) * r[1];
+        cov_[2] += double(r[0]) * r[2];
+        cov_[3] += double(r[1]) * r[1];
+        cov_[4] += double(r[1]) * r[2];
+        cov_[5] += double(r[2]) * r[2];
+    }
+    if (activityMs_ >= activityTarget_) {
+        if (evaluatePointing(now) && phase_ == QuickPhase::Pointing) {
+            phase_ = QuickPhase::Preview;
+        }
+    }
+}
+bool QuickPractice::evaluatePointing(uint32_t now) {
+    pointCaptured_ = true;
+    auto reject = [&](const char* why) {
+        // keep the measured pointing; ask for another tilt direction
+        reason_ = why;
+        phase_ = QuickPhase::Tilt;
+        beginTilt(now);
+        return false;
+    };
+    if (covCount_ < 20) {
+        pointCaptured_ = false;
+        activityTarget_ += 1500;
+        reason_ = "keep moving the pointer around, as you normally would";
+        phase_ = QuickPhase::Pointing;
+        return false;
+    }
+    double c[6];
+    double trace = 0;
+    for (int i = 0; i < 6; ++i) {
+        c[i] = cov_[i] / double(covCount_);
+    }
+    trace = c[0] + c[3] + c[5];
+    double ev[3];
+    eigenvalues(c, ev);
+    if (!(trace > 1e-6) || ev[1] < start::quickPointingCoverageMin * ev[0]) {
+        // pointing in only one direction proves nothing about the others: ask for more variety
+        pointCaptured_ = false;
+        activityTarget_ += 2000;
+        reason_ = "move the pointer in more different directions (not only one way)";
+        phase_ = QuickPhase::Pointing;
+        return false;
+    }
+    const Vec3& d = profile_.direction;
+    const double along = d[0] * (c[0] * d[0] + c[1] * d[1] + c[2] * d[2]) +
+                         d[1] * (c[1] * d[0] + c[3] * d[1] + c[4] * d[2]) +
+                         d[2] * (c[2] * d[0] + c[4] * d[1] + c[5] * d[2]);
+    pointingShare_ = float(std::clamp(along / trace, 0.0, 1.0));
+    if (pointingShare_ > start::quickPointingShareMax) {
+        std::snprintf(reasonBuf_, sizeof reasonBuf_,
+                      "that direction is %d%% of your ordinary pointing: choose a direction you do not point in",
+                      int(std::lround(pointingShare_ * 100.f)));
+        return reject(reasonBuf_);
+    }
+    // Replay the measured pointing through the recognizer this practice would create.
+    QuickRecognizer replay;
+    replay.configure(profile_, settings_);
+    for (size_t i = 0; i < pointFrames_.size(); ++i) {
+        replay.update(pointFrames_[i], pointTimes_[i]);
+    }
+    const float duration = pointTimes_.size() > 1
+                               ? float(pointTimes_.back() - pointTimes_.front())
+                               : 1.f;
+    if (replay.accepted > 0 || float(replay.suppressedMs) > start::quickPointingSuppressedMax * duration) {
+        std::snprintf(reasonBuf_, sizeof reasonBuf_,
+                      "your ordinary pointing triggered this gesture (%u clicks, pointer paused %d%% of the time): choose another direction",
+                      unsigned(replay.accepted),
+                      int(std::lround(100.f * float(replay.suppressedMs) / duration)));
+        return reject(reasonBuf_);
     }
     preview_.configure(profile_, settings_);
     phase_ = QuickPhase::Preview;
-    phaseStart_ = lastMs_;
-    reason_ = "practice captured: try it in the preview, then accept or retry";
+    phaseStart_ = now;
+    reason_ = "checked against your ordinary pointing: try it in the preview, then accept or retry";
     return true;
 }
 QuickStatus QuickPractice::status(uint32_t now) const {
@@ -501,6 +638,10 @@ QuickStatus QuickPractice::status(uint32_t now) const {
             break;
         }
         st.progress = .4f;
+    } else if (phase_ == QuickPhase::Pointing) {
+        st.cue = QuickCue::PointNormally;
+        st.pointingMs = activityMs_;
+        st.progress = .5f + .4f * std::min(1.f, float(activityMs_) / float(std::max<uint32_t>(1, activityTarget_)));
     } else if (phase_ == QuickPhase::Preview || phase_ == QuickPhase::Done) {
         st.cue = QuickCue::Preview;
         st.progress = 1.f;
@@ -509,7 +650,8 @@ QuickStatus QuickPractice::status(uint32_t now) const {
         st.designated = true;
         st.practiceResidualDeg = residualDeg_;
         st.practiceCrossDeg = crossDeg_;
-        st.planeShare = planeShare_;
+        st.pointingShare = pointingShare_;
+        st.pointingMs = activityMs_;
         st.accepted = preview_.accepted;
         st.rejected = preview_.rejected;
         st.candidates = preview_.candidates;
@@ -532,14 +674,15 @@ size_t quickJson(char* out, size_t capacity, const QuickStatus& s) {
     const int written = std::snprintf(
         out, capacity,
         "{\"phase\":\"%s\",\"cue\":\"%s\",\"cueMs\":%lu,\"progress\":%.3f,\"reason\":\"%s\","
-        "\"practice\":{\"excursion\":%.1f,\"residual\":%.1f,\"cross\":%.1f,\"planeShare\":%.2f},"
+        "\"practice\":{\"excursion\":%.1f,\"residual\":%.1f,\"cross\":%.1f,\"pointingShare\":%.2f,\"pointingMs\":%lu},"
         "\"ready\":%s,\"enabled\":%s,\"frame\":\"%s\",\"state\":\"%s\",\"suppressing\":%s,"
         "\"accepted\":%lu,\"rejected\":%lu,\"candidates\":%lu,\"clicks\":%lu,"
         "\"suppressedMs\":%lu,\"lastReject\":\"%s\",\"last\":{\"excursion\":%.1f,\"residual\":%.1f,"
         "\"durationMs\":%.0f},\"sensitivity\":%.2f,\"returnTolerance\":%.2f,"
         "\"directionTolerance\":%.0f,\"designated\":%s,\"direction\":[%.3f,%.3f,%.3f],\"blocked\":\"%s\"}",
         name(s.phase), name(s.cue), static_cast<unsigned long>(s.cueMs), s.progress, s.reason,
-        s.practiceDeg, s.practiceResidualDeg, s.practiceCrossDeg, s.planeShare,
+        s.practiceDeg, s.practiceResidualDeg, s.practiceCrossDeg, s.pointingShare,
+        static_cast<unsigned long>(s.pointingMs),
         s.ready ? "true" : "false", s.enabled ? "true" : "false",
         s.configuredFrame ? "CONFIGURED" : "FALLBACK", s.state, s.suppressing ? "true" : "false",
         static_cast<unsigned long>(s.accepted), static_cast<unsigned long>(s.rejected),

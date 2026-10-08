@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Capture a raw 100 Hz sensor recording from the running companion for offline replay.
 
-The board records up to 10 seconds of RAW sensor frames in RAM (`capture start`); this tool starts it,
+The board records up to 20 seconds of RAW sensor frames in RAM (`capture start`); this tool starts it,
 waits, reads the pages back (`capture get`) and writes a CSV (t_ms,gx,gy,gz,ax,ay,az in sensor register
 units: gyro 131 LSB per deg/s, accel 16384 LSB per g) plus a small metadata file, under
 hardware-evidence/captures/ (git-ignored, local only; no device identifiers are written).
@@ -9,7 +9,7 @@ hardware-evidence/captures/ (git-ignored, local only; no device identifiers are 
 The capture is passive: it sends only capture commands and never changes control. For a practice
 recording, run this at the moment you start the practice in the companion.
 
-    python3 scripts/capture_session.py --label practice --seconds 10
+    python3 scripts/capture_session.py --label practice --seconds 15
     python3 scripts/capture_session.py --label pointing --seconds 10 --note "normal pointing, no gestures"
     python3 scripts/capture_session.py --label gestures --seconds 10 --note "gestures at about 2 s and 6 s"
 
@@ -76,13 +76,13 @@ def main(argv=None):
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("--port", type=int, default=8791, help="companion port")
-    parser.add_argument("--seconds", type=int, default=10, help="1 to 10")
+    parser.add_argument("--seconds", type=int, default=15, help="1 to 20")
     parser.add_argument("--label", required=True, help="short name for the recording")
     parser.add_argument("--note", default="", help="what you will do during the capture")
     parser.add_argument("--out", type=Path, default=ROOT / "hardware-evidence" / "captures")
     args = parser.parse_args(argv)
-    if not 1 <= args.seconds <= 10:
-        parser.error("--seconds must be 1 to 10")
+    if not 1 <= args.seconds <= 20:
+        parser.error("--seconds must be 1 to 20")
     label = "".join(c if c.isalnum() or c in "-_" else "-" for c in args.label)
 
     def call(body):

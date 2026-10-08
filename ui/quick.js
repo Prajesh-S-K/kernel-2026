@@ -4,7 +4,7 @@ const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const REASONS = {
   NONE: '',
   TOO_SMALL: 'the tilt was too small',
-  CROSS_AXIS: 'too much sideways drift',
+  CROSS_AXIS: 'too much drift away from the designated direction',
   NO_RETURN: 'it did not come back',
   NOT_BACK_TO_START: 'it did not return to the start orientation',
   TIMEOUT: 'it took longer than a second',
@@ -24,7 +24,8 @@ export function quickOf(device) {
       excursion: num(q?.practice?.excursion),
       residual: num(q?.practice?.residual),
       cross: num(q?.practice?.cross),
-      planeShare: num(q?.practice?.planeShare),
+      pointingShare: num(q?.practice?.pointingShare),
+      pointingMs: num(q?.practice?.pointingMs),
     },
     ready: q?.ready === true,
     enabled: q?.enabled === true,
@@ -60,31 +61,27 @@ const STATE_TEXT = {
   SETTLING: 'Settling — pointer paused',
 };
 
-const AXES = [
-  ['horizontal (turn)', 'to the right', 'to the left'],
-  ['vertical (nod)', 'down', 'up'],
-  ['roll (side tilt)', 'toward the right shoulder', 'toward the left shoulder'],
-];
+const AXIS_NAMES = ['first', 'second', 'third'];
 // The designated direction as the companion shows it: the signed unit vector in the control frame and
-// a plain-words reading of its dominant axis. In the default mapping the third axis is the head roll.
+// its dominant component. No body-direction label (left, right, shoulder, ...) is given: the sensor's
+// mounting and axis mapping are not verified, so the axes carry no anatomical meaning here.
 export function directionText(q) {
   if (!q.designated) return 'No direction designated yet: practise the gesture to set it.';
   const d = q.direction;
   const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
   const lead = d.reduce((best, v, i) => (Math.abs(v) > Math.abs(d[best]) ? i : best), 0);
-  const [name, positive, negative] = AXES[lead];
-  const words = `mostly ${name}, ${d[lead] >= 0 ? positive : negative}`;
-  return `Designated direction (${fmt(d[0])}, ${fmt(d[1])}, ${fmt(d[2])}) in the control frame: ${words}. Only this direction, with this sign and within ±${q.directionTolerance.toFixed(0)}°, can start a click; the opposite and other directions keep pointing normally. Changing it needs another practice.`;
+  const dominant = `${AXIS_NAMES[lead]} axis, ${d[lead] >= 0 ? 'positive' : 'negative'} side`;
+  return `Designated direction (${fmt(d[0])}, ${fmt(d[1])}, ${fmt(d[2])}) in the control frame; dominant component: ${dominant}. This is the direction you demonstrated; it has no body-direction name because the mounting and axis mapping are not verified. Only this direction, with this sign and within ±${q.directionTolerance.toFixed(0)}°, can start a click; the opposite and other directions keep pointing normally. Changing it needs another practice.`;
 }
 
 export function quickView(device) {
   const q = quickOf(device);
   const hardware = device?.source === 'HARDWARE' && q.reported;
-  const practising = hardware && ['REST', 'TILT', 'PREVIEW'].includes(q.phase);
+  const practising = hardware && ['REST', 'TILT', 'POINTING', 'PREVIEW'].includes(q.phase);
   const seconds = Math.ceil(q.cueMs / 1000);
   let title = 'Quick gesture click is off';
   let instruction =
-    'EXPERIMENTAL. Choose ONE direction (for example tilting your head toward your right shoulder) and practise it once, with the return (about a second). Only that direction, with that sign, can click. It is off until you enable it.';
+    'EXPERIMENTAL. Choose ONE direction (for example a head tilt to one side) and practise it once, with the return (about a second). Only that direction, with that sign, can click. It is off until you enable it.';
   let big = '';
   if (practising && q.phase === 'REST') {
     title = 'Step 1: hold still';
@@ -93,7 +90,7 @@ export function quickView(device) {
   } else if (practising && q.phase === 'TILT') {
     title = 'Step 2: demonstrate your direction, then return';
     if (q.cue === 'COUNTDOWN') {
-      instruction = 'Get ready. When it says GO: demonstrate your designated direction (for example tilt your head toward your right shoulder), then come straight back to the start, in about a second.';
+      instruction = 'Get ready. When it says GO: demonstrate your chosen direction (for example a head tilt to one side), then come straight back to the start, in about a second.';
       big = String(Math.max(1, seconds));
     } else if (q.cue === 'GO') {
       instruction = 'Now: your designated direction, then return to the start.';
@@ -105,6 +102,12 @@ export function quickView(device) {
     if (q.reason && q.cue !== 'RECORDING' && !q.reason.startsWith('stillness')) {
       instruction += ` Last attempt: ${q.reason}`;
     }
+  } else if (practising && q.phase === 'POINTING') {
+    title = 'Step 3: your ordinary pointing';
+    instruction = `Now move the pointer around in different directions, as you normally would: ${(q.practice.pointingMs / 1000).toFixed(1)} s observed. The gesture is checked against YOUR measured pointing, not an assumed pointing direction.${
+      q.reason && !q.reason.startsWith('now move') ? ` ${q.reason}` : ''
+    }`;
+    big = 'POINT';
   } else if (practising && q.phase === 'PREVIEW') {
     title = 'Preview: try it';
     instruction =
@@ -126,7 +129,7 @@ export function quickView(device) {
       : '';
   const practiceLine =
     q.ready || (practising && q.phase === 'PREVIEW')
-      ? `Practice: excursion ${q.practice.excursion.toFixed(1)}°, return residual ${q.practice.residual.toFixed(1)}°, wander ${q.practice.cross.toFixed(1)}°, ${(Math.round((1 - q.practice.planeShare) * 100))}% outside the pointing plane.`
+      ? `Practice: excursion ${q.practice.excursion.toFixed(1)}°, return residual ${q.practice.residual.toFixed(1)}°, wander ${q.practice.cross.toFixed(1)}°, ${Math.round(q.practice.pointingShare * 100)}% of your measured ordinary pointing lies along this direction.`
       : '';
   return {
     hardware,

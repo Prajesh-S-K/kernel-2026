@@ -119,15 +119,15 @@ def command_for(data):
         operation = data.get("op")
         if operation == "start":
             seconds = data.get("seconds")
-            if type(seconds) is not int or not 1 <= seconds <= 10:
-                raise ValueError("Capture length must be 1 to 10 seconds")
+            if type(seconds) is not int or not 1 <= seconds <= 20:
+                raise ValueError("Capture length must be 1 to 20 seconds")
             return f"capture start {seconds}"
         if operation == "stop":
             return "capture stop"
         if operation == "get":
             offset = data.get("offset")
-            if type(offset) is not int or not 0 <= offset < 1000:
-                raise ValueError("Capture offset must be 0 to 999")
+            if type(offset) is not int or not 0 <= offset < 2000:
+                raise ValueError("Capture offset must be 0 to 1999")
             return f"capture get {offset}"
         raise ValueError("Invalid capture request")
     if action == "quick":

@@ -142,13 +142,13 @@ ready, enabled, frame, state, suppressing, accepted, rejected, candidates, click
 control). `mapping` also reports `mountingDeg` (angle between the gravity direction now and while teaching)
 and `mountingWarning` (above 35 degrees).
 
-Status frames carry `quick` `{phase, cue, cueMs, progress, reason, practice{excursion,residual,cross,planeShare},
+Status frames carry `quick` `{phase, cue, cueMs, progress, reason, practice{excursion,residual,cross,pointingShare,pointingMs},
 ready, enabled, frame, state, suppressing, accepted, rejected, candidates, clicks, suppressedMs, lastReject,
 last{excursion,residual,durationMs}, sensitivity, returnTolerance, blocked}`. `designated` and `direction` `[x,y,z]` report the practised direction (signed, unit, control frame; shown in the companion) and `directionTolerance` its angular tolerance in degrees. `state` is OFF, NEUTRAL, READY,
 OUTWARD, RETURN or SETTLING (the last three pause the pointer); `lastReject` is NONE, TOO_SMALL, CROSS_AXIS,
 NO_RETURN, NOT_BACK_TO_START, TIMEOUT or INVALID_SAMPLE.
 
-Hardware-only raw capture (bench): `capture start <1-10>` records raw sensor rows into RAM (1000 rows at
+Hardware-only raw capture (bench): `capture start <1-20>` records raw sensor rows into RAM (2000 rows at
 most); `capture stop`; `capture get <offset>` makes the next frame carry up to 16 rows of that page
 (`capture.rows` = `[t_ms, gx, gy, gz, ax, ay, az]` in register units: gyro 131 LSB per deg/s, accel 16384 LSB
 per g, sensor coordinates). Status frames carry `capture` `{active, count, capacity}`. The simulator refuses it.

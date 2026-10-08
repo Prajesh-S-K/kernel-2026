@@ -275,11 +275,11 @@ class CommandValidation(HandsFreeCase):
             {"action": "capture"},
             {"action": "capture", "op": "start"},
             {"action": "capture", "op": "start", "seconds": 0},
-            {"action": "capture", "op": "start", "seconds": 11},
+            {"action": "capture", "op": "start", "seconds": 21},
             {"action": "capture", "op": "start", "seconds": 2.5},
             {"action": "capture", "op": "start", "seconds": True},
             {"action": "capture", "op": "get", "offset": -1},
-            {"action": "capture", "op": "get", "offset": 1000},
+            {"action": "capture", "op": "get", "offset": 2000},
             {"action": "capture", "op": "get"},
         ):
             with self.assertRaises(ValueError, msg=str(bad)):

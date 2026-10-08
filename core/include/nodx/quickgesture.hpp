@@ -80,9 +80,9 @@ private:
     void finishCandidate(Event& event, bool accept, QuickReject reason, uint32_t now);
 };
 
-enum class QuickPhase { Idle, Rest, Tilt, Preview, Done, Failed };
+enum class QuickPhase { Idle, Rest, Tilt, Pointing, Preview, Done, Failed };
 const char* name(QuickPhase phase);
-enum class QuickCue { None, HoldStill, Countdown, Go, Recording, ReturnToCentre, Preview };
+enum class QuickCue { None, HoldStill, Countdown, Go, Recording, ReturnToCentre, PointNormally, Preview };
 const char* name(QuickCue cue);
 
 struct QuickStatus {
@@ -92,7 +92,10 @@ struct QuickStatus {
     float progress = 0;
     const char* reason = "idle";
     // practice result / preview
-    float practiceDeg = 0, practiceResidualDeg = 0, practiceCrossDeg = 0, planeShare = 0;
+    // pointingShare: the share of the MEASURED ordinary-pointing variance that lies along the designated
+    // direction (0 .. 1); pointingMs: how much ordinary pointing the practice has observed.
+    float practiceDeg = 0, practiceResidualDeg = 0, practiceCrossDeg = 0, pointingShare = 0;
+    uint32_t pointingMs = 0;
     bool ready = false, enabled = false, suppressing = false, configuredFrame = false;
     const char* state = "OFF";
     uint32_t accepted = 0, rejected = 0, candidates = 0, clicks = 0, suppressedMs = 0;
@@ -145,7 +148,17 @@ private:
     QuickRecognizer preview_;
     std::vector<Vec3> rates_;
     std::vector<float> dts_;
-    float residualDeg_ = 0, crossDeg_ = 0, planeShare_ = 0;
+    float residualDeg_ = 0, crossDeg_ = 0, pointingShare_ = 0;
+    // the measured ordinary-pointing sample (kept so a retried tilt is checked against it again)
+    std::vector<Vec3> pointFrames_;
+    std::vector<uint32_t> pointTimes_;
+    double cov_[6] = {0, 0, 0, 0, 0, 0}; // xx, xy, xz, yy, yz, zz of the bias-corrected rates
+    unsigned covCount_ = 0;
+    uint32_t activityMs_ = 0, activityTarget_ = 0, pointStart_ = 0;
+    bool pointCaptured_ = false;
+    char reasonBuf_[200] = {0};
+    void tickPointing(const Vec3& frame, uint32_t now);
+    bool evaluatePointing(uint32_t now);
     void beginTilt(uint32_t now);
     bool analyze();
     void fail(const char* reason);

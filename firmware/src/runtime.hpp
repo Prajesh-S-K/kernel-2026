@@ -26,8 +26,8 @@ struct SensorSnapshot {
 extern SensorSnapshot sensorSnapshot;
 // Bench capture of the RAW sensor stream (sensor coordinates, integer register units: gyro 131 LSB per
 // deg/s, accel 16384 LSB per g) at the sensor rate, for offline replay of the recognizers. RAM only,
-// passive (it never affects control), at most 10 seconds, read back in pages with `capture get`.
-constexpr size_t captureCapacity = 1000;
+// passive (it never affects control), at most 20 seconds, read back in pages with `capture get`.
+constexpr size_t captureCapacity = 2000;
 constexpr size_t capturePage = 16;
 struct CaptureRow {
     uint32_t t = 0;

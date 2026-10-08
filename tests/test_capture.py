@@ -121,7 +121,7 @@ class CaptureScript(unittest.TestCase):
         for body in board.log:
             self.assertIn(body["action"], ("capture", "status"))
         with self.assertRaises(SystemExit):
-            CAPTURE.main(["--label", "x", "--seconds", "11"])
+            CAPTURE.main(["--label", "x", "--seconds", "21"])
 
 
 def raw(rate_dps, rng, noise=0.8):
@@ -153,9 +153,14 @@ class Replay(unittest.TestCase):
     def make(self, tmp):
         rng = random.Random(5)
         practice = []
-        for i in range(1000):  # 10 s: still, countdown, one tilt-and-return, settle
+        for i in range(1500):  # 15 s: still, countdown, one tilt-and-return, ordinary pointing
             t = 10 * i
-            practice.append((t, raw((0, 0, tilt_rate(t - 5300)), rng)))
+            yaw = pitch = 0.0
+            if t >= 6800:  # varied pointing in the yaw/pitch plane
+                phase = (t - 6800) / 1000.0
+                yaw = 45 * math.sin(2 * math.pi * phase * 0.8)
+                pitch = 40 * math.sin(2 * math.pi * phase * 0.55 + 1)
+            practice.append((t, raw((yaw, pitch, tilt_rate(t - 5300)), rng)))
         write(Path(tmp) / "practice.csv", practice)
         evalrows = []
         for i in range(1000):  # gestures at 1.5 s and 6.0 s; pointing in between

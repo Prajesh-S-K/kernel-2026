@@ -121,7 +121,7 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         input >> verb;
         if (verb == "start") {
             unsigned seconds = 0;
-            ok = bool(input >> seconds) && (input >> std::ws).eof() && seconds >= 1 && seconds <= 10;
+            ok = bool(input >> seconds) && (input >> std::ws).eof() && seconds >= 1 && seconds <= 20;
             if (ok) {
                 captureState.count = 0;
                 captureState.untilMs = now + seconds * 1000u;

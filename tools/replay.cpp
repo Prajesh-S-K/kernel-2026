@@ -5,8 +5,9 @@
 //
 // CSV (as written by scripts/capture_session.py): t_ms,gx,gy,gz,ax,ay,az in sensor register units
 // (gyro 131 LSB per deg/s, accel 16384 LSB per g). The practice file is replayed through the same
-// guided practice the device runs (its cue timing follows the sample timestamps, so capture must start
-// when the practice starts); the profile it produces configures the recognizer for the eval files.
+// guided practice the device runs, INCLUDING its ordinary-pointing sample (its cue timing follows the
+// sample timestamps, so the capture must start when the practice starts and be long enough, about
+// 13-15 s); the profile it produces configures the recognizer for the eval files.
 // The optional ":t1,t2" list gives the times (ms from the file start) of INTENDED gestures so hits,
 // misses and false clicks can be counted. Nothing here is a hardware validation by itself: it
 // reports what the recorded data does.
@@ -124,8 +125,9 @@ int main(int argc, char** argv) {
         std::printf("{\"practice\":\"%s\",\"ok\":false}\n", name(ps.phase));
         return 1;
     }
-    std::printf("practice: excursion %.1f deg, residual %.1f, wander %.1f, plane share %.2f\n",
-                ps.practiceDeg, ps.practiceResidualDeg, ps.practiceCrossDeg, ps.planeShare);
+    std::printf("practice: excursion %.1f deg, residual %.1f, wander %.1f, %.0f%% of the measured pointing lies along it (%u ms of pointing observed)\n",
+                ps.practiceDeg, ps.practiceResidualDeg, ps.practiceCrossDeg, 100.f * ps.pointingShare,
+                unsigned(ps.pointingMs));
     practice.accept();
     int exit = 0;
     for (const std::string& spec : evals) {

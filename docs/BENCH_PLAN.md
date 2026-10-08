@@ -391,10 +391,10 @@ gestures and suppression time on a person are NOT measured yet and are reported 
 
 No real recording exists yet: the status stream is 10 Hz, too coarse for 150 ms confirmations, so the quick
 gesture was tuned on synthetic data only. The next firmware upload adds a passive raw capture (`capture
-start <1-10 s>`, `capture stop`, `capture get <offset>`; 16 KB of RAM, never affects control, simulator
+start <1-20 s>`, `capture stop`, `capture get <offset>`; 32 KB of RAM, never affects control, simulator
 refuses it) and the host tools:
 
-* `python3 scripts/capture_session.py --label practice --seconds 10` writes
+* `python3 scripts/capture_session.py --label practice --seconds 15` writes
   `hardware-evidence/captures/<time>-<label>.csv` (+ a small .json; local, git-ignored, no device identifiers).
 * `build/nodx_replay quick --practice practice.csv --eval pointing.csv --eval gestures.csv:2000,6000` replays
   the practice through the same guided practice the device runs, configures the recognizer from it and reports,
@@ -422,6 +422,27 @@ Once a candidate has started the pointer is frozen; excessive deviation from the
 settled return near the start within the one-second window are required. The direction can only be changed
 by another practice capture (the tolerance and sensitivity are separate validated settings).
 
-A practice whose direction lies mostly inside the pointing plane (turning left/right or nodding) is refused
-with an explanation, because it could not be told apart from pointing; the head-to-shoulder tilt is the
-intended kind of direction.
+The practice never assumes where ordinary pointing happens (the default mapping's pointing plane is
+unverified in the fallback). After the movement it records a short sample of the user's OWN pointing (5 s of
+movement, in varied directions) and rejects a direction that carries more than 20 percent of that pointing's
+variance, or that the recognizer would click or pause the pointer for (more than 5 percent of the sample) when
+the sample is replayed through it; the reason names the measured share. The measured pointing is kept, so a
+retried movement is checked against it again. The companion shows the designated direction as a signed vector
+in the control frame with its dominant component and tolerance, and deliberately gives it NO body-direction
+name (left, right, shoulder, roll, ...), because the mounting and axis mapping behind those names are not
+verified.
+
+## Quick gesture: return handling and settling (software results)
+
+* The return stroke must run OPPOSITE to the designated direction (below -max(exit + 2, 0.25 x enter) deg/s)
+  after a clear outward excursion. Tested: a return that overshoots into the opposite side is rejected
+  (NOT_BACK_TO_START); a creeping return (3 deg/s) never registers as a return and is rejected; the opposite
+  stroke FIRST followed by the designated one opens no candidate; a detour return is rejected.
+* Near-zero settling: the final three-axis residual must be at most the return tolerance (default 35 percent)
+  of the excursion: residuals up to 25 percent settle, 40 percent and more are refused, and the boundary moves
+  with the setting (15-60 percent). The settled return needs 150 ms below max(6, 4 sigma) deg/s; a disturbance
+  inside that window restarts the calm (the click is delayed, never doubled); a return that keeps moving about
+  the exit threshold never settles and times out.
+* Integration drift: a gyro bias estimate error of about 2 deg/s still settles; 3 deg/s and more is rejected.
+  The bias comes from the 1.5 s stillness (expected error far smaller on the bench sensor); hardware drift over
+  the hour is unmeasured.

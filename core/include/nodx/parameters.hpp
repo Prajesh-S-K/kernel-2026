@@ -127,7 +127,14 @@ constexpr float quickPracticeMinDeg = 8.f;   // smallest practice tilt that is a
 constexpr uint32_t quickPracticeMaxMs = 1500;
 constexpr float quickPracticeResidualRatio = .5f;
 constexpr float quickPracticeCrossRatio = .4f; // practice must be straighter than recognition tolerates
-constexpr float quickPlaneShareMax = .8f;    // practice direction share inside the pointing plane
+// The practice is checked against MEASURED ordinary pointing (a short sample taken during the practice),
+// never against an assumed pointing plane of the default mapping.
+constexpr uint32_t quickPointingActivityMs = 5000; // moving time needed in the sample
+constexpr uint32_t quickPointingWindowMs = 15000;  // time allowed to get it
+constexpr float quickPointingActiveRate = 8.f;     // deg/s that counts as moving
+constexpr float quickPointingCoverageMin = .1f;    // second / first principal variance: varied pointing
+constexpr float quickPointingShareMax = .2f;       // share of pointing variance along the direction
+constexpr float quickPointingSuppressedMax = .05f; // share of the sample the pointer could be paused
 constexpr uint32_t quickRestMs = 1500;
 constexpr uint32_t quickRestWindowMs = 6000;
 constexpr uint32_t quickPreviewTimeoutMs = 120000;

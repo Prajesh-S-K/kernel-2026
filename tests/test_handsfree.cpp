@@ -3894,6 +3894,10 @@ int main() {
         bool moving = false;
         uint32_t moveStart = 0;
         Tilt current;
+        std::mt19937 pointRng(31);
+        uint32_t pointUntil = 0, pointFrom = 0;
+        std::array<float, 3> pointDir{1, 0, 0};
+        float pointPeak = 30;
         for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
             const QuickStatus st = h.s().quickStatus(h.now);
             if (st.phase == QuickPhase::Preview) {
@@ -3907,7 +3911,10 @@ int main() {
             }
             last = st.cue;
             std::array<float, 3> b{};
-            if (moving && h.now >= moveStart) {
+            if (st.phase == QuickPhase::Pointing) {
+                // the measured ordinary-pointing sample: yaw/pitch sweeps in random directions
+                b = pointingAt(pointRng, h.now, pointUntil, pointFrom, pointDir, pointPeak);
+            } else if (moving && h.now >= moveStart) {
                 if (h.now - moveStart > current.ms) {
                     moving = false;
                 } else {
@@ -3964,6 +3971,10 @@ int main() {
             return g;
         };
         std::string seen;
+        std::mt19937 prng(77);
+        uint32_t puntil = 0, pfrom = 0;
+        std::array<float, 3> pdir{1, 0, 0};
+        float ppeak = 30;
         require(h.s().quickPracticeStart(h.now, false), "start");
         QuickCue last = QuickCue::None;
         unsigned attempt = 0;
@@ -3983,7 +3994,9 @@ int main() {
             }
             last = st.cue;
             std::array<float, 3> b{};
-            if (moving && h.now >= moveStart && h.now - moveStart <= cur.ms) {
+            if (st.phase == QuickPhase::Pointing) {
+                b = pointingAt(prng, h.now, puntil, pfrom, pdir, ppeak);
+            } else if (moving && h.now >= moveStart && h.now - moveStart <= cur.ms) {
                 b = tiltRate(cur, float(h.now - moveStart));
             }
             rawTick(h, mountIdentity, b);
@@ -4312,7 +4325,7 @@ int main() {
         // pointing move, so use another out-of-plane direction)
         require(quickPractice(h, mountIdentity, false, [](unsigned) {
                     Tilt g;
-                    g.dir = {.5f, .3f, -.81f};
+                    g.dir = {.35f, .2f, -.91f};
                     return g;
                 }) && h.s().quickPracticeAccept(),
                 "second practice");
