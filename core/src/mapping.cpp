@@ -703,14 +703,14 @@ size_t mappingJson(char* out, size_t capacity, const MappingStatus& s) {
         "\"preview\":{\"x\":%.2f,\"y\":%.2f,\"angleX\":%.2f,\"angleY\":%.2f},"
         "\"bias\":[%.3f,%.3f,%.3f],\"noise\":[%.3f,%.3f,%.3f],"
         "\"learnedValid\":%s,\"unsaved\":%s,\"stored\":\"%s\",\"mode\":\"%s\",\"blocked\":\"%s\","
-        "\"saveResult\":\"%s\"}",
+        "\"saveResult\":\"%s\",\"mountingDeg\":%.0f,\"mountingWarning\":%s}",
         name(s.phase), name(s.cue), s.step, s.steps, s.direction < 0 ? "NONE" : directionName(unsigned(s.direction)),
         s.validation ? "true" : "false", s.example, s.examplesPerDirection, s.retries,
         s.interruptions, static_cast<unsigned long>(s.cueMs), static_cast<unsigned long>(s.stillMs),
         static_cast<unsigned long>(s.windowMs), s.progress, s.reason, s.previewX, s.previewY,
         s.previewAngleX, s.previewAngleY, s.bias[0], s.bias[1], s.bias[2], s.noise[0], s.noise[1],
         s.noise[2], s.learnedValid ? "true" : "false", s.unsaved ? "true" : "false", s.stored,
-        s.mode, s.blocked, s.saveResult);
+        s.mode, s.blocked, s.saveResult, s.mountingDeg, s.mountingWarning ? "true" : "false");
     return written > 0 && size_t(written) < capacity ? size_t(written) : 0;
 }
 } // namespace nodx

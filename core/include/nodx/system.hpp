@@ -84,7 +84,8 @@ public:
     }
     // Temporary UNCALIBRATED pointer demo: real sensor, AxisTransform, filtering, output bounds,
     // SafetyManager -> HIDManager, but a validated RAM-only demo profile instead of a user profile.
-    // It needs the physical enable button's permission (momentary latch) and is stopped by it. Movement only. Never saved, never a calibration, never
+    // The fallback is authorised by the explicit website start (no enable press needed); a press of the
+    // physical enable button only STOPS it. Configured control keeps the enable-button permission. Movement only. Never saved, never a calibration, never
     // started by a connection or a reboot; any stop needs an explicit restart.
     bool startUncalibratedDemo(uint32_t now);
     void stopUncalibratedDemo(const char* reason);
@@ -114,6 +115,10 @@ public:
     bool startConfiguredControl(uint32_t now);
     const char* configuredBlocker() const;       // nullptr when a start would be accepted
     const char* teachBlocker() const;
+    // Angle (degrees) between the gravity direction now and while the mapping was taught. Gravity can
+    // reveal a gross re-orientation only; it cannot see a turn about the gravity axis, and ordinary
+    // head tilt changes it legitimately, so it only blocks a start beyond mapMountingBlockDeg.
+    float mountingAngleDeg() const;
     bool configuredControl() const {
         return uncal_ && configured_;
     }

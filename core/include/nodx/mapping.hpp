@@ -116,6 +116,8 @@ struct MappingStatus {
     const char* mode = "OFF";
     const char* blocked = "";
     const char* saveResult = "";
+    float mountingDeg = 0;      // angle between the gravity direction now and while teaching
+    bool mountingWarning = false;
 };
 // Writes one JSON object (no trailing newline); 0 when it does not fit.
 size_t mappingJson(char* out, size_t capacity, const MappingStatus& status);

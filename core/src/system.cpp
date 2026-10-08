@@ -332,8 +332,8 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         stop(SystemState::Paused, now);
         diagnostics_.reason = "control switch OFF; explicit resume required";
     }
-    if (uncal_ && uncalNeedsEnable_ && !uncalGate_.permitted()) {
-        stopUncalibratedDemo("demo stopped: enable permission lost; explicit restart required");
+    if (uncal_ && configured_ && uncalNeedsEnable_ && !uncalGate_.permitted()) {
+        stopUncalibratedDemo("control stopped: enable permission lost; explicit restart required");
     }
     const bool movementOnly = demoMovementOnly_ || uncal_;
     const UserProfile& control = uncal_ ? uncalProfile_ : profile_;
@@ -490,7 +490,7 @@ void System::setControlSwitch(bool active, uint32_t now) {
     uncalGate_.update(active, now);
     const bool pressEdge = active && !uncalPrevPress_;
     uncalPrevPress_ = active;
-    if (uncal_ && ((uncalNeedsEnable_ && !uncalGate_.permitted()) || pressEdge)) {
+    if (uncal_ && ((configured_ && uncalNeedsEnable_ && !uncalGate_.permitted()) || pressEdge)) {
         // Disable at the press edge: release now, without waiting for another sensor sample.
         stopUncalibratedDemo("demo stopped by the enable button; explicit restart required");
     }
@@ -795,16 +795,18 @@ const char* System::sessionBlocker(bool configured) const {
         if (!learnedValid_) {
             return "no learned mapping: teach the movements first";
         }
-        // A changed mounting changes which gyro axes mean left/right/up/down.
-        if (dot(lastAccel_, learned_.gravity) <
-            norm(lastAccel_) * std::cos(start::mapMountingToleranceDeg * 3.14159265f / 180.f)) {
+        // A gross re-orientation (beyond mapMountingBlockDeg) means the gyro axes no longer mean
+        // left/right/up/down. Ordinary head tilt stays well inside that and never blocks.
+        if (mountingAngleDeg() > start::mapMountingBlockDeg) {
             return "mounting changed: teach the movements again";
         }
     }
-    if (uncalNeedsEnable_ && !uncalGate_.present()) {
+    // Configured control keeps the physical enable permission; the temporary fallback is authorised by
+    // the explicit website start instead.
+    if (configured && uncalNeedsEnable_ && !uncalGate_.present()) {
         return "enable button not present";
     }
-    if (uncalNeedsEnable_ && !uncalGate_.permitted()) {
+    if (configured && uncalNeedsEnable_ && !uncalGate_.permitted()) {
         return "press the enable button first";
     }
     if (!configured && !uncalibratedDemoProfile().valid()) {
@@ -965,6 +967,14 @@ void System::setControlRepository(ControlRepository& repository) {
     }
     controlRecord_ = repository.state();
 }
+float System::mountingAngleDeg() const {
+    const float n = norm(lastAccel_);
+    if (!learnedValid_ || !(n > 1e-3f)) {
+        return 0.f;
+    }
+    const float c = std::clamp(dot(lastAccel_, learned_.gravity) / n, -1.f, 1.f);
+    return std::acos(c) * 57.2957795f;
+}
 const char* System::teachBlocker() const {
     if (uncal_ || state_ == SystemState::Active) {
         return "control is active: stop it first";
@@ -1071,6 +1081,8 @@ MappingStatus System::mappingStatus(uint32_t now) const {
     const char* blocker = configuredBlocker();
     st.blocked = uncal_ ? "" : (blocker ? blocker : "");
     st.saveResult = saveResult_;
+    st.mountingDeg = mountingAngleDeg();
+    st.mountingWarning = learnedValid_ && st.mountingDeg > start::mapMountingWarnDeg;
     if (learnedValid_ && teacher_.phase() == MapPhase::Idle) {
         st.bias = learned_.bias;
         st.noise = learned_.noise;
@@ -1178,7 +1190,8 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.uncalGain = shown.gain[0];
     s.uncalDeadzone = shown.deadzone[0];
     s.uncalMaxStep = start::uncalDemoMaxStep;
-    s.uncalNeedsEnable = uncalNeedsEnable_;
+    s.uncalNeedsEnable = uncalNeedsEnable_; // applies to configured control only
+    s.uncalPermission = !uncal_ ? "NONE" : configured_ ? "ENABLE_BUTTON" : "WEBSITE_START";
     s.uncalPresent = uncalGate_.present();
     s.uncalPermitted = uncalGate_.permitted();
     s.uncalReverseX = uncalReverseX_;

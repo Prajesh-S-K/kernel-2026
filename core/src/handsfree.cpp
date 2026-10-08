@@ -316,7 +316,7 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         "\"rejects\":%u,\"validated\":%s,\"reason\":\"%s\"},"
         "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\","
         "\"uncalDemo\":{\"active\":%s,\"needsEnable\":%s,\"present\":%s,\"permitted\":%s,"
-        "\"reverseX\":%s,\"reverseY\":%s,\"blocked\":\"%s\","
+        "\"reverseX\":%s,\"reverseY\":%s,\"permission\":\"%s\",\"blocked\":\"%s\","
         "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f,"
         "\"dwell\":{\"enabled\":%s,\"ms\":%lu,\"tolerance\":%.1f,\"state\":\"%s\",\"progress\":%.3f,"
         "\"clicks\":%lu}}}",
@@ -335,7 +335,8 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.stored[0] ? "true" : "false", s.stored[1] ? "true" : "false", s.blocked,
         s.uncalActive ? "true" : "false", s.uncalNeedsEnable ? "true" : "false",
         s.uncalPresent ? "true" : "false", s.uncalPermitted ? "true" : "false",
-        s.uncalReverseX ? "true" : "false", s.uncalReverseY ? "true" : "false", s.uncalBlocked, s.profileState, s.uncalGain,
+        s.uncalReverseX ? "true" : "false", s.uncalReverseY ? "true" : "false",
+        s.uncalPermission, s.uncalBlocked, s.profileState, s.uncalGain,
         s.uncalDeadzone, s.uncalMaxStep, s.uncalDwellEnabled ? "true" : "false",
         static_cast<unsigned long>(s.uncalDwellMs), s.uncalDwellTolerance, s.uncalDwellState,
         s.uncalDwellProgress, static_cast<unsigned long>(s.uncalClicks));

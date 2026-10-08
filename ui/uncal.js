@@ -16,6 +16,7 @@ export function uncalOf(device) {
     permitted: raw?.permitted === true,
     reverseX: raw?.reverseX === true,
     reverseY: raw?.reverseY === true,
+    permission: typeof raw?.permission === 'string' ? raw.permission : 'NONE',
     blocked: typeof raw?.blocked === 'string' ? raw.blocked : '',
     profileState: typeof raw?.profileState === 'string' ? raw.profileState : 'MISSING',
     gain: Number(raw?.gain) || 0,
@@ -62,9 +63,17 @@ export function uncalView(device) {
           : u.dwell.state === 'ARMING'
             ? 'Arming: hold still.'
             : 'Dwell armed: hold still on the target.';
+  const websiteStart = active && u.permission === 'WEBSITE_START';
+  const permissionNote = websiteStart
+    ? 'WEBSITE-START PERMISSION ACTIVE: clicking Start authorised movement without the physical enable button. Pressing that button, a fault or a disconnect stops it, and it needs another Start.'
+    : active && u.permission === 'ENABLE_BUTTON'
+      ? 'Enable-button permission: the next press of the physical button stops it.'
+      : '';
   return {
     hardware,
     active,
+    websiteStart,
+    permissionNote,
     canStart,
     status,
     calibration,

@@ -454,13 +454,20 @@ function renderMapping(data) {
   $('mapControlStop').disabled = !view.running;
   $('mapSettings').textContent = `${view.settings} ${view.saveResult === 'SAVE_FAILED_RAM_ONLY' ? 'Saving failed: it works in memory only.' : view.saveResult === 'SAVED' ? 'Saved.' : ''}`;
   $('mapStored').textContent = view.stored;
-  $('mapBlocked').textContent = view.controlBlocked ? `Configured control: ${view.controlBlocked}.` : '';
+  $('mapBlocked').textContent = [
+    view.controlBlocked ? `Configured control: ${view.controlBlocked}.` : '',
+    view.mountingNote,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 function renderUncal(data) {
   const view = uncalView(data);
   $('uncalPanel').hidden = !view.hardware;
   $('uncalBanner').hidden = !view.active;
   $('uncalBannerText').textContent = view.banner || BANNER;
+  $('uncalPermissionNote').textContent =
+    view.permissionNote || 'Movement only. Not a calibration. Nothing is saved.';
   document.title = view.active ? `${view.banner} · NodX Adapt` : baseTitle;
   if (!view.hardware) return;
   $('uncalTag').textContent = view.active ? 'ACTIVE' : 'OFF';

@@ -22,7 +22,7 @@
       </header>
       <div id="uncalBanner" class="uncal-banner" role="alert" hidden>
         <strong id="uncalBannerText">UNCALIBRATED DEMO — LIVE SENSOR</strong>
-        <span>Movement only. Not a calibration. Nothing is saved.</span>
+        <span id="uncalPermissionNote">Movement only. Not a calibration. Nothing is saved.</span>
         <button id="uncalStopBanner" class="uncal-stop">Stop demo</button>
       </div>
       <div class="layout">
@@ -168,9 +168,10 @@
               <p>
                 The real sensor moves the Mac pointer with conservative fixed settings, even
                 without a calibration. Pointer movement only: no clicks, dwell, drag or scrolling.
-                Press the physical enable button first, then start. The next button press, any fault, a
-                disconnect or a calibration stops it, and you must start it again yourself. It also works
-                when calibration is missing or failed, or the saved profile is corrupt (reported
+                Clicking Start authorises movement from this page: the physical enable button is not
+                needed to start this temporary demo. A press of that button stops it at once, and so do
+                Stop demo, any fault, a disconnect or a calibration; each needs another Start. It also
+                works when calibration is missing or failed, or the saved profile is corrupt (reported
                 separately, never used or overwritten).
               </p>
               <p id="uncalStatus" class="uncal-status"></p>

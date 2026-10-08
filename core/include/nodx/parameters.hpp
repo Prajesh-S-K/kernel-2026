@@ -54,9 +54,11 @@ constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 constexpr uint32_t uncalDwellMs = 1200;
 constexpr float uncalDwellTolerance = 8.f;
 // One Euro smoothing for configured control. EXPERIMENTAL START values: chosen on synthetic recordings
-// only (tests/test_mapping.cpp prints the comparison with the old EMA); not hardware-measured.
-constexpr float oneEuroMinCutoffHz = 2.0f;
-constexpr float oneEuroBeta = 0.02f;
+// only (tests/test_mapping.cpp enforces the provisional +30 ms stopping-delay criterion against the old
+// EMA across speeds and seeds); not hardware-measured. The first defaults (2.0 / 0.02) FAILED that
+// criterion (worst stop 100 ms vs 50 ms) and were replaced.
+constexpr float oneEuroMinCutoffHz = 1.5f;
+constexpr float oneEuroBeta = 0.05f;
 constexpr float oneEuroDerivativeCutoffHz = 2.0f;
 // Guided mapping (teaching). START values, not measured on users.
 constexpr uint32_t mapStillMs = 2000;       // qualified stillness required (contiguous)
@@ -84,7 +86,8 @@ constexpr float mapDeadzoneSigmas = 4.f;
 constexpr float mapDeadzoneFloor = .8f;
 constexpr float mapDeadzoneCap = 10.f;
 constexpr float mapHysteresis = .6f;        // exit threshold / enter threshold
-constexpr float mapMountingToleranceDeg = 25.f; // gravity direction change that needs relearning
+constexpr float mapMountingBlockDeg = 75.f; // gravity direction change that blocks a start
+constexpr float mapMountingWarnDeg = 35.f;  // ... and the change that only shows a warning
 constexpr uint32_t mapPreviewTimeoutMs = 120000;
 // Gesture click (optional, RAM only). START values, not measured on users.
 constexpr uint32_t clickRestMs = 1500;        // qualified stillness before training

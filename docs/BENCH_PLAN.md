@@ -203,11 +203,15 @@ allow-listed diagnostic commands, never flashes and never guesses a port.
 Purpose: show the real sensor moving the Mac pointer while calibration is missing or FAILED. It is not a
 calibration, saves nothing and never reports a profile. Start values are in `docs/PARAMETERS.md`.
 
-* Start: companion, Setup page, "Start without calibration" (hardware device only). It needs the physical
-  enable button's permission (its own momentary latch: disabled at every boot, a button held at boot is
-  ignored, cleared by every fault, the next press disables), a healthy sensor (20 good samples), a valid axis
-  mapping, an unfaulted BLE link and no calibration, training or active control in progress. It works when
-  calibration is missing or failed, or the saved profile is corrupt (reported separately).
+* Start: companion, Setup page, "Start without calibration" (hardware device only). Clicking it is the
+  authorisation for this TEMPORARY demo: the physical enable button is not needed to start it, and the page
+  says "WEBSITE-START PERMISSION ACTIVE" while it runs. It needs a healthy sensor (20 good samples), a valid
+  axis mapping, an unfaulted BLE link and no calibration, training or active control in progress. It works
+  when calibration is missing or failed or the saved profile is corrupt (reported separately).
+  Any press of the physical enable button stops it at the press edge (no sensor sample needed) and revokes
+  the permission; so do Stop demo, any fault, a disconnect and starting a calibration. Each needs another
+  explicit website start; a connection, reconnect, fault or reboot never starts it. Configured control keeps
+  the physical enable-button permission (unchanged).
 * Reversal: "Reverse horizontal" / "Reverse vertical" flip the default mapping's pointer direction (RAM only,
   cleared by a reboot). The fallback uses the default axis mapping and promises nothing for other mountings.
 * Real sensor -> AxisTransform -> filtering -> bounded output -> SafetyManager -> HIDManager. Clicks,
@@ -322,3 +326,25 @@ often the pointer was held. Real-user hit and false-trigger rates are still to m
    one click; stay still: no repeat; make it again after a pause: second click.
 5. Immediate stop: press the enable button (or Stop demo): the pointer and clicks stop at once.
 Never test dragging, held buttons or disconnects with a button held.
+
+## What the mounting check can and cannot detect
+
+Configured control remembers the gravity direction (in the sensor frame) from the teaching. At start it
+compares the current gravity direction with it:
+* Detected and blocked: a gross re-orientation of the sensor relative to gravity, more than 75 degrees (for
+  example the board flipped over or stood on its side). A warning is shown above 35 degrees.
+* Deliberately NOT blocked: ordinary head movement. Nodding, leaning and tilting change the gravity direction
+  in the sensor frame legitimately, so the check is only made when starting and never stops a running session;
+  tilts up to 75 degrees from the taught posture are accepted. Start from roughly the posture used for
+  teaching.
+* NOT detectable by gravity alone: a turn about the gravity axis (for example the board turned 90 degrees
+  while the head stays upright), a remount that keeps the gravity direction similar, or a mirrored mount. After
+  any physical remount the movements must be taught again; use the preview to confirm, and the reversal
+  controls of the fallback for a simple flip. A test documents the undetectable turn about the gravity axis.
+
+## Acceptance status of the provisional criteria (software, synthetic recordings only)
+
+* Stopping delay of the configured filter at most +30 ms against the old EMA: MET in software after tuning
+  (worst case over 3 speeds x 7 seeds: EMA 50 ms, One Euro 60 ms). The first parameter set did NOT meet it
+  (100 ms) and was replaced. Not yet checked on hardware.
+* Jitter, drift, gentle-motion response on real recordings: not measured. No acceptance is claimed.

@@ -557,6 +557,59 @@ int main() {
         }
         return m;
     };
+    test("comparison (synthetic): provisional criterion, stopping delay at most +30 ms vs the EMA", [] {
+        // Worst case over speeds and seeds, filter alone (deadzone out of the way).
+        auto stopDelay = [](const std::function<float(const MotionSample&)>& run, float speed,
+                            unsigned seed) {
+            std::mt19937 rng(seed);
+            std::normal_distribution<float> n(0.f, .8f);
+            uint32_t now = 0;
+            auto next = [&](float rate) {
+                now += 10;
+                MotionSample s;
+                s.timestampMs = now;
+                s.gyro = {rate + n(rng), n(rng), n(rng)};
+                return s;
+            };
+            float steady = 0;
+            for (unsigned i = 0; i < 500; ++i) {
+                const float out = run(next(speed));
+                if (i >= 400) {
+                    steady += out / 100.f;
+                }
+            }
+            float last = 0;
+            for (unsigned i = 0; i < 300; ++i) {
+                if (std::abs(run(next(0))) > .1f * std::max(1.f, steady)) {
+                    last = float((i + 1) * 10);
+                }
+            }
+            return last;
+        };
+        float worstEma = 0, worstEuro = 0;
+        for (float speed : {15.f, 40.f, 80.f}) {
+            for (unsigned seed = 1; seed <= 7; ++seed) {
+                UserProfile profile;
+                profile.bias = {0, 0, 0};
+                profile.deadzone = {.1f, .1f};
+                MotionProcessor ema;
+                worstEma = std::max(worstEma, stopDelay([&](const MotionSample& s) {
+                                        return ema.process(s, profile, .01f).x;
+                                    }, speed, seed));
+                LearnedControl c;
+                c.bias = {0, 0, 0};
+                c.deadzoneEnter = {.1f, .1f};
+                c.deadzoneExit = {.06f, .06f};
+                ControlProcessor euro; // the shipped START defaults
+                worstEuro = std::max(worstEuro, stopDelay([&](const MotionSample& s) {
+                                         return euro.process(s, c).x;
+                                     }, speed, seed));
+            }
+        }
+        std::printf("INFO stopping delay, worst over 3 speeds x 7 seeds: EMA %.0f ms, One Euro %.0f ms (criterion +30 ms)\n",
+                    worstEma, worstEuro);
+        require(worstEuro <= worstEma + 30.f, "UNMET: One Euro stops more than 30 ms later than the EMA");
+    });
     test("comparison (synthetic): One Euro vs the current EMA, filter alone and end to end",
          [measure] {
              auto emaRun = [&measure](float deadzone, float residual) {
@@ -591,8 +644,8 @@ int main() {
              require(euroFull.jitter <= emaFull.jitter + 1e-4f, "end to end is not steadier");
              require(std::abs(euroFull.drift) <= std::abs(emaFull.drift) + 1e-4f,
                      "residual bias drifts more than before");
-             require(euroFilter.stopMs <= emaFilter.stopMs + 150.f &&
-                         euroFull.stopMs <= emaFull.stopMs + 150.f,
+             require(euroFilter.stopMs <= emaFilter.stopMs + 30.f &&
+                         euroFull.stopMs <= emaFull.stopMs + 30.f,
                      "stopping delay grew too much");
          });
 

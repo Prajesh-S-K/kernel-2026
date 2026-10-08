@@ -133,6 +133,7 @@ struct HandsFreeStatus {
     // Temporary uncalibrated pointer demo (RAM only; never a calibration, never saved).
     bool uncalActive = false, uncalNeedsEnable = true, uncalPresent = false, uncalPermitted = false;
     bool uncalReverseX = false, uncalReverseY = false;
+    const char* uncalPermission = "NONE"; // WEBSITE_START (fallback), ENABLE_BUTTON (configured)
     const char* uncalBlocked = "";
     const char* profileState = "MISSING";
     float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;

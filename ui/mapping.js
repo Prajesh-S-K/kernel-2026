@@ -40,6 +40,8 @@ export function mappingOf(device) {
     mode: typeof m?.mode === 'string' ? m.mode : 'OFF',
     blocked: typeof m?.blocked === 'string' ? m.blocked : '',
     saveResult: typeof m?.saveResult === 'string' ? m.saveResult : '',
+    mountingDeg: num(m?.mountingDeg),
+    mountingWarning: m?.mountingWarning === true,
   };
 }
 
@@ -118,6 +120,10 @@ export function mappingView(device) {
     canClear: hardware && m.learnedValid && !teaching,
     canControl: hardware && m.learnedValid && !teaching && !controlActive && m.blocked === '',
     controlBlocked: hardware && m.learnedValid && !controlActive ? m.blocked : '',
+    mountingNote:
+      hardware && m.learnedValid && m.mountingWarning
+        ? `The sensor is ${Math.round(m.mountingDeg)}° away from the posture it was taught in. Head tilt is fine; if the board was physically remounted, teach the movements again.`
+        : '',
     m,
   };
 }

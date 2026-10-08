@@ -876,3 +876,24 @@ test("gesture click: statistics and banners", () => {
   assert.equal(clickOf({ click: { ready: "yes", progress: 9 } }).ready, false);
   assert.equal(clickOf({ click: { progress: 9 } }).progress, 1);
 });
+
+test("fallback: website-start permission is shown and described", () => {
+  const web = uncalView({ ...hw({ active: true, permission: "WEBSITE_START" }), mapping: { mode: "OFF" } });
+  assert.equal(web.websiteStart, true);
+  assert.match(web.permissionNote, /WEBSITE-START PERMISSION ACTIVE/);
+  assert.match(web.permissionNote, /Pressing that button/);
+  assert.match(web.permissionNote, /another Start/);
+  const cfg = uncalView({ ...hw({ active: true, permission: "ENABLE_BUTTON" }), mapping: { mode: "CONFIGURED" } });
+  assert.equal(cfg.websiteStart, false);
+  assert.match(cfg.permissionNote, /Enable-button permission/);
+  assert.equal(uncalView(hw({ active: false })).permissionNote, "");
+  assert.equal(uncalView(hw({ active: false })).websiteStart, false);
+});
+test("guided setup: a mounting warning explains head tilt versus a remount", () => {
+  const warn = mappingView(mapDev({ learnedValid: true, mountingDeg: 41.6, mountingWarning: true }));
+  assert.match(warn.mountingNote, /42° away/);
+  assert.match(warn.mountingNote, /Head tilt is fine/);
+  assert.match(warn.mountingNote, /teach the movements again/);
+  assert.equal(mappingView(mapDev({ learnedValid: true, mountingDeg: 5 })).mountingNote, "");
+  assert.equal(mappingView(mapDev({ mountingWarning: true })).mountingNote, "");
+});

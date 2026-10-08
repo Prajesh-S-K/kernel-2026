@@ -3108,46 +3108,77 @@ int main() {
         h.quiet(400);
         return h;
     };
-    test("fallback: needs the physical enable permission, healthy sensor and BLE", [=] {
-        HF h = permRig();
-        require(!h.s().startUncalibratedDemo(h.now), "started without the button");
-        require(std::string(h.s().diagnostics.reason) == "press the enable button first", "reason");
-        require(std::string(h.s().handsFreeStatus().uncalBlocked) == "press the enable button first",
-                "status reason");
-        h.click();
-        h.quiet(300);
-        require(!h.s().uncalibratedDemo(), "the press alone started the demo");
-        require(h.s().handsFreeStatus().uncalPermitted, "permission not shown");
+    test("fallback: the website start authorises it without the physical button; checks remain", [=] {
+        HF h = permRig(); // configured control would need the button here; the fallback does not
+        require(std::string(h.s().handsFreeStatus().uncalBlocked).empty(),
+                "nothing but the website start should be missing");
         h.transport.online = false;
-        require(!h.s().startUncalibratedDemo(h.now), "started without BLE");
+        require(!h.s().startUncalibratedDemo(h.now) &&
+                    std::string(h.s().diagnostics.reason) == "BLE link unavailable",
+                "started without BLE");
         h.transport.online = true;
-        require(h.s().startUncalibratedDemo(h.now), "start with permission refused");
+        HF fresh(false, EnableKind::Momentary);
+        fresh.sw = false;
+        fresh.uncalNeedsEnable = true;
+        fresh.boot();
+        require(!fresh.s().startUncalibratedDemo(fresh.now), "started before healthy samples");
+        fresh.s().axes.axes = {0, 0, 0};
+        fresh.quiet(300);
+        require(!fresh.s().startUncalibratedDemo(fresh.now), "started with an invalid mapping");
+        require(h.s().startUncalibratedDemo(h.now), "website start refused");
+        require(h.s().uncalibratedDemo() && !h.s().configuredControl(), "session");
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof buffer, h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"permission\":\"WEBSITE_START\""),
+                "website-start permission must be shown in the status");
         h.run(hold(0, 60, 300));
-        h.click(); // the next press disables
-        require(!h.s().uncalibratedDemo() && h.released(), "disable did not stop at the press edge");
-        require(!h.s().startUncalibratedDemo(h.now), "restarted without a new permission");
-        h.click();
-        require(h.s().startUncalibratedDemo(h.now), "restart after a new press");
+        const float* none = nullptr;
+        (void)none;
     });
-    test("fallback: no wired button means no start; a fault or reboot drops the permission", [=] {
+    test("fallback: the physical button stops it at once and revokes the permission", [=] {
         HF h = permRig();
-        h.s().configureEnableInput(false);
-        h.click();
-        require(!h.s().startUncalibratedDemo(h.now), "started with no enable input wired");
-        require(std::string(h.s().diagnostics.reason) == "enable button not present", "reason");
+        require(h.s().startUncalibratedDemo(h.now), "start");
+        h.run(hold(0, 60, 300));
+        // the press edge alone, with no further sensor sample, releases and stops
+        h.s().setControlSwitch(true, h.now + 1);
+        require(!h.s().uncalibratedDemo() && h.released(), "not stopped at the press edge");
+        h.s().setControlSwitch(false, h.now + 100);
+        h.quiet(1000);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "the button or the passing of time restarted it");
+        std::array<float, 2> moved{};
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            moved[0] += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(moved[0] == 0, "movement after the stop");
+        require(std::string(h.s().handsFreeStatus().uncalPermission) == "NONE", "permission revoked");
+        require(h.s().startUncalibratedDemo(h.now), "another explicit website start works");
+    });
+    test("fallback: a fault or disconnect revokes it; reconnect and reboot never restart it", [=] {
+        HF h = permRig();
+        require(h.s().startUncalibratedDemo(h.now), "start");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        h.quiet(800);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "a fault left or restarted the session");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+        h.transport.online = false;
+        h.quiet(60);
+        require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(), "disconnect");
+        h.transport.online = true;
+        h.quiet(1500);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "reconnect restarted it");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart after reconnect");
+        h.boot();
+        h.quiet(600);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "boot started it");
         HF g = permRig();
-        g.click();
-        require(g.s().startUncalibratedDemo(g.now), "start");
-        g.now += 10;
-        g.s().tick({g.now, {NAN, 0, 0}, {0, 0, 1}, true}, g.now, false);
-        g.quiet(600);
-        require(!g.s().uncalibratedDemo() && !g.s().handsFreeStatus().uncalPermitted,
-                "permission survived a fault");
-        g.click();
-        g.boot();
-        g.quiet(400);
-        require(!g.s().uncalibratedDemo() && !g.s().handsFreeStatus().uncalPermitted,
-                "permission or demo survived a reboot");
+        g.s().configureEnableInput(false); // no button wired at all
+        require(g.s().startUncalibratedDemo(g.now), "the website start does not need a wired button");
     });
     test("fallback: horizontal and vertical reversal flip the pointer, RAM only", [=] {
         auto move = [&](bool rx, bool ry, unsigned axis, float rate) {
@@ -3779,6 +3810,61 @@ int main() {
         }
         h.s().clickClear();
         require(!h.s().clickStatus(h.now).ready, "forget");
+    });
+
+    test("mapping: ordinary head tilt never blocks or stops configured control; gross remounts do", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        auto tilted = [&](float degrees, const std::array<float, 3>& about) {
+            // gravity (0,0,1) rotated by `degrees` about `about` (a unit axis)
+            const float t = degrees * 3.14159265f / 180.f, c = std::cos(t), sn = std::sin(t);
+            const std::array<float, 3> v{0, 0, 1};
+            const std::array<float, 3> cross{about[1] * v[2] - about[2] * v[1],
+                                             about[2] * v[0] - about[0] * v[2],
+                                             about[0] * v[1] - about[1] * v[0]};
+            const float d = about[0] * v[0] + about[1] * v[1] + about[2] * v[2];
+            std::array<float, 3> a{};
+            for (unsigned i = 0; i < 3; ++i) {
+                a[i] = v[i] * c + cross[i] * sn + about[i] * d * (1 - c);
+            }
+            for (unsigned i = 0; i < 40; ++i) {
+                h.now += 10;
+                h.sys->setControlSwitch(h.sw, h.now);
+                h.sys->tick({h.now, {-1.2f, 0, 0}, a, true}, h.now, false);
+            }
+        };
+        for (float deg : {20.f, 40.f, 60.f, 70.f}) { // nod / lean / tilt: ordinary head movement
+            tilted(deg, {1, 0, 0});
+            require(h.s().startConfiguredControl(h.now), "ordinary head tilt blocked a start");
+            h.s().stopUncalibratedDemo("test");
+            tilted(deg, {0, 1, 0});
+            require(h.s().startConfiguredControl(h.now), "ordinary sideways head tilt blocked a start");
+            h.s().stopUncalibratedDemo("test");
+        }
+        tilted(40.f, {1, 0, 0});
+        require(h.s().mappingStatus(h.now).mountingWarning, "a large tilt should show a warning");
+        tilted(0.f, {1, 0, 0});
+        require(!h.s().mappingStatus(h.now).mountingWarning, "no warning at the taught posture");
+        // a running session keeps the mapping through head movement (the guard is a start check only)
+        require(h.s().startConfiguredControl(h.now), "start");
+        tilted(60.f, {1, 0, 0});
+        tilted(0.f, {0, 1, 0});
+        require(h.s().configuredControl(), "head movement stopped the session");
+        h.s().stopUncalibratedDemo("test");
+        // gross re-orientation (the board flipped over): blocked
+        tilted(110.f, {1, 0, 0});
+        require(!h.s().startConfiguredControl(h.now) &&
+                    std::string(h.s().diagnostics.reason) ==
+                        "mounting changed: teach the movements again",
+                "a flipped sensor must be refused");
+        tilted(0.f, {1, 0, 0});
+        // KNOWN LIMIT: a turn about the gravity axis is not visible in the gravity direction at all.
+        // (Here: gravity along the z axis, the board turned about z: the accelerometer reading is the
+        // same, but left/right/up/down no longer match the taught gyro axes.)
+        tilted(90.f, {0, 0, 1});
+        require(h.s().startConfiguredControl(h.now),
+                "documented limit: a turn about the gravity axis cannot be detected");
     });
 
     std::cout << passed << " passed, " << failed << " failed\n";
