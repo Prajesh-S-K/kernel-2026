@@ -47,6 +47,7 @@ def run_session(
     clock=time.monotonic,
     sleep=time.sleep,
     wall=datetime.datetime.now,
+    echo=None,
 ):
     """`link` needs read(), write(bytes). Returns the raw log text. Lines get host timestamps."""
     out_dir.mkdir(parents=True, exist_ok=False)
