@@ -1,5 +1,6 @@
 """Bounded native/serial transport; a failed native session must be restarted."""
 
+import faulthandler
 import json
 import math
 import os
@@ -107,8 +108,33 @@ class SerialDevice:
         self.serial.rts = False
         self.serial.open()
         self.sequence = 0
+        # Optional raw capture of everything the device sends (bench evidence; kept local).
+        tee = os.environ.get("NODX_SERIAL_TEE")
+        self.tee = open(tee, "ab", buffering=0) if tee else None
 
     def request(self, command):
+        # Optional bench trace (NODX_SERIAL_TRACE=<file>): every non-status command, every slow or
+        # failed request, and a thread dump if one request runs longer than four seconds.
+        trace = os.environ.get("NODX_SERIAL_TRACE")
+        if not trace:
+            return self._request(command)
+        started = time.monotonic()
+        with open(trace, "a", buffering=1) as log:
+            faulthandler.dump_traceback_later(4, file=log)
+            try:
+                reply = self._request(command)
+                outcome = "ok"
+                return reply
+            except Exception as error:
+                outcome = f"ERROR {error}"
+                raise
+            finally:
+                faulthandler.cancel_dump_traceback_later()
+                elapsed = time.monotonic() - started
+                if outcome != "ok" or elapsed > 0.5 or command.split()[0] not in ("status", "step"):
+                    log.write(f"{time.time():.3f} {command[:60]!r} {outcome} {elapsed:.3f}s\n")
+
+    def _request(self, command):
         op = command.split()[0]
         if op in ("corrupt", "record"):
             raise ValueError("This action is available only for the native simulator")
@@ -123,6 +149,8 @@ class SerialDevice:
         pending = bytearray()
         while time.monotonic() < deadline:
             fragment = self.serial.readline()
+            if getattr(self, "tee", None) and fragment:
+                self.tee.write(fragment)
             pending.extend(fragment)
             if len(pending) > MAX_REPLY_BYTES:
                 raise ValueError("Serial reply too large")
