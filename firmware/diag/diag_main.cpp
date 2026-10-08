@@ -338,6 +338,7 @@ void imuInit(unsigned seconds) {
         Serial.printf("DIAG,imuinit,reg=0x%02X,read=%d,value=0x%02X\n", reg, read, value);
     }
     RunningStats mag, gyroX, gyroY, gyroZ;
+    double gyroPeak = 0;
     unsigned valid = 0, polls = 0;
     const uint32_t end = millis() + seconds * 1000u;
     while (int32_t(millis() - end) < 0) {
@@ -351,12 +352,17 @@ void imuInit(unsigned seconds) {
             gyroX.add(row.gyro[0]);
             gyroY.add(row.gyro[1]);
             gyroZ.add(row.gyro[2]);
+            for (float g : row.gyro) {
+                gyroPeak = std::fmax(gyroPeak, std::fabs(double(g)));
+            }
         }
         delay(2);
     }
     Serial.printf("DIAG,imuinit,seconds=%u,polls=%u,validFrames=%u\n", seconds, polls, valid);
     Serial.printf("DIAG,imuinit,accelMagMeanG=%.4f,accelMagStdG=%.4f,gyroMeanDps=%.3f/%.3f/%.3f\n",
                   mag.mean(), mag.stddev(), gyroX.mean(), gyroY.mean(), gyroZ.mean());
+    Serial.printf("DIAG,imuinit,accelMagMinG=%.4f,accelMagMaxG=%.4f,gyroPeakDps=%.1f\n", mag.min(),
+                  mag.max(), gyroPeak);
 }
 
 // ---------------------------------------------------------------- stage 3: the enable button

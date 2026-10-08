@@ -244,6 +244,56 @@ class Analysis(unittest.TestCase):
             status_of(GOOD + good.replace("0.9840", "0.2000"), "driver-converted"), "FAIL"
         )
 
+    def held_log(self, events, toggles, idle=0):
+        """events: [(kind, startMs)]; toggles: [(latched, atMs)]."""
+        lines = [f"DIAG,button,idleLevel={idle},expected=1,note=x"]
+        for n, (latched, at) in enumerate(toggles, 1):
+            lines.append(f"DIAG,button,gateToggle={n},latched={latched},atMs={at}")
+        for n, (kind, start) in enumerate(events, 1):
+            lines.append(
+                f"DIAG,button,burst={n},kind={kind},edges=1,spanUs=0,startUs={start * 1000}"
+            )
+        lines.append(
+            f"DIAG,button,edges={len(events)},droppedEdges=0,bursts={len(events)},gateToggles={len(toggles)},latchedAtEnd=0"
+        )
+        return GOOD.replace(BUTTON, "\n".join(lines) + "\n")
+
+    HELD_OK = (
+        [
+            ("release", 10000),
+            ("press", 14000),
+            ("release", 19000),
+            ("press", 23000),
+            ("release", 24000),
+        ],
+        [(1, 14030), (0, 23000)],
+    )
+
+    def test_the_boot_held_sequence_is_judged_step_by_step(self):
+        events, toggles = self.HELD_OK
+        result = ANALYZE.analyze_text(self.held_log(events, toggles))
+        names = [c for c in result["checks"] if c["name"].startswith("boot-held sequence")]
+        self.assertEqual(len(names), 7, [c["name"] for c in names])
+        self.assertTrue(all(c["status"] == "PASS" for c in names), result["report"])
+        self.assertEqual(status_of(self.held_log(events, toggles), "pin read LOW at start"), "INFO")
+        broken = {
+            "held at boot: no toggle": ([(1, 5000)] + toggles, events),
+            "release alone": ([(1, 12000)] + toggles, events),
+            "long hold does not retrigger": (
+                [toggles[0], (0, 17000), (1, 17500), toggles[1]],
+                events,
+            ),
+            "one new press enables": ([(0, 14030), toggles[1]], events),
+            "next press disables": ([toggles[0], (0, 23100)], events),
+        }
+        for name, (bad_toggles, bad_events) in broken.items():
+            with self.subTest(name):
+                self.assertEqual(status_of(self.held_log(bad_events, bad_toggles), name), "FAIL")
+        ends_pressed = events[:-1]
+        self.assertEqual(
+            status_of(self.held_log(ends_pressed, toggles), "the run ends released"), "FAIL"
+        )
+
     def test_garbage_and_truncated_lines_do_not_crash(self):
         noisy = (
             "boot junk \x00\x01\nDIAG,imu,gyroMeanDps=a/b/c\nDIAG,\nBLE,state\nrst:0x1 (POWERON)\n"

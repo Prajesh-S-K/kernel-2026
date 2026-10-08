@@ -171,6 +171,86 @@ def classify_toggles(bursts, toggles):
     return result
 
 
+def boot_hold_sequence(button):
+    """Judge the held-at-boot scenario from the bursts and toggles: held at boot enables nothing, a
+    release alone enables nothing, one new press enables ~30 ms in, a long hold does not retrigger,
+    the next press disables at its edge, and the run ends released and quiet. Returns a list of
+    (name, ok, detail). Only meaningful when the pin read LOW at the start."""
+    bursts = [b for b in button["burstList"] if isinstance(b.get("startUs"), int)]
+    toggles = button["toggleList"]
+    ms = lambda b: b["startUs"] / 1000.0  # noqa: E731
+    results = []
+    releases = [b for b in bursts if b.get("kind") == "release"]
+    presses = [b for b in bursts if b.get("kind") == "press"]
+    if not releases:
+        return [("the scenario released the button at least once", False, "no release burst")]
+    first_release = releases[0]
+    at = lambda t: number(t.get("atMs"), -1)  # noqa: E731
+    before = [t for t in toggles if at(t) < ms(first_release) + 1]
+    results.append(
+        (
+            "held at boot: no toggle while held (and none at release)",
+            not before,
+            f"{len(before)} toggle(s) up to the first release",
+        )
+    )
+    new_presses = [b for b in presses if ms(b) > ms(first_release)]
+    if not new_presses:
+        return results + [("a new press followed the release", False, "none")]
+    press1 = new_presses[0]
+    quiet = [t for t in toggles if ms(first_release) < at(t) < ms(press1) - 1]
+    results.append(
+        (
+            "release alone enables nothing",
+            not quiet,
+            f"{len(quiet)} toggle(s) between the release and the next press",
+        )
+    )
+    enable = [t for t in toggles if ms(press1) - 2 <= at(t) <= ms(press1) + 80]
+    ok_enable = len(enable) == 1 and enable[0].get("latched") == "1"
+    results.append(
+        (
+            "one new press enables (about 30 ms in)",
+            ok_enable,
+            f"toggles near press: {[(t.get('latched'), round(at(t) - ms(press1), 1)) for t in enable]}",
+        )
+    )
+    after_press1 = [r for r in releases if ms(r) > ms(press1)]
+    hold_end = ms(after_press1[0]) if after_press1 else float("inf")
+    extra = [t for t in toggles if ms(press1) + 80 < at(t) < hold_end]
+    results.append(
+        (
+            f"a long hold does not retrigger (held {((hold_end - ms(press1)) / 1000):.1f} s)",
+            not extra,
+            f"{len(extra)} toggle(s) after the enable during the hold",
+        )
+    )
+    later = [b for b in new_presses if ms(b) > hold_end]
+    if later:
+        press2 = later[0]
+        disable = [t for t in toggles if ms(press2) - 2 <= at(t) <= ms(press2) + 10]
+        ok_disable = len(disable) == 1 and disable[0].get("latched") == "0"
+        results.append(
+            (
+                "the next press disables at its edge",
+                ok_disable,
+                f"toggles at the press: {[(t.get('latched'), round(at(t) - ms(press2), 1)) for t in disable]}",
+            )
+        )
+        final = [t for t in toggles if at(t) > ms(press2) + 10]
+        results.append(("no toggle after the disable", not final, f"{len(final)} toggle(s)"))
+    else:
+        results.append(("a second press followed", False, "none"))
+    results.append(
+        (
+            "the run ends released",
+            bursts[-1].get("kind") == "release",
+            f"last burst: {bursts[-1].get('kind')}",
+        )
+    )
+    return results
+
+
 def check(name, status, detail):
     return {"name": name, "status": status, "detail": detail}
 
@@ -366,6 +446,14 @@ def judge(data):
                     f"{mag:.4f} g",
                 )
             )
+    if "gyroPeakDps" in drv:
+        out.append(
+            check(
+                "driver-seen motion range (judge by the run: still or tilted)",
+                "INFO",
+                f"|a| {drv.get('accelMagMinG')}..{drv.get('accelMagMaxG')} g, gyro peak {drv.get('gyroPeakDps')} dps",
+            )
+        )
     raw = data["raw"]
     if raw:
         accel, gyro = triple(raw.get("rangeAccelLsb")), triple(raw.get("rangeGyroLsb"))
@@ -393,14 +481,29 @@ def judge(data):
     elif "error" in button:
         out.append(check("enable button test", "FAIL", button["error"]))
     else:
-        out.append(
-            check(
-                "pin idles HIGH with the internal pull-up",
-                "PASS" if button.get("idleLevel") == "1" else "FAIL",
-                f"idleLevel={button.get('idleLevel')}",
-            )
-        )
         bursts = button["burstList"]
+        held_run = (
+            button.get("idleLevel") == "0"
+            and any(b.get("kind") == "release" for b in bursts)
+            and all(isinstance(b.get("startUs"), int) for b in bursts)
+        )
+        if held_run:
+            # LOW at the start followed by a release is the deliberate held-at-boot scenario.
+            out.append(
+                check(
+                    "pin read LOW at start (button held at boot)",
+                    "INFO",
+                    "judged by the boot-held sequence below",
+                )
+            )
+        else:
+            out.append(
+                check(
+                    "pin idles HIGH with the internal pull-up",
+                    "PASS" if button.get("idleLevel") == "1" else "FAIL",
+                    f"idleLevel={button.get('idleLevel')}",
+                )
+            )
         presses = [b for b in bursts if b.get("kind") == "press"]
         out.append(
             check(
@@ -425,6 +528,13 @@ def judge(data):
                 f"dropped={button.get('droppedEdges')}",
             )
         )
+        if (
+            button.get("idleLevel") == "0"
+            and bursts
+            and all(isinstance(b.get("startUs"), int) for b in bursts)
+        ):
+            for name, ok, detail in boot_hold_sequence(button):
+                out.append(check("boot-held sequence: " + name, "PASS" if ok else "FAIL", detail))
         edges_total = number(button.get("edges"), 0)
         bursts_total = number(button.get("bursts"), 0)
         dropped = number(button.get("droppedEdges"), 0)
