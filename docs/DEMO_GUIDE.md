@@ -10,3 +10,15 @@ Start `python3 desktop/server.py`; open http://127.0.0.1:8765. Use one tab. For 
 6. **Evidence:** Performance lab → condition/source → Start. Select center, then 12 targets. Show misses, selection time and clearly named nominal rate. Export CSV; inspect raw geometry, condition, input source and profile snapshot/hash. Run both conditions in alternating order for a later real study. Do not turn a software smoke run into a user-performance claim.
 
 Close with what remains: verify wiring and axes, read real MPU data, validate NVS/BLE on physical hardware, measure timing, tune START parameters and collect honest user trials.
+
+## v0.2.0 handoff
+
+Use the new module walkthrough to read the code. `sh scripts/release_gate.sh` runs format/lint,
+74 software checks and both firmware builds. `python3 scripts/package.py` accepts only the clean
+committed source matching that gate. The v0.1.0 tag stays available for comparison.
+
+Lab blocks freeze source/profile/selection/geometry and show separate summaries. Compare generic
+and adaptive using the same temporary selection settings; saved profiles stay intact. Desktop
+HOST_CLICK smoke trials exercise the UI, not adaptive pointing. Look for explicit persistence
+status in CSV; raw trials remain in runtime JSONL. Changing viewport or an accepted profile aborts
+a running block. Pausing or starting calibration requests release without waiting for a new sample.

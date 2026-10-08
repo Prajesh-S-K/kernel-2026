@@ -1,12 +1,13 @@
 """Integration tests for desktop calibration, saved files, recording and replay."""
+
 import importlib.util
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("server", ROOT / "desktop/server.py")
@@ -67,7 +68,9 @@ class ProtocolTests(unittest.TestCase):
         self.send("record off")
         path = Path(self.tmp.name) / "samples.csv"
         self.assertEqual(len(path.read_text().splitlines()), 51)
-        replay = subprocess.run([str(EXE), self.tmp.name, "--replay", str(path)], capture_output=True, text=True)
+        replay = subprocess.run(
+            [str(EXE), self.tmp.name, "--replay", str(path)], capture_output=True, text=True
+        )
         self.assertEqual(replay.returncode, 0, replay.stderr)
         rows = [json.loads(line) for line in replay.stdout.splitlines()]
         self.assertEqual(len(rows), 50)
@@ -78,9 +81,11 @@ class ProtocolTests(unittest.TestCase):
         samples = ["timestampMs,gyroX,gyroY,gyroZ,accelX,accelY,accelZ,valid"]
         for i in range(1, 101):
             gyro = "nan" if i == 40 else "10"
-            samples.append(f"{i*10},{gyro},0,0,0,0,1,1")
+            samples.append(f"{i * 10},{gyro},0,0,0,0,1,1")
         path.write_text("\n".join(samples) + "\n")
-        replay = subprocess.run([str(EXE), self.tmp.name, "--replay", str(path)], capture_output=True, text=True)
+        replay = subprocess.run(
+            [str(EXE), self.tmp.name, "--replay", str(path)], capture_output=True, text=True
+        )
         self.assertEqual(replay.returncode, 0, replay.stderr)
         rows = [json.loads(line) for line in replay.stdout.splitlines()]
         self.assertEqual(rows[39]["state"], "SAFE_STATE")
@@ -91,7 +96,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(self.send("step 51 0 0 0 0 1 0 0")["ok"])
 
     def test_api_rejects_nonfinite_and_out_of_range(self):
-        for data in ({"action":"step","yaw":math.nan}, {"action":"step","count":1000}, {"action":"step","fault":7}, {"action":"other"}):
+        for data in (
+            {"action": "step", "yaw": math.nan},
+            {"action": "step", "count": 1000},
+            {"action": "step", "fault": 7},
+            {"action": "other"},
+        ):
             with self.assertRaises(ValueError):
                 SERVER.command_for(data)
 
@@ -105,37 +115,174 @@ class ProtocolTests(unittest.TestCase):
         class FakeSerial:
             def reset_input_buffer(self):
                 pass
+
             def write(self, data):
                 self.written = data
-                self.lines = [b'[NODX] boot\n', b'{"protocol":1,"requestId":0,"ok":true}\n',
-                              b'{"protocol":1,"requestId":1,"ok":false,"source":"HARDWARE"}\n']
+                self.lines = [
+                    b"[NODX] boot\n",
+                    b'{"protocol":1,"requestId":0,"ok":true}\n',
+                    b'{"protocol":1,"requestId":1,"ok":false,"source":"HARDWARE"}\n',
+                ]
+
             def readline(self):
                 return self.lines.pop(0)
+
         adapter = SERVER.SerialDevice.__new__(SERVER.SerialDevice)
         adapter.serial = FakeSerial()
         adapter.sequence = 0
         result = adapter.request("resume")
         self.assertFalse(result["ok"])
-        self.assertEqual(adapter.serial.written, b'@1 resume\n')
+        self.assertEqual(adapter.serial.written, b"@1 resume\n")
 
     def test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption(self):
         class FakeSerial:
             def reset_input_buffer(self):
                 pass
+
             def write(self, data):
                 self.written = data
                 self.sequence = int(data.decode().split()[0][1:])
+
             def readline(self):
-                return json.dumps({"protocol":1,"requestId":self.sequence,"ok":True}).encode()
+                return json.dumps({"protocol": 1, "requestId": self.sequence, "ok": True}).encode()
+
         adapter = SERVER.SerialDevice.__new__(SERVER.SerialDevice)
         adapter.serial = FakeSerial()
         adapter.sequence = 0
         adapter.request("step 5 20 30 40 1 1 0 0")
-        self.assertEqual(adapter.serial.written,b'@1 status\n')
+        self.assertEqual(adapter.serial.written, b"@1 status\n")
         adapter.request("dwell 1")
-        self.assertEqual(adapter.serial.written,b'@2 dwell on\n')
+        self.assertEqual(adapter.serial.written, b"@2 dwell on\n")
         with self.assertRaises(ValueError):
             adapter.request("corrupt")
+
+    def test_strict_counts_booleans_and_trailing_native_fields(self):
+        for command in (
+            "step 1.5 0 0 0 1 1 0",
+            "step 1 0 0 0 2 1 0 0",
+            "dwell",
+            "dwell 2",
+            "status extra",
+            "record maybe",
+            "x" * 257,
+        ):
+            self.assertFalse(self.send(command)["ok"], command)
+        for data in (
+            {"action": "step", "count": 1.5},
+            {"action": "step", "fault": 1.5},
+            {"action": "step", "pressed": "false"},
+            {"action": "dwell", "enabled": 1},
+        ):
+            with self.assertRaises(ValueError):
+                SERVER.command_for(data)
+
+    def test_pause_report_without_step_and_finite_invalid_profile_telemetry(self):
+        self.calibrate()
+        self.send("resume")
+        self.send("step 5 20 0 0 1 1 0 0")
+        result = self.send("pause")
+        self.assertEqual(result["reports"][-1], [0, 0, 0, 0])
+        result = self.send("corrupt")
+        json.dumps(result, allow_nan=False)
+        self.assertEqual(result["faultCode"], "PROFILE")
+
+    def test_temporary_settings_preserve_saved_profile(self):
+        saved = self.calibrate()["profile"]
+        changed = self.send("settings 1 0")
+        self.assertTrue(changed["profile"]["dwellEnabled"])
+        self.assertEqual(self.send("load")["profile"], saved)
+
+    def test_oversized_profile_file_is_rejected_without_loading(self):
+        self.device.close()
+        (Path(self.tmp.name) / "profile0.bin").write_bytes(b"x" * 4096)
+        self.device = SERVER.NativeDevice(EXE, self.tmp.name)
+        result = self.send("status")
+        self.assertFalse(result["hasProfile"])
+        self.assertEqual(result["state"], "CALIBRATION_REQUIRED")
+        self.assertEqual(result["softwareVersion"], (ROOT / "VERSION").read_text().strip())
+
+    def test_partial_serial_acknowledgement(self):
+        class FakeSerial:
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                self.lines = [b'{"protocol":1,', b'"requestId":1,"ok":', b"true}\n"]
+
+            def readline(self):
+                return self.lines.pop(0)
+
+        adapter = SERVER.SerialDevice.__new__(SERVER.SerialDevice)
+        adapter.serial = FakeSerial()
+        adapter.sequence = 0
+        self.assertTrue(adapter.request("status")["ok"])
+
+
+class DeadlineTests(unittest.TestCase):
+    def test_native_timeout_dead_process_and_malformed_reply(self):
+        import sys
+        import time
+        from unittest.mock import patch
+
+        from desktop import transport
+
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "device.py"
+            for body in ("import time;time.sleep(10)", "print('broken',flush=True)", "pass"):
+                script.write_text(body)
+                process = subprocess.Popen(
+                    [sys.executable, str(script)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    bufsize=0,
+                )
+                with patch.object(transport.subprocess, "Popen", return_value=process):
+                    device = transport.NativeDevice("unused", directory)
+                started = time.monotonic()
+                with patch.object(transport, "REQUEST_TIMEOUT_SECONDS", 0.05):
+                    with self.assertRaises((ValueError, RuntimeError, OSError)):
+                        device.request("status")
+                self.assertLess(time.monotonic() - started, 0.8)
+                device.close()
+
+    def test_reply_json_rejects_nonfinite_values_and_invalid_ids(self):
+        from desktop.transport import decode_reply
+
+        for reply in (
+            b'{"ok":true,"motion":[1e999]}',
+            b'{"ok":true,"requestId":true}',
+            b'{"ok":true,"requestId":1.5}',
+            b'{"ok":true,"protocol":true}',
+            b'{"ok":true,"requestId":4294967296}',
+            b'{"ok":1}',
+            b"[]",
+        ):
+            with self.assertRaises(ValueError):
+                decode_reply(reply)
+
+    def test_missing_serial_acknowledgement_deadline(self):
+        import time
+        from unittest.mock import patch
+
+        from desktop import transport
+
+        class FakeSerial:
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                pass
+
+            def readline(self):
+                time.sleep(0.005)
+                return b'{"protocol":1,"requestId":0,"ok":true}\n'
+
+        adapter = transport.SerialDevice.__new__(transport.SerialDevice)
+        adapter.serial = FakeSerial()
+        adapter.sequence = 0
+        with patch.object(transport, "REQUEST_TIMEOUT_SECONDS", 0.02):
+            with self.assertRaises(RuntimeError):
+                adapter.request("pause")
 
 
 if __name__ == "__main__":

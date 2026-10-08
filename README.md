@@ -1,4 +1,4 @@
-# NodX Adapt · V1 pre-hardware software
+# NodX Adapt · v0.2.0 pre-hardware software
 
 Head pointing, accessible switch selection/drag, optional dwell, roll scrolling and pause for an ESP32-S3 + MPU6050 prototype. One C++17 engine runs both the desktop simulator and the firmware. The companion uses a dark cyan/teal visual language and records Fitts-style trials without inventing performance claims.
 
@@ -13,7 +13,7 @@ python3 desktop/server.py
 
 Open http://127.0.0.1:8765. Start calibration, open Control studio, then explicitly Resume. WASD points; Q/E rolls; Space selects; P pauses. The browser drives the same engine compiled for the ESP32. No OS input is emitted by the desktop simulator.
 
-Run all software checks: `sh scripts/check.sh`. Build both firmware variants: `pio run`. Start with [BUILD_GUIDE](docs/BUILD_GUIDE.md) for prerequisites and detailed instructions.
+Install the pinned development tools in BUILD_GUIDE, then run all software checks: `sh scripts/check.sh`. Build both firmware variants: `pio run`. Start with [BUILD_GUIDE](docs/BUILD_GUIDE.md) for prerequisites and detailed instructions.
 
 | Read | Purpose |
 |---|---|
@@ -26,6 +26,9 @@ Run all software checks: `sh scripts/check.sh`. Build both firmware variants: `p
 | [DEMO_GUIDE](docs/DEMO_GUIDE.md) | A reproducible demonstration |
 | [PARAMETERS](docs/PARAMETERS.md) | START registry, bounds, units and tuning methods |
 | [PARAMETER_CHANGELOG](docs/PARAMETER_CHANGELOG.md) | Parameter history |
+| [MODULE_WALKTHROUGH](docs/MODULE_WALKTHROUGH.md) | Reading order, responsibilities and individual checks |
 | [PROTOCOL](docs/PROTOCOL.md) | Desktop/USB transport and raw data schemas |
 
 The custom NodX cursor belongs to the companion. Standard BLE HID uses the host's normal cursor outside it. The prototype is USB-powered; battery, Wi-Fi and cloud features are outside V1.
+
+Release gate: `sh scripts/release_gate.sh`. Package only its clean, committed source with `python3 scripts/package.py`. The prior release tag is preserved.

@@ -2,7 +2,7 @@
 
 ## Desktop prerequisites
 
-CMake ≥3.16, a C++17 compiler, Python ≥3.10 and Node ≥18 for metric checks. The desktop file adapter targets macOS/Linux (POSIX fsync). No npm packages, cloud accounts, front-end bundler or downloaded visual assets are required. On Windows use WSL for the desktop process; firmware compilation can use PlatformIO on Windows.
+CMake ≥3.16, a C++17 compiler, Python ≥3.10 and Node ≥22 for metric checks. The desktop file adapter targets macOS/Linux (POSIX fsync). No runtime npm packages, cloud accounts, front-end bundler or downloaded visual assets are required. Formatting/lint tools are development-only. On Windows use WSL for the desktop process; firmware compilation can use PlatformIO on Windows.
 
 From the repository directory:
 
@@ -15,7 +15,16 @@ python3 desktop/server.py
 
 Open http://127.0.0.1:8765. Keep one control tab open; the local server has one serialized session. Port override: `--port 8766`. State lives in ignored `runtime/`. A different `--runtime /tmp/nodx-demo` creates an isolated fresh demo without changing your current saved profile.
 
-Full software checks (36 core invariants, desktop integration, metric calculation/export):
+Install pinned development tools before the software gate:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-dev.txt
+npm ci --prefix ui --ignore-scripts
+```
+
+Full software checks (original 51 checks retained, plus hardening regressions):
 
 ```sh
 sh scripts/check.sh
@@ -73,4 +82,28 @@ pip install -r desktop/requirements-hardware.txt
 python3 desktop/server.py --serial /dev/cu.usbmodemYOUR_DEVICE
 ```
 
-The UI detects HARDWARE telemetry and disables virtual sensor/fault controls. Use Host pointer in the lab; the actual BLE pointer supplies selections. The bridge and serial format are implemented and compile-checked, but require board/USB/NVS/BLE validation. Physical firmware telemetry at 115200 baud competes with sampling and needs timing measurement. Desktop profile slots and ESP32 NVS are separate; profiles are not silently transferred between them.
+The UI detects HARDWARE telemetry and disables virtual sensor/fault controls. Use Host pointer in the lab; the actual BLE pointer supplies selections. The bridge and serial format are implemented and compile-checked, but require board/USB/NVS/BLE validation. Periodic firmware telemetry is 5 Hz with bounded nonblocking writes and acknowledgement priority. Physical USB/UART throughput, sampling jitter and BLE scheduling still need timing measurement. Desktop profile slots and ESP32 NVS are separate; profiles are not silently transferred between them.
+
+## v0.2.0 release procedure
+
+```sh
+sh scripts/release_gate.sh
+# Review the generated evidence logs, then commit the verified source.
+git add .
+git commit -m "Release NodX Adapt v0.2.0 pre-hardware hardening"
+git tag v0.2.0-prehardware
+python3 scripts/package.py
+```
+
+The gate removes any previous verification stamp, checks formatting/lint, runs native UBSAN,
+Python and JS suites, compiles both firmware variants, refreshes logs and hashes the final source
+and build outputs. Commit/tag do not alter source bytes. Packaging refuses dirty source, source
+changes since the gate, missing files or changed build hashes. If a source/evidence file changes,
+rerun the gate before committing. Preserve the prior `v0.1.0-prehardware` tag.
+
+The archive and its `.zip.sha256` appear beside this repository. `artifacts/manifest.json` records
+commit, source digest and image hashes; SHA256SUMS verifies copies. Application images and
+flash-support images are labeled separately. This is **not a complete flashing bundle**: board
+settings, offsets and the Arduino boot_app0 image may also be required. Qualify pins/axes and
+use PlatformIO rebuild/upload, rather than guessing a merged-image flashing command.
+An unpacked archive without Git can run builds/checks; packaging requires a versioned Git checkout.

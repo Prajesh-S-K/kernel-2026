@@ -19,7 +19,7 @@ constexpr uint32_t dwellMs = 1000;
 constexpr uint32_t armMs = 250;
 constexpr uint32_t debounceMs = 30;
 constexpr float scrollThreshold = 12.f; // roll angle degrees
-constexpr float scrollGain = .8f; // wheel units/second/degree beyond threshold
+constexpr float scrollGain = .8f;       // wheel units/second/degree beyond threshold
 constexpr uint32_t phaseMs = 1500;
 constexpr uint32_t minPhaseSamples = 100;
 constexpr float minimumRange = 3.f;
@@ -27,4 +27,4 @@ constexpr float maxRestSigma = 4.f;
 constexpr float maxRestBias = 10.f;
 constexpr int maxPointer = 40;
 constexpr int maxWheel = 5;
-}
+} // namespace nodx::start

@@ -1,94 +1,69 @@
 #!/usr/bin/env python3
 """Loopback companion server; one session drives the shared native C++ engine."""
+
 import argparse
 import hashlib
 import json
 import math
-import os
-from pathlib import Path
-import subprocess
 import threading
-import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+try:
+    from desktop.transport import NativeDevice, SerialDevice
+except ImportError:
+    from transport import NativeDevice, SerialDevice
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = threading.Lock()
-
-
-class NativeDevice:
-    def __init__(self, executable, runtime):
-        self.process = subprocess.Popen([str(executable), str(runtime)], stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, text=True, bufsize=1)
-
-    def request(self, command):
-        self.process.stdin.write(command + "\n")
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("Control engine stopped; restart the companion")
-        return json.loads(line)
-
-    def close(self):
-        if self.process.poll() is None:
-            self.process.terminate()
-            self.process.wait(timeout=3)
-        self.process.stdin.close()
-        self.process.stdout.close()
-
-
-class SerialDevice:
-    """Same browser protocol over USB serial; BLE remains the host pointing path."""
-    def __init__(self, port):
-        import serial
-        self.serial = serial.Serial(port, 115200, timeout=.2, write_timeout=1)
-        self.sequence = 0
-
-    def request(self, command):
-        op = command.split()[0]
-        if op in ("corrupt", "record"):
-            raise ValueError("This action is available only for the native simulator")
-        if op == "step":
-            command = "status"
-        elif op in ("dwell", "scroll"):
-            command = op + (" on" if command.split()[1] == "1" else " off")
-        self.serial.reset_input_buffer()
-        self.sequence += 1
-        self.serial.write((f"@{self.sequence} {command}\n").encode())
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            line = self.serial.readline().decode(errors="replace").strip()
-            if line.startswith('{'):
-                data = json.loads(line)
-                if data.get("protocol") == 1 and data.get("requestId") == self.sequence:
-                    return data
-        raise RuntimeError("No telemetry from ESP32; check firmware, USB port and baud")
-
-    def close(self):
-        self.serial.close()
+TRIAL_LOCK = threading.Lock()
 
 
 def number(data, key, default, low, high):
-    value = float(data.get(key, default))
+    raw = data.get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(f"Invalid {key}")
+    value = float(raw)
     if not math.isfinite(value) or not low <= value <= high:
         raise ValueError(f"Invalid {key}")
+    return value
+
+
+def integer(data, key, default, low, high):
+    value = number(data, key, default, low, high)
+    if not value.is_integer():
+        raise ValueError(f"{key} must be an integer")
+    return int(value)
+
+
+def boolean(data, key, default=False):
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
     return value
 
 
 def command_for(data):
     action = data.get("action", "status")
     if action == "step":
-        count = int(number(data, "count", 5, 1, 50))
+        count = integer(data, "count", 5, 1, 50)
         motion = [number(data, axis, 0, -1000, 1000) for axis in ("yaw", "pitch", "roll")]
-        flags = [int(bool(data.get(k, default))) for k, default in
-                 (("pressed", False), ("connected", True), ("automatic", True))]
-        fault = int(number(data, "fault", 0, 0, 6))
+        flags = [
+            int(boolean(data, k, default))
+            for k, default in (("pressed", False), ("connected", True), ("automatic", True))
+        ]
+        fault = integer(data, "fault", 0, 0, 6)
         return "step " + " ".join(map(str, [count, *motion, *flags, fault]))
     if action in ("status", "calibrate", "cancel", "resume", "pause", "generic", "load", "corrupt"):
         return action
     if action in ("dwell", "scroll"):
-        return f"{action} {int(bool(data.get('enabled')))}"
+        return f"{action} {int(boolean(data, 'enabled'))}"
+    if action == "settings":
+        return (
+            f"settings {int(boolean(data, 'dwellEnabled'))} {int(boolean(data, 'scrollEnabled'))}"
+        )
     if action == "record":
-        return "record " + ("on" if data.get("enabled") else "off")
+        return "record " + ("on" if boolean(data, "enabled") else "off")
     raise ValueError("Unknown action")
 
 
@@ -121,18 +96,40 @@ class Handler(SimpleHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError("Expected a JSON object")
-            with LOCK:
+            with TRIAL_LOCK if self.path == "/api/trial" else LOCK:
                 if self.path == "/api/trial":
-                    required = ("trial", "condition", "inputSource", "distance", "width", "movementTimeMs", "hit", "profile")
+                    required = (
+                        "trial",
+                        "condition",
+                        "inputSource",
+                        "distance",
+                        "width",
+                        "movementTimeMs",
+                        "hit",
+                        "profile",
+                    )
                     if not isinstance(data, dict) or any(k not in data for k in required):
                         raise ValueError("Incomplete trial")
                     if data["inputSource"] not in ("SIMULATED", "HOST_POINTER"):
                         raise ValueError("Unknown input source")
                     for key in ("distance", "width", "movementTimeMs"):
-                        number(data, key, 0, .001, 1e8)
+                        number(data, key, 0, 0.001, 1e8)
+                    boolean(data, "hit")
+                    boolean(data, "aborted")
+                    integer(data, "trial", 1, 1, 1000000)
+                    context = data.get("blockContext")
+                    if context is not None:
+                        if (
+                            not isinstance(context, dict)
+                            or context.get("profile") != data["profile"]
+                        ):
+                            raise ValueError("Trial profile differs from block context")
+                        for key in ("deviceSource", "inputSource", "condition", "selectionMethod"):
+                            if context.get(key) != data.get(key):
+                                raise ValueError("Trial differs from block context")
                     encoded = json.dumps(data["profile"], sort_keys=True, allow_nan=False)
                     data["profileHash"] = hashlib.sha256(encoded.encode()).hexdigest()
-                    data["softwareVersion"] = "0.1.0"
+                    data["softwareVersion"] = "0.2.0"
                     with (self.server.runtime / "trials.jsonl").open("a") as out:
                         out.write(json.dumps(data, allow_nan=False) + "\n")
                     self.reply(200, {"ok": True, "profileHash": data["profileHash"]})
@@ -156,8 +153,13 @@ def main():
     args.runtime.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.runtime = args.runtime
-    server.device = SerialDevice(args.serial) if args.serial else NativeDevice(args.executable, args.runtime)
-    print(f"NodX companion: http://127.0.0.1:{args.port} ({'HARDWARE' if args.serial else 'SIMULATED'} device)", flush=True)
+    server.device = (
+        SerialDevice(args.serial) if args.serial else NativeDevice(args.executable, args.runtime)
+    )
+    print(
+        f"NodX companion: http://127.0.0.1:{args.port} ({'HARDWARE' if args.serial else 'SIMULATED'} device)",
+        flush=True,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

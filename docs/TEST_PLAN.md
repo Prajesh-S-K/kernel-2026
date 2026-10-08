@@ -34,3 +34,17 @@ Open the loopback companion. Check desktop and narrow/mobile layouts, readable l
 | User/lab | Comfortable short session, accessible pause available, generic/adaptive order counterbalanced, practice consistent, device/profile/source/version logged; report improvements or lack of them honestly |
 
 Do not claim cross-platform compatibility, comfort, effective Fitts throughput or adaptation benefit from software tests. On hardware, measure actual emitted HID rate and host cursor behavior; the core's relative-output dwell estimate does not know host pointer acceleration or screen edges.
+
+## v0.2.0 regressions and release gate
+
+All original 51 named checks remain. Additional cases cover immediate stopping without a new sample,
+repeated transport failures, recovery interruption, invalid mapping/profile finite telemetry,
+settings-save failure, strict request IDs/truncation/counts/booleans/trailing fields, native dead
+process/malformed reply/deadline, partial serial replies/missing acknowledgement, temporary settings,
+frozen Lab context/grouping, accurate simulation labels, coalesced polling, separate persistence,
+browser timeout and dirty/stale/tampered release refusal. The gate checks four-space C++/Python,
+two-space JS, format/lint, native UBSAN and both ESP32-S3 builds.
+
+Browser acceptance additionally checks block abort after profile/state/geometry changes, matched
+selection toggles between conditions, per-block results, CSV persistence status and mobile controls.
+The GitHub workflow installs pinned development tools; remote execution is not claimed as evidence.

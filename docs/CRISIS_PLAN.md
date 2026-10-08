@@ -15,3 +15,12 @@ For physical demonstration trouble: press pause first, confirm host button relea
 Use the native simulator as the fallback demo. State plainly that it is simulated and show the same shared engine, generated profile, crisis bank and raw lab logging. Do not present simulated cursor behavior as a successful hardware demonstration.
 
 The core is cooperative software, not an independent safety controller. A total MCU hang can prevent any release report or buzzer transition; watchdog/reset and host timeout behavior must be physically qualified. Buzzer electrical behavior and brownouts remain untested. A sensor with frozen numbers but valid advancing timestamps is not reliably distinguishable from rest without additional physical checks.
+
+## Connection deadline or failed stopping (0.2.0)
+
+A missing native/serial acknowledgement fails after two seconds; the browser aborts after three.
+A failed native engine session requires companion restart. Do not interpret missing acknowledgements
+as success. Device fault recovery waits for 20 consecutive healthy checks and successful neutral
+output, followed by explicit resume and switch release. Stop/pause does not need another sensor frame.
+Trial disk failures keep rows in page memory with `persisted:false`; export before reloading.
+Dirty/stale release packaging is a refusal, not a usable artifact; rerun the full gate and commit.

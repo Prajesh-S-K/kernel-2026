@@ -1,31 +1,335 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NodX Adapt · Motion, made personal</title><link rel="stylesheet" href="style.css"></head>
-<body>
-<div class="app">
-<header><a class="brand" href="#"><span class="mark">◈</span><span>NODX <b>ADAPT</b><small>ADAPTIVE HUMAN INTERFACE / V1</small></span></a><div class="header-right"><span class="tag" id="deviceSource">SIMULATED DEVICE</span><span id="connection" class="status"><i></i>ENGINE CONNECTED</span><button id="pause" class="quiet">Ⅱ Pause</button></div></header>
-<div class="layout">
-<aside><div class="aside-label">YOUR CONTROL SPACE</div><nav><button class="nav active" data-view="setup"><span>01</span> Setup & calibration <b>↗</b></button><button class="nav" data-view="control"><span>02</span> Control studio <b>↗</b></button><button class="nav" data-view="lab"><span>03</span> Performance lab <b>↗</b></button></nav>
-<div class="device-card"><span class="eyebrow">NODX DEVICE</span><div class="chip">◇</div><strong>ESP32-S3 + MPU6050</strong><p id="deviceDetail">Virtual sensor · Shared firmware engine</p><dl><div><dt>System state</dt><dd id="systemState">BOOT</dd></div><div><dt>Saved profile</dt><dd id="profileState">Checking</dd></div><div><dt>Safety events</dt><dd id="faultCount">0</dd></div></dl></div>
-<div class="access"><label><input type="checkbox" id="reduced"> Reduced motion</label><label><input type="checkbox" id="glow" checked> Soft glow</label><label>UI scale <select id="scale"><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option></select></label></div>
-<div class="aside-foot">PRE-HARDWARE EDITION <span>0.1.0</span><p>Real-world performance awaits hardware testing.</p></div></aside>
-<main>
-<section id="setup" class="view">
-<div class="page-top"><div><span class="eyebrow">01 / SETUP & CALIBRATION</span><h1>Control that adapts<br>to <em>you.</em></h1><p>Find your natural movement. Build your motion profile.</p></div><div class="session"><span class="eyebrow">SESSION STATUS</span><strong id="sessionStatus">Ready to calibrate</strong><span>All parameters are experimental START values.</span></div></div>
-<div class="steps"><span class="done">01 Connect</span><span class="done">02 System check</span><span id="stepCal">03 Calibrate</span><span id="stepProfile">04 Profile</span><span>05 Control test</span><span>06 Performance</span></div>
-<div class="setup-grid"><article class="panel calibration"><div class="panel-head"><span class="eyebrow">MOTION CALIBRATION</span><span class="tag" id="calSource">SYNTHETIC USER C</span></div><div class="orbit" id="orbit"><div class="orbit-grid"></div><div class="ring ring-one"></div><div class="ring ring-two"></div><div class="cross-h"></div><div class="cross-v"></div><span class="direction north">UP</span><span class="direction south">DOWN</span><span class="direction west">LEFT</span><span class="direction east">RIGHT</span><svg class="head-graphic" id="headGraphic" viewBox="0 0 120 140" aria-label="Live head movement"><path d="M28 40L43 17H77L94 42V82L75 111H46L28 84Z"/><path d="M28 47L45 53M94 47L77 53M54 51L51 73L64 78M43 90L73 90M44 110L38 131H85L78 110"/><path class="face" d="M43 53H48M73 53H79"/></svg><div class="axis-dot"></div></div>
-<span class="eyebrow" id="phaseLabel">A PERSONAL MOTION SIGNATURE</span><h2 id="instruction">Start with your natural movement</h2><p id="phaseDescription">The simulator will collect rest and four directional samples.</p><div class="progress"><div id="calProgress"></div></div><div class="progress-label"><span id="phaseNumber">6 collection phases · analysis · validation · save</span><span id="calPercent">0%</span></div><div class="actions"><button id="calibrate" class="primary">Start calibration <span>↗</span></button><button id="cancel" class="quiet" disabled>Cancel</button></div><p class="caption" id="calEvidence">Demo samples are mathematical inputs, not clinical or user evidence.</p></article>
-<div class="right-stack"><article class="panel live"><div class="panel-head"><span class="eyebrow">LIVE MOTION</span><span class="live-dot">● LIVE</span></div><canvas id="trace" height="120" aria-label="Yaw and pitch motion trace"></canvas><div class="legend"><span>― Yaw</span><span>― Pitch</span><span id="motionValues">0.0 / 0.0 °/s</span></div><div class="stability"><span>Motion stability <b id="stabilityValue">—</b></span><div class="progress"><div id="stabilityBar"></div></div><small>Illustrative 1 / (1 + filtered speed), not a comfort score.</small></div></article>
-<article class="panel profile"><div class="panel-head"><span class="eyebrow">YOUR MOTION PROFILE</span><span id="profileBadge" class="tag">NOT CALIBRATED</span></div><div class="profile-map"><span class="gain up">UP <b id="gainUp">—</b></span><span class="gain left">LEFT <b id="gainLeft">—</b></span><span class="diamond">◈</span><span class="gain right">RIGHT <b id="gainRight">—</b></span><span class="gain down">DOWN <b id="gainDown">—</b></span></div><div class="profile-stats"><span>Deadzone <b id="deadzone">—</b></span><span>Filter α <b id="alpha">—</b></span></div><div class="actions"><button id="load" class="quiet">Load saved</button><button id="exportProfile" class="quiet">Export profile ↓</button></div><p class="caption" id="gainEvidence">Directional gain: output pixels / degree. Generated from simulated samples.</p></article></div></div>
-</section>
-<section id="control" class="view" hidden><div class="page-top"><div><span class="eyebrow">02 / CONTROL STUDIO</span><h1>Make motion<br><em>meaningful.</em></h1><p>WASD to point · Q/E to roll · Space to select · P to pause.</p></div><button id="resume" class="primary">Resume control ↗</button></div>
-<div class="control-grid"><article class="panel"><div class="panel-head"><span class="eyebrow">LIVE CONTROL SPACE</span><span id="cursorLabel" class="tag">WARNING</span></div><div id="studio" class="point-space"><div class="space-grid"></div><div class="practice-target" data-target="1">◎<small>SELECT</small></div><div class="practice-target second" data-target="2">◇<small>DRAG</small></div><p class="space-hint">Your NodX cursor lives inside this companion.<br>Bluetooth HID uses the host’s standard cursor.</p></div><div class="studio-result" id="studioResult">Selections: 0 · Scroll: 0 · Drag distance: 0 px</div></article>
-<article class="panel controls"><span class="eyebrow">INPUT & INTENT</span><label>Yaw <output id="yawOut">0 °/s</output><input type="range" id="yaw" min="-60" max="60" value="0"></label><label>Pitch <output id="pitchOut">0 °/s</output><input type="range" id="pitch" min="-60" max="60" value="0"></label><label>Roll <output id="rollOut">0 °/s</output><input type="range" id="roll" min="-60" max="60" value="0"></label><button id="switch" class="quiet wide">Hold accessible switch</button><label class="toggle"><input type="checkbox" id="dwell"> Dwell selection</label><label class="toggle"><input type="checkbox" id="scroll" checked> Roll scrolling</label><div class="dwell-status"><span id="dwellLabel">Dwell: IDLE</span><div class="progress"><div id="dwellBar"></div></div></div><hr><label>Fault injection<select id="fault"><option value="0">Healthy samples</option><option value="1">NaN gyroscope</option><option value="2">Extreme gyroscope</option><option value="3">Sensor timeout</option><option value="4">Sensor disconnect</option><option value="5">Frozen timestamp</option><option value="6">HID send failure</option></select></label><label class="toggle"><input type="checkbox" id="ble" checked> Simulated BLE connected</label><button id="record" class="quiet">Record raw samples</button><button id="corrupt" class="danger">Inject profile corruption</button><p class="caption">Corrupts the demo profile slots. Recalibrate to create a new valid profile.</p></article></div></section>
-<section id="lab" class="view" hidden><div class="page-top"><div><span class="eyebrow">03 / PERFORMANCE LAB</span><h1>Measure.<br><em>Don’t assume.</em></h1><p>Fitts-style target selection. Every attempt becomes a raw trial.</p></div><div class="session"><span class="eyebrow">EVIDENCE STANDARD</span><strong>Observed results only</strong><span>Nominal ID / mean selection time. Not effective throughput.</span></div></div>
-<div class="lab-toolbar panel"><label>Condition<select id="condition"><option value="GENERIC">Generic START profile</option><option value="ADAPTIVE">Saved adaptive profile</option></select></label><label>Input source<select id="inputSource"><option value="SIMULATED">NodX simulator</option><option value="HOST_POINTER">Host pointer / later BLE</option></select></label><button id="startLab" class="primary">Start 12 trials ↗</button><button id="stopLab" class="quiet" disabled>Abort</button><button id="exportTrials" class="quiet">Export raw CSV ↓</button></div>
-<article class="panel"><div class="panel-head"><span id="trialLabel" class="eyebrow">POINTING EXPERIMENT</span><span id="labStatus" class="tag">NO RESULTS YET</span></div><div id="arena" class="point-space arena"><div class="space-grid"></div><div id="labTarget" hidden></div><div id="labWelcome"><span>◎</span><h2>One target. One measured attempt.</h2><p>Click the starting point, then select each target.<br>Misses count. Simulated results stay labeled.</p></div></div></article>
-<div id="metrics" class="metrics"></div><p class="caption">Selection time includes dwell when enabled. Practice, fatigue, host acceleration and target geometry affect results. Counterbalance condition order for real comparisons; these are exploratory trials.</p></section>
-<footer><span id="reason">Initializing shared control engine…</span><span>FAIL STATIONARY · EXPLICIT RESUME</span></footer>
-</main></div></div>
-<div id="nodxCursor" class="nodx-cursor" hidden><svg viewBox="0 0 48 48"><circle class="dwell-ring" cx="24" cy="24" r="20"/><path class="cursor-shape" d="M12 9L34 26L24 28L20 38Z"/><path class="cursor-center" d="M18 20L26 26L22 28Z"/></svg><span id="cursorText">NORMAL</span></div><div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="app.js"></script></body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NodX Adapt · Motion, made personal</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <a class="brand" href="#"
+          ><span class="mark">◈</span
+          ><span>NODX <b>ADAPT</b><small>ADAPTIVE HUMAN INTERFACE / V1</small></span></a
+        >
+        <div class="header-right">
+          <span class="tag" id="deviceSource">SIMULATED DEVICE</span
+          ><span id="connection" class="status"><i></i>ENGINE CONNECTED</span
+          ><button id="pause" class="quiet">Ⅱ Pause</button>
+        </div>
+      </header>
+      <div class="layout">
+        <aside>
+          <div class="aside-label">YOUR CONTROL SPACE</div>
+          <nav>
+            <button class="nav active" data-view="setup">
+              <span>01</span> Setup & calibration <b>↗</b></button
+            ><button class="nav" data-view="control">
+              <span>02</span> Control studio <b>↗</b></button
+            ><button class="nav" data-view="lab"><span>03</span> Performance lab <b>↗</b></button>
+          </nav>
+          <div class="device-card">
+            <span class="eyebrow">NODX DEVICE</span>
+            <div class="chip">◇</div>
+            <strong>ESP32-S3 + MPU6050</strong>
+            <p id="deviceDetail">Virtual sensor · Shared firmware engine</p>
+            <dl>
+              <div>
+                <dt>System state</dt>
+                <dd id="systemState">BOOT</dd>
+              </div>
+              <div>
+                <dt>Saved profile</dt>
+                <dd id="profileState">Checking</dd>
+              </div>
+              <div>
+                <dt>Safety events</dt>
+                <dd id="faultCount">0</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="access">
+            <label><input type="checkbox" id="reduced" /> Reduced motion</label
+            ><label><input type="checkbox" id="glow" checked /> Soft glow</label
+            ><label
+              >UI scale
+              <select id="scale">
+                <option value="1">100%</option>
+                <option value="1.15">115%</option>
+                <option value="1.3">130%</option>
+              </select></label
+            >
+          </div>
+          <div class="aside-foot">
+            PRE-HARDWARE EDITION <span>0.2.0</span>
+            <p>Real-world performance awaits hardware testing.</p>
+          </div>
+        </aside>
+        <main>
+          <section id="setup" class="view">
+            <div class="page-top">
+              <div>
+                <span class="eyebrow">01 / SETUP & CALIBRATION</span>
+                <h1>Control that adapts<br />to <em>you.</em></h1>
+                <p>Find your natural movement. Build your motion profile.</p>
+              </div>
+              <div class="session">
+                <span class="eyebrow">SESSION STATUS</span
+                ><strong id="sessionStatus">Ready to calibrate</strong
+                ><span>All parameters are experimental START values.</span>
+              </div>
+            </div>
+            <div class="steps">
+              <span class="done">01 Connect</span><span class="done">02 System check</span
+              ><span id="stepCal">03 Calibrate</span><span id="stepProfile">04 Profile</span
+              ><span>05 Control test</span><span>06 Performance</span>
+            </div>
+            <div class="setup-grid">
+              <article class="panel calibration">
+                <div class="panel-head">
+                  <span class="eyebrow">MOTION CALIBRATION</span
+                  ><span class="tag" id="calSource">SYNTHETIC USER C</span>
+                </div>
+                <div class="orbit" id="orbit">
+                  <div class="orbit-grid"></div>
+                  <div class="ring ring-one"></div>
+                  <div class="ring ring-two"></div>
+                  <div class="cross-h"></div>
+                  <div class="cross-v"></div>
+                  <span class="direction north">UP</span><span class="direction south">DOWN</span
+                  ><span class="direction west">LEFT</span><span class="direction east">RIGHT</span
+                  ><svg
+                    class="head-graphic"
+                    id="headGraphic"
+                    viewBox="0 0 120 140"
+                    aria-label="Live head movement"
+                  >
+                    <path d="M28 40L43 17H77L94 42V82L75 111H46L28 84Z" />
+                    <path
+                      d="M28 47L45 53M94 47L77 53M54 51L51 73L64 78M43 90L73 90M44 110L38 131H85L78 110"
+                    />
+                    <path class="face" d="M43 53H48M73 53H79" />
+                  </svg>
+                  <div class="axis-dot"></div>
+                </div>
+                <span class="eyebrow" id="phaseLabel">A PERSONAL MOTION SIGNATURE</span>
+                <h2 id="instruction">Start with your natural movement</h2>
+                <p id="phaseDescription">
+                  The simulator will collect rest and four directional samples.
+                </p>
+                <div class="progress"><div id="calProgress"></div></div>
+                <div class="progress-label">
+                  <span id="phaseNumber">6 collection phases · analysis · validation · save</span
+                  ><span id="calPercent">0%</span>
+                </div>
+                <div class="actions">
+                  <button id="calibrate" class="primary">Start calibration <span>↗</span></button
+                  ><button id="cancel" class="quiet" disabled>Cancel</button>
+                </div>
+                <p class="caption" id="calEvidence">
+                  Demo samples are mathematical inputs, not clinical or user evidence.
+                </p>
+              </article>
+              <div class="right-stack">
+                <article class="panel live">
+                  <div class="panel-head">
+                    <span class="eyebrow" id="motionHeading">SIMULATED MOTION</span
+                    ><span class="live-dot" id="motionSource">● SYNTHETIC</span>
+                  </div>
+                  <canvas id="trace" height="120" aria-label="Yaw and pitch motion trace"></canvas>
+                  <div class="legend">
+                    <span>― Yaw</span><span>― Pitch</span
+                    ><span id="motionValues">0.0 / 0.0 °/s</span>
+                  </div>
+                  <div class="stability">
+                    <span>Motion stability <b id="stabilityValue">—</b></span>
+                    <div class="progress"><div id="stabilityBar"></div></div>
+                    <small>Illustrative 1 / (1 + filtered speed), not a comfort score.</small>
+                  </div>
+                </article>
+                <article class="panel profile">
+                  <div class="panel-head">
+                    <span class="eyebrow">YOUR MOTION PROFILE</span
+                    ><span id="profileBadge" class="tag">NOT CALIBRATED</span>
+                  </div>
+                  <div class="profile-map">
+                    <span class="gain up">UP <b id="gainUp">—</b></span
+                    ><span class="gain left">LEFT <b id="gainLeft">—</b></span
+                    ><span class="diamond">◈</span
+                    ><span class="gain right">RIGHT <b id="gainRight">—</b></span
+                    ><span class="gain down">DOWN <b id="gainDown">—</b></span>
+                  </div>
+                  <div class="profile-stats">
+                    <span>Deadzone <b id="deadzone">—</b></span
+                    ><span>Filter α <b id="alpha">—</b></span>
+                  </div>
+                  <div class="actions">
+                    <button id="load" class="quiet">Load saved</button
+                    ><button id="exportProfile" class="quiet">Export profile ↓</button>
+                  </div>
+                  <p class="caption" id="gainEvidence">
+                    Directional gain: output pixels / degree. Generated from simulated samples.
+                  </p>
+                </article>
+              </div>
+            </div>
+          </section>
+          <section id="control" class="view" hidden>
+            <div class="page-top">
+              <div>
+                <span class="eyebrow">02 / CONTROL STUDIO</span>
+                <h1>Make motion<br /><em>meaningful.</em></h1>
+                <p>WASD to point · Q/E to roll · Space to select · P to pause.</p>
+              </div>
+              <button id="resume" class="primary">Resume control ↗</button>
+            </div>
+            <div class="control-grid">
+              <article class="panel">
+                <div class="panel-head">
+                  <span class="eyebrow">LIVE CONTROL SPACE</span
+                  ><span id="cursorLabel" class="tag">WARNING</span>
+                </div>
+                <div id="studio" class="point-space">
+                  <div class="space-grid"></div>
+                  <div class="practice-target" data-target="1">◎<small>SELECT</small></div>
+                  <div class="practice-target second" data-target="2">◇<small>DRAG</small></div>
+                  <p class="space-hint">
+                    Your NodX cursor lives inside this companion.<br />Bluetooth HID uses the host’s
+                    standard cursor.
+                  </p>
+                </div>
+                <div class="studio-result" id="studioResult">
+                  Selections: 0 · Scroll: 0 · Drag distance: 0 px
+                </div>
+              </article>
+              <article class="panel controls">
+                <span class="eyebrow">INPUT & INTENT</span
+                ><label
+                  >Yaw <output id="yawOut">0 °/s</output
+                  ><input
+                    aria-label="Yaw rate"
+                    type="range"
+                    id="yaw"
+                    min="-60"
+                    max="60"
+                    value="0" /></label
+                ><label
+                  >Pitch <output id="pitchOut">0 °/s</output
+                  ><input
+                    aria-label="Pitch rate"
+                    type="range"
+                    id="pitch"
+                    min="-60"
+                    max="60"
+                    value="0" /></label
+                ><label
+                  >Roll <output id="rollOut">0 °/s</output
+                  ><input
+                    aria-label="Roll rate"
+                    type="range"
+                    id="roll"
+                    min="-60"
+                    max="60"
+                    value="0" /></label
+                ><button id="switch" class="quiet wide">Hold accessible switch</button
+                ><label class="toggle"><input type="checkbox" id="dwell" /> Dwell selection</label
+                ><label class="toggle"
+                  ><input type="checkbox" id="scroll" checked /> Roll scrolling</label
+                >
+                <div class="dwell-status">
+                  <span id="dwellLabel">Dwell: IDLE</span>
+                  <div class="progress"><div id="dwellBar"></div></div>
+                </div>
+                <hr />
+                <label
+                  >Fault injection<select id="fault">
+                    <option value="0">Healthy samples</option>
+                    <option value="1">NaN gyroscope</option>
+                    <option value="2">Extreme gyroscope</option>
+                    <option value="3">Sensor timeout</option>
+                    <option value="4">Sensor disconnect</option>
+                    <option value="5">Frozen timestamp</option>
+                    <option value="6">HID send failure</option>
+                  </select></label
+                ><label class="toggle"
+                  ><input type="checkbox" id="ble" checked /> Simulated BLE connected</label
+                ><button id="record" class="quiet">Record raw samples</button
+                ><button id="corrupt" class="danger">Inject profile corruption</button>
+                <p class="caption">
+                  Corrupts the demo profile slots. Recalibrate to create a new valid profile.
+                </p>
+              </article>
+            </div>
+          </section>
+          <section id="lab" class="view" hidden>
+            <div class="page-top">
+              <div>
+                <span class="eyebrow">03 / PERFORMANCE LAB</span>
+                <h1>Measure.<br /><em>Don’t assume.</em></h1>
+                <p>Fitts-style target selection. Every attempt becomes a raw trial.</p>
+              </div>
+              <div class="session">
+                <span class="eyebrow">EVIDENCE STANDARD</span><strong>Observed results only</strong
+                ><span>Nominal ID / mean selection time. Not effective throughput.</span>
+              </div>
+            </div>
+            <div class="lab-toolbar panel">
+              <label
+                >Condition<select id="condition">
+                  <option value="GENERIC">Generic START profile</option>
+                  <option value="ADAPTIVE">Saved adaptive profile</option>
+                </select></label
+              ><label
+                >Input source<select id="inputSource">
+                  <option value="SIMULATED">NodX simulator</option>
+                  <option value="HOST_POINTER">Host pointer / later BLE</option>
+                </select></label
+              ><button id="startLab" class="primary">Start 12 trials ↗</button
+              ><button id="stopLab" class="quiet" disabled>Abort</button
+              ><button id="exportTrials" class="quiet">Export raw CSV ↓</button>
+            </div>
+            <article class="panel">
+              <div class="panel-head">
+                <span id="trialLabel" class="eyebrow">POINTING EXPERIMENT</span
+                ><span id="labStatus" class="tag">NO RESULTS YET</span>
+              </div>
+              <div id="arena" class="point-space arena">
+                <div class="space-grid"></div>
+                <div id="labTarget" hidden></div>
+                <div id="labWelcome">
+                  <span>◎</span>
+                  <h2>One target. One measured attempt.</h2>
+                  <p>
+                    Click the starting point, then select each target.<br />Misses count. Simulated
+                    results stay labeled.
+                  </p>
+                </div>
+              </div>
+            </article>
+            <div id="metrics" class="metrics"></div>
+            <p class="caption">
+              Desktop host-pointer blocks measure ordinary host clicks; changing the NodX profile
+              does not alter that pointer. Selection time includes dwell when enabled. Practice,
+              fatigue, host acceleration and target geometry affect results. Counterbalance
+              condition order for real comparisons; these are exploratory trials.
+            </p>
+          </section>
+          <footer>
+            <span id="reason">Initializing shared control engine…</span
+            ><span>FAIL STATIONARY · EXPLICIT RESUME</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+    <div id="nodxCursor" class="nodx-cursor" hidden>
+      <svg viewBox="0 0 48 48">
+        <circle class="dwell-ring" cx="24" cy="24" r="20" />
+        <path class="cursor-shape" d="M12 9L34 26L24 28L20 38Z" />
+        <path class="cursor-center" d="M18 20L26 26L22 28Z" /></svg
+      ><span id="cursorText">NORMAL</span>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

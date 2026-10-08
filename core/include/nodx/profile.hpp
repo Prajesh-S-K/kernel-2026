@@ -38,6 +38,7 @@ public:
     explicit ProfileRepository(ProfileStorage& storage) : storage_(storage) {}
     bool load(UserProfile& profile);
     bool save(const UserProfile& profile);
+
 private:
     ProfileStorage& storage_;
 };
@@ -46,7 +47,9 @@ public:
     std::array<std::vector<uint8_t>, 2> slots;
     bool failWrite = false;
     bool tearWrite = false;
-    std::vector<uint8_t> read(unsigned slot) override { return slots.at(slot); }
+    std::vector<uint8_t> read(unsigned slot) override {
+        return slots.at(slot);
+    }
     bool write(unsigned slot, const std::vector<uint8_t>& bytes) override;
 };
-}
+} // namespace nodx

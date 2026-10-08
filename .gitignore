@@ -5,3 +5,4 @@ __pycache__/
 runtime/
 *.DS_Store
 artifacts/
+node_modules/

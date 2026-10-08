@@ -67,3 +67,13 @@ MPU6050 uses address 0x68, WHO_AM_I 0x68, ±250°/s, ±2g, data-ready checking a
 Connect/system-check presentation reflects a running simulated engine; it does not attest BLE hardware qualification. Synthetic User C uses different left/right and up/down input amplitudes. Calibration actually feeds the core and saves its result. UI badges distinguish SIMULATED versus HARDWARE; USB telemetry enables later live calibration without redesign. Custom cursor states include NORMAL, PRECISION, TRAVEL, DWELL_ARMING, DWELL_PROGRESS, CLICK, DRAG, SCROLL, PAUSED, WARNING and SAFE_STATE. Text labels accompany color; reduced motion, glow preference, scaling and keyboard focus are supported.
 
 Lab blocks use 12 circular targets with three diameters. Record every attempt: condition, source, profile/hash, target/start/end geometry, distance, times, hit/miss, dwell cancellations and aborted status. Show hit rate, misses, mean selection time and **nominal successful ΣID/Σtime**, with `ID=log2(D/W+1)`. Selection time includes dwell and errors are never erased. This is exploratory, not ISO conformance or effective-width throughput. Generic versus adaptive runs keep their own actual settings; order must be counterbalanced in real experiments. Host-pointer trials are not automatically attributed to NodX hardware.
+
+## v0.2.0 module and safety refinement
+
+The frozen V1 pipeline is unchanged. See MODULE_WALKTHROUGH for the separated core, adapters,
+transport, presentation and Lab responsibilities. System state and accepted profile are read-only
+views. Proposed changes are validated commands. Pause/calibration/profile acceptance requests a
+stationary release through SafetyManager → HIDManager immediately, before storage or another sample.
+Delivery failure enters Safe State. Recovery requires 20 consecutive valid system checks and neutral
+output delivery, then explicit resume with held-switch release. Invalid inputs/mapping/timing/profile
+skip motion/adaptation math. Physical connection/release behavior still needs host validation.

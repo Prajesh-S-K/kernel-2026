@@ -1,1 +1,15 @@
-{"private":true,"type":"module","scripts":{"test":"node --test ../tests/metrics.test.mjs"}}
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ../tests/*.test.mjs",
+    "lint": "cd .. && ui/node_modules/.bin/eslint --config ui/eslint.config.js ui tests/*.mjs",
+    "format:check": "prettier --check \"*.js\" \"*.html\" \"*.css\" \"../tests/*.mjs\""
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "eslint": "9.39.1",
+    "@eslint/js": "9.39.1",
+    "globals": "16.5.0"
+  }
+}

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(nodx_adapt VERSION 0.1.0 LANGUAGES CXX)
+project(nodx_adapt VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(NODX_SANITIZE "Enable undefined-behavior sanitizer" OFF)
@@ -12,7 +12,15 @@ if(NODX_ASAN)
   add_compile_options(-fsanitize=address)
   add_link_options(-fsanitize=address)
 endif()
-add_library(nodx core/src/engine.cpp core/src/profile.cpp core/src/sensor.cpp)
+add_library(nodx
+    core/src/calibration.cpp
+    core/src/motion.cpp
+    core/src/selection.cpp
+    core/src/output.cpp
+    core/src/system.cpp
+    core/src/profile.cpp
+    core/src/sensor.cpp
+)
 target_include_directories(nodx PUBLIC core/include)
 target_compile_options(nodx PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(nodx_sim desktop/main.cpp)
@@ -21,3 +29,7 @@ add_executable(nodx_tests tests/test_main.cpp)
 target_link_libraries(nodx_tests PRIVATE nodx)
 enable_testing()
 add_test(NAME control_invariants COMMAND nodx_tests)
+
+foreach(target nodx_sim nodx_tests)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endforeach()

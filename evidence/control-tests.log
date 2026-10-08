@@ -34,4 +34,10 @@ PASS MPU missing ID never supplies valid motion
 PASS replay respects sample timestamps and EOF is invalid
 PASS clock wrap is safe but stalled/backward ticks are rejected
 PASS long simulation obeys bounds and never produces nonfinite
-36 passed, 0 failed
+PASS stop commands release immediately without another sample
+PASS failed stop delivery inhibits output until qualified recovery
+PASS recovery resets when a second fault interrupts qualification
+PASS invalid mapping timing and profile skip control calculations
+PASS settings save failure returns failure and preserves profile
+PASS request envelope rejects malformed IDs and truncated commands
+42 passed, 0 failed

@@ -11,6 +11,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: npm ci --prefix ui --ignore-scripts
       - run: sh scripts/check.sh
   firmware:
     runs-on: ubuntu-latest

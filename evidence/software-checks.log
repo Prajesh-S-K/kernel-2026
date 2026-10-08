@@ -1,20 +1,31 @@
--- Configuring done (0.0s)
+All checks passed!
+8 files already formatted
+
+> format:check
+> prettier --check "*.js" "*.html" "*.css" "../tests/*.mjs"
+
+Checking formatting...
+All matched files use Prettier code style!
+
+> lint
+> cd .. && ui/node_modules/.bin/eslint --config ui/eslint.config.js ui tests/*.mjs
+
+-- Configuring done (0.1s)
 -- Generating done (0.0s)
 -- Build files have been written to: <project>/build
-[ 12%] Building CXX object CMakeFiles/nodx.dir/core/src/engine.cpp.o
-[ 25%] Linking CXX static library libnodx.a
-[ 50%] Built target nodx
-[ 75%] Linking CXX executable nodx_sim
-[ 75%] Linking CXX executable nodx_tests
-[ 87%] Built target nodx_sim
+[ 66%] Built target nodx
 [100%] Built target nodx_tests
+[100%] Built target nodx_sim
 Test project <project>/build
     Start 1: control_invariants
-1/1 Test #1: control_invariants ...............   Passed    0.59 sec
+1/1 Test #1: control_invariants ...............   Passed    0.15 sec
 
 100% tests passed out of 1
 
-Total Test time (real) =   0.59 sec
+Total Test time (real) =   0.16 sec
+test_missing_serial_acknowledgement_deadline (test_protocol.DeadlineTests.test_missing_serial_acknowledgement_deadline) ... ok
+test_native_timeout_dead_process_and_malformed_reply (test_protocol.DeadlineTests.test_native_timeout_dead_process_and_malformed_reply) ... ok
+test_reply_json_rejects_nonfinite_values_and_invalid_ids (test_protocol.DeadlineTests.test_reply_json_rejects_nonfinite_values_and_invalid_ids) ... ok
 test_api_rejects_nonfinite_and_out_of_range (test_protocol.ProtocolTests.test_api_rejects_nonfinite_and_out_of_range) ... ok
 test_baseline_never_overwrites_saved_adaptive (test_protocol.ProtocolTests.test_baseline_never_overwrites_saved_adaptive) ... ok
 test_corrupt_both_slots_rejects_and_recalibration_repairs (test_protocol.ProtocolTests.test_corrupt_both_slots_rejects_and_recalibration_repairs) ... ok
@@ -22,46 +33,92 @@ test_end_to_end_calibration_saved_reloaded_after_restart (test_protocol.Protocol
 test_fault_recovery_needs_resume (test_protocol.ProtocolTests.test_fault_recovery_needs_resume) ... ok
 test_nan_replay_enters_safe_and_stays_ready_after_recovery (test_protocol.ProtocolTests.test_nan_replay_enters_safe_and_stays_ready_after_recovery) ... ok
 test_native_protocol_refuses_unknown_or_oversized_batch (test_protocol.ProtocolTests.test_native_protocol_refuses_unknown_or_oversized_batch) ... ok
+test_oversized_profile_file_is_rejected_without_loading (test_protocol.ProtocolTests.test_oversized_profile_file_is_rejected_without_loading) ... ok
+test_partial_serial_acknowledgement (test_protocol.ProtocolTests.test_partial_serial_acknowledgement) ... ok
+test_pause_report_without_step_and_finite_invalid_profile_telemetry (test_protocol.ProtocolTests.test_pause_report_without_step_and_finite_invalid_profile_telemetry) ... ok
 test_recording_can_be_replayed (test_protocol.ProtocolTests.test_recording_can_be_replayed) ... ok
 test_serial_adapter_correlates_ack_not_unsolicited_telemetry (test_protocol.ProtocolTests.test_serial_adapter_correlates_ack_not_unsolicited_telemetry) ... ok
 test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption (test_protocol.ProtocolTests.test_serial_bridge_never_injects_virtual_motion_and_refuses_corruption) ... ok
+test_strict_counts_booleans_and_trailing_native_fields (test_protocol.ProtocolTests.test_strict_counts_booleans_and_trailing_native_fields) ... ok
+test_temporary_settings_preserve_saved_profile (test_protocol.ProtocolTests.test_temporary_settings_preserve_saved_profile) ... ok
+test_dirty_stale_and_hash_mismatch_are_rejected (test_release.ReleaseTests.test_dirty_stale_and_hash_mismatch_are_rejected) ... ok
 
 ----------------------------------------------------------------------
-Ran 10 tests in 0.445s
+Ran 19 tests in 0.540s
 
 OK
 TAP version 13
-# Subtest: empty trials never invent metrics
-ok 1 - empty trials never invent metrics
+# Subtest: frozen block captures profile source selection and geometry
+ok 1 - frozen block captures profile source selection and geometry
   ---
-  duration_ms: 0.653542
+  duration_ms: 0.861083
+  ...
+# Subtest: blocks are separate and comparison settings preserve profile
+ok 2 - blocks are separate and comparison settings preserve profile
+  ---
+  duration_ms: 0.389292
+  ...
+# Subtest: desktop and firmware simulation labels never claim live readings
+ok 3 - desktop and firmware simulation labels never claim live readings
+  ---
+  duration_ms: 0.167708
+  ...
+# Subtest: polls coalesce and trial persistence runs outside the command queue
+ok 4 - polls coalesce and trial persistence runs outside the command queue
+  ---
+  duration_ms: 1.152333
+  ...
+# Subtest: malformed acknowledgement and persistence failure are visible
+ok 5 - malformed acknowledgement and persistence failure are visible
+  ---
+  duration_ms: 0.476958
+  ...
+# Subtest: browser timeout aborts a stalled request
+ok 6 - browser timeout aborts a stalled request
+  ---
+  duration_ms: 5.433542
+  ...
+# Subtest: reused block IDs cannot pool different profiles or device sources
+ok 7 - reused block IDs cannot pool different profiles or device sources
+  ---
+  duration_ms: 0.198833
+  ...
+# Subtest: Lab applies matched temporary settings, freezes trials and retains persistence failures
+ok 8 - Lab applies matched temporary settings, freezes trials and retains persistence failures
+  ---
+  duration_ms: 4.554334
+  ...
+# Subtest: empty trials never invent metrics
+ok 9 - empty trials never invent metrics
+  ---
+  duration_ms: 1.12575
   ...
 # Subtest: misses affect accuracy and time but not nominal successful rate
-ok 2 - misses affect accuracy and time but not nominal successful rate
+ok 10 - misses affect accuracy and time but not nominal successful rate
   ---
-  duration_ms: 0.087667
+  duration_ms: 0.096708
   ...
 # Subtest: aborted trials are retained raw but excluded from metrics
-ok 3 - aborted trials are retained raw but excluded from metrics
+ok 11 - aborted trials are retained raw but excluded from metrics
   ---
-  duration_ms: 0.112959
+  duration_ms: 0.116167
   ...
 # Subtest: aggregate uses summed ID over summed time, not average trial rate
-ok 4 - aggregate uses summed ID over summed time, not average trial rate
+ok 12 - aggregate uses summed ID over summed time, not average trial rate
   ---
-  duration_ms: 0.053208
+  duration_ms: 0.056583
   ...
 # Subtest: CSV quotes nested profile and multiline text
-ok 5 - CSV quotes nested profile and multiline text
+ok 13 - CSV quotes nested profile and multiline text
   ---
-  duration_ms: 0.130875
+  duration_ms: 0.14275
   ...
-1..5
-# tests 5
+1..13
+# tests 13
 # suites 0
-# pass 5
+# pass 13
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 64.850666
+# duration_ms 79.61925

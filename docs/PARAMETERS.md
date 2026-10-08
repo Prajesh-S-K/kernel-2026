@@ -45,3 +45,18 @@ All numeric values below are experimental starting settings. Bounds are defensiv
 | Buzzer transition pulse | 80 normal /300 Safe State | ms | Electrical driver/current and user comfort |
 
 The lab's 32/56/80px target diameters, 12 trials and geometry are experiment design constants, not validated accessibility settings. The stability readout `1/(1+filtered speed)` is an illustrative motion metric, not a measured personal ability/comfort score.
+
+## v0.2.0 transport/scheduling constants (not user tuning)
+
+| Value | Setting / units | Acceptance |
+|---|---|---|
+| Native/serial reply | 2 seconds | Deadline regression; physical USB reconnect still required |
+| Browser reply | 3 seconds | Aborted-request regression |
+| Firmware periodic telemetry | 200 ms / 5 Hz | Cross-built; board sampling jitter must be measured |
+| Firmware command line | 80 bytes; 64 read bytes per iteration | Envelope/truncation check; board parser acceptance later |
+| Telemetry frame | 2048 bytes; two pending acknowledgements | Bounded fixed storage; physical saturation later |
+| Firmware transmit budget | ≤64 available bytes per iteration | Nonblocking code; actual driver behavior requires board measurement |
+
+All V1 motion/filter/selection defaults and wire bytes are preserved. Recovery requires 20
+consecutive healthy checks including successful neutral output while connected. A fault resets
+qualification; a held switch must release and the user must resume explicitly.

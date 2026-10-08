@@ -17,3 +17,18 @@
 | 2026-10-08 | USB setup telemetry plus BLE pointing | Companion can show live state later without modifying basic host HID behavior |
 | 2026-10-08 | Exploratory circular-target lab; nominal successful ΣID/Σtime | Honest metric name; no effective-width/ISO assertion; raw misses and aborted trials retained |
 | 2026-10-08 | Local Git baseline and tag; no remote created | Clean versioned handoff without publishing code or choosing a remote account |
+
+## 0.2.0 professional hardening
+
+- Split responsibilities without adding parallel control algorithms or a JS framework. Read-only
+  System views preserve existing readers; all accepted profile changes use validation.
+- Typed faults drive logic. Readable reasons are presentation, not condition checks.
+- Stop commands release before storage and before another sample. Failed delivery inhibits output;
+  recovery requires consecutive healthy checks plus successful neutral delivery and explicit resume.
+- Bound all transport waits; discard a failed native session rather than accepting a late stale reply.
+  Persist trials separately from device commands. Finish telemetry lines before acknowledgement priority
+  applies, so JSON lines cannot interleave.
+- Freeze and group Lab context by block/settings. Identical temporary selection overrides make
+  condition changes explicit; host-pointer smoke trials cannot establish adaptation benefit.
+- Formatting/lint tools are pinned development dependencies. Gate stamps bind all source bytes and
+  built artifact hashes; packaging refuses dirty/stale inputs. GPIOs and START parameters stay unchanged.
