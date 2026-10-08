@@ -187,6 +187,12 @@ class Handler(SimpleHTTPRequestHandler):
                     with (self.server.runtime / "trials.jsonl").open("a") as out:
                         out.write(json.dumps(data, allow_nan=False) + "\n")
                     self.reply(200, {"ok": True, "profileHash": data["profileHash"]})
+                elif self.path == "/api/device" and data.get("action") == "reconnect":
+                    device = self.server.device
+                    if not hasattr(device, "reopen"):
+                        raise ValueError("Reconnect is available only for the hardware device")
+                    device.reopen()
+                    self.reply(200, {"ok": True, "reason": "reconnecting; the board is rebooting"})
                 elif self.path == "/api/device":
                     self.reply(200, self.server.device.request(command_for(data)))
                 else:

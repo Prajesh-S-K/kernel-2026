@@ -425,6 +425,14 @@ function renderUncal(data) {
     `at most ${view.u.maxStep} px per report.`;
 }
 const baseTitle = document.title;
+$('reconnect').onclick = async () => {
+  try {
+    const result = await request({ action: 'reconnect' });
+    toast(result.ok ? 'Reconnecting: the board is rebooting (about 5 seconds).' : result.reason);
+  } catch (error) {
+    toast(`Reconnect failed: ${error.message}`);
+  }
+};
 $('uncalStart').onclick = () => action('handsfree', { op: 'uncal', enabled: true });
 for (const id of ['uncalStop', 'uncalStopBanner'])
   $(id).onclick = () => action('handsfree', { op: 'uncal', enabled: false });

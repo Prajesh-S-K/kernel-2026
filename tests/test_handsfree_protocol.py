@@ -602,6 +602,54 @@ class SwitchAndTransport(HandsFreeCase):
             self.assertTrue(all(r[3] == 0 for r in result["reports"]))
         self.assertEqual(self.quiet(200)["state"], "READY")
 
+    def test_serial_link_reopens_after_repeated_timeouts_and_on_request(self):
+        class DeadSerial:
+            closed = False
+
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                pass
+
+            def readline(self):
+                return b""
+
+            def close(self):
+                self.closed = True
+
+        class Adapter(SERVER.SerialDevice):
+            reopened = 0
+
+            def _open(self):
+                Adapter.reopened += 1
+                self.serial = DeadSerial()
+
+        import sys
+
+        transport = sys.modules[SERVER.SerialDevice.__module__]
+        original_timeout = transport.REQUEST_TIMEOUT_SECONDS
+        transport.REQUEST_TIMEOUT_SECONDS = 0.01
+        try:
+            adapter = Adapter("fake-port")
+            self.assertEqual(Adapter.reopened, 1)
+            for _ in range(adapter.AUTO_REOPEN_AFTER - 1):
+                with self.assertRaises(RuntimeError):
+                    adapter.request("status")
+            self.assertEqual(Adapter.reopened, 1, "reopened too early")
+            with self.assertRaises(RuntimeError):
+                adapter.request("status")
+            self.assertEqual(Adapter.reopened, 2, "no automatic reopen after repeated timeouts")
+            for _ in range(adapter.AUTO_REOPEN_AFTER + 2):
+                with self.assertRaises(RuntimeError):
+                    adapter.request("status")
+            self.assertEqual(Adapter.reopened, 2, "cooldown ignored")
+            adapter.reopen()  # the manual button
+            self.assertEqual(Adapter.reopened, 3)
+            self.assertEqual(adapter.failures, 0)
+        finally:
+            transport.REQUEST_TIMEOUT_SECONDS = original_timeout
+
     def test_serial_adapter_passes_new_commands_and_still_refuses_native_only(self):
         class FakeSerial:
             def reset_input_buffer(self):
