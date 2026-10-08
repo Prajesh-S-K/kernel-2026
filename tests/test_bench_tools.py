@@ -98,6 +98,7 @@ class Analysis(unittest.TestCase):
             "worst 10 ms": GOOD.replace("intervalUsMax=11200", "intervalUsMax=80000"),
             "flash size": GOOD.replace("flashBytes=16777216", "flashBytes=8388608"),
             "PSRAM": GOOD.replace("psramBytes=8388608", "psramBytes=0"),
+            "PSRAM is": GOOD.replace("psramBytes=8388608", "psramBytes=4194304"),
             "bounce stays": GOOD.replace("edges=5,spanUs=900", "edges=60,spanUs=900"),
             "pin idles HIGH": GOOD.replace("idleLevel=1", "idleLevel=0"),
             "edges dropped": GOOD.replace("droppedEdges=0", "droppedEdges=4"),
@@ -110,6 +111,30 @@ class Analysis(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(status_of(text, name), "FAIL")
                 self.assertEqual(status_of(GOOD, name), "PASS")
+
+    def test_psram_as_reported_by_a_real_board_counts_as_8_mib(self):
+        # The heap-reported size is a little under 8 MiB (measured on the bench: 8386295 bytes).
+        real = GOOD.replace("psramBytes=8388608", "psramBytes=8386295")
+        self.assertEqual(status_of(real, "PSRAM is"), "PASS")
+
+    def test_register_dump_is_recorded_and_frozen_frames_are_flagged(self):
+        live = "".join(
+            f"DIAG,regs,frame={i},read=1,raw=0000{i:02X}0000000000000000000000\n" for i in range(3)
+        )
+        frozen = "".join(
+            "DIAG,regs,frame=%d,read=1,raw=00000000000000000000000000\n" % i for i in range(3)
+        )
+        head = "DIAG,regs,reg=PWR_MGMT_1,address=0x6B,read=1,value=0x01\n"
+        self.assertEqual(status_of(GOOD + head + live, "raw frames identical"), "PASS")
+        self.assertEqual(status_of(GOOD + head + frozen, "raw frames identical"), "FAIL")
+        self.assertIn(
+            "PWR_MGMT_1=0x01",
+            [
+                c
+                for c in ANALYZE.analyze_text(GOOD + head + live)["checks"]
+                if "registers" in c["name"]
+            ][0]["detail"],
+        )
 
     def test_garbage_and_truncated_lines_do_not_crash(self):
         noisy = (
@@ -178,7 +203,7 @@ class Logger(unittest.TestCase):
         self.assertEqual(shown, ["DIAG,button,prompt=press-and-release-the-button-now,seconds=20"])
 
     def test_only_short_diagnostic_commands_are_accepted(self):
-        for ok in ("info", "scan", "imu 10", "button 20", "down confirm", "up", "nudge"):
+        for ok in ("info", "scan", "imuregs", "imu 10", "button 20", "down confirm", "up", "nudge"):
             self.assertTrue(LOG.SAFE_COMMAND.fullmatch(ok), ok)
         for bad in ("rm -rf /", "imu 1000", "flash", "ota", "imu;ls", "", "down  confirm"):
             self.assertFalse(LOG.SAFE_COMMAND.fullmatch(bad), bad)

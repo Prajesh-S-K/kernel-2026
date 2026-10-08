@@ -214,6 +214,42 @@ void imu(unsigned seconds) {
     Serial.println("DIAG,imu,note=keep the board still for this test");
 }
 
+// Read-only register dump plus raw frames: what the sensor holds right now, with NO writes at all.
+// Added after the first bench run, which found WHO_AM_I=0x70 and frozen near-zero accel/gyro
+// values.
+void imuRegisters() {
+    if (!startWire()) {
+        Serial.println("DIAG,regs,error=pins-not-configured-or-wire-failed");
+        return;
+    }
+    struct Reg {
+        uint8_t address;
+        const char* name;
+    };
+    const Reg registers[] = {{0x19, "SMPLRT_DIV"},   {0x1a, "CONFIG"},        {0x1b, "GYRO_CONFIG"},
+                             {0x1c, "ACCEL_CONFIG"}, {0x1d, "ACCEL_CONFIG2"}, {0x23, "FIFO_EN"},
+                             {0x37, "INT_PIN_CFG"},  {0x38, "INT_ENABLE"},    {0x3a, "INT_STATUS"},
+                             {0x6a, "USER_CTRL"},    {0x6b, "PWR_MGMT_1"},    {0x6c, "PWR_MGMT_2"},
+                             {0x75, "WHO_AM_I"}};
+    for (const Reg& reg : registers) {
+        uint8_t value = 0;
+        const bool ok = readReg(reg.address, &value, 1);
+        Serial.printf("DIAG,regs,reg=%s,address=0x%02X,read=%d,value=0x%02X\n", reg.name,
+                      reg.address, ok, value);
+    }
+    for (unsigned frame = 0; frame < 6; ++frame) {
+        uint8_t b[14] = {};
+        const bool ok = readReg(0x3b, b, sizeof(b));
+        Serial.printf("DIAG,regs,frame=%u,read=%d,raw=", frame, ok);
+        for (size_t i = 0; i < sizeof(b); ++i) {
+            Serial.printf("%02X", b[i]);
+        }
+        Serial.println();
+        delay(10);
+    }
+    Serial.println("DIAG,regs,note=read-only;accel=bytes0-5,temp=6-7,gyro=8-13");
+}
+
 // ---------------------------------------------------------------- stage 3: the enable button
 // Records every level change with microsecond timestamps (bounce), and runs the REAL momentary gate
 // from the firmware so the same rules are seen with the real part: raw pressed vs latched
@@ -264,7 +300,7 @@ void button(unsigned seconds) {
 }
 
 void help() {
-    Serial.println("DIAG,help,commands=help|info|scan|imu [seconds]|button [seconds]|all");
+    Serial.println("DIAG,help,commands=help|info|scan|imu [seconds]|imuregs|button [seconds]|all");
 }
 unsigned secondsArg(const String& line, unsigned fallback) {
     const int space = line.indexOf(' ');
@@ -307,6 +343,8 @@ void loop() {
                 info();
             } else if (command == "scan") {
                 scan();
+            } else if (command == "imuregs") {
+                imuRegisters();
             } else if (command.startsWith("imu")) {
                 imu(secondsArg(command, 10));
             } else if (command.startsWith("button")) {

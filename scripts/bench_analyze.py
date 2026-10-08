@@ -49,6 +49,7 @@ def collect(lines):
         "imu": {},
         "button": {"burstList": [], "toggleList": []},
         "ble": {"states": [], "sends": [], "warnings": []},
+        "regs": [],
         "ignored": 0,
     }
     for text in lines:
@@ -65,6 +66,8 @@ def collect(lines):
                 data["scan"]["addresses"].append(fields["address"].lower())
             else:
                 data["scan"].update(fields)
+        elif family == "DIAG" and stage == "regs":
+            data["regs"].append(fields)
         elif family == "DIAG" and stage == "button":
             if "burst" in fields:
                 data["button"]["burstList"].append(fields)
@@ -103,8 +106,10 @@ def judge(data):
         )
         out.append(
             check(
-                "PSRAM is the 8 MB candidate",
-                "PASS" if psram == 8 * 1024 * 1024 else "FAIL",
+                "PSRAM is the 8 MB candidate (heap-reported, within 1% below 8 MiB)",
+                "PASS"
+                if psram is not None and 0.99 * 8 * 1024 * 1024 <= psram <= 8 * 1024 * 1024
+                else "FAIL",
                 f"psramBytes={info.get('psramBytes')}",
             )
         )
@@ -231,6 +236,20 @@ def judge(data):
                     "worst 10 ms poll interval under 30 ms (START)",
                     "PASS" if worst < 30000 else "FAIL",
                     f"{worst:.0f} us",
+                )
+            )
+    if data["regs"]:
+        registers = ", ".join(
+            f"{r['reg']}={r['value']}" for r in data["regs"] if "reg" in r and r.get("read") == "1"
+        )
+        frames = [r["raw"] for r in data["regs"] if "raw" in r]
+        out.append(check("MPU registers read-only dump", "INFO", registers))
+        if frames:
+            out.append(
+                check(
+                    "raw frames identical across the dump (a live sensor is not)",
+                    "FAIL" if len(set(frames)) == 1 else "PASS",
+                    f"{len(frames)} frames, {len(set(frames))} distinct",
                 )
             )
     # ---- stage 3: enable button

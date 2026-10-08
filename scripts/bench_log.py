@@ -28,7 +28,7 @@ PORT_NAME = re.compile(
     r"^(/dev/(cu|tty)\.[A-Za-z0-9._-]+|/dev/ttyACM\d+|/dev/ttyUSB\d+|COM\d{1,3})$"
 )
 SAFE_COMMAND = re.compile(
-    r"^(help|info|scan|all|status|ping|nudge|up|adv|down confirm|imu( \d{1,3})?|button( \d{1,3})?)$"
+    r"^(help|info|scan|all|status|ping|nudge|up|adv|down confirm|imuregs|imu( \d{1,3})?|button( \d{1,3})?)$"
 )
 
 
