@@ -48,8 +48,8 @@ behavior remain physical tests. Cross-compilation does not establish real-time h
 
 # Hands-free revision (unreleased) — evidence
 
-Verified on the committed branch `claude/hands-free-revision` (`406fb0d`, three implementation commits on top of
-`8454580`) in a clean clone under a neutral path. This revision is **software and simulation only**.
+Verified on the committed branch `claude/hands-free-revision` (on top of `8454580`; the tip is named in the pull request)
+in a clean clone under a neutral path. This revision is **software and simulation only**.
 Nothing below establishes hardware behaviour, accidental-trigger rates, comfort, training burden or suitability.
 
 ## Checks
@@ -59,16 +59,49 @@ Nothing below establishes hardware behaviour, accidental-trigger rates, comfort,
 | C++ named checks (`nodx_tests` / `nodx_handsfree_tests`) | 42 | 108 | 150 |
 | Python (`unittest`) | 19 | 21 | 40 |
 | JavaScript (`node --test`) | 13 | 14 | 27 |
-| **Total named checks** | **74** | **143** | **217** |
+| **Subtotal** | **74** | **143** | **217** |
+| Firmware command path, host-compiled (`nodx_firmware_sim_tests` / `nodx_firmware_hw_tests`) | 0 | 142 | 142 |
+| **Total named checks** | **74** | **285** | **359** |
 
 Each named check counts once; a test executable is not counted as one check. Logs:
 [software gate](../evidence/handsfree-software-checks.log) (formatting, lint, UBSAN native build, Python,
 JavaScript), [named C++ results](../evidence/handsfree-tests.log), [firmware builds](../evidence/handsfree-firmware-build.log).
-`ctest` reports 2 test programs (the two C++ executables); the 150 named C++ checks are inside them.
+`ctest` reports 4 test programs; the 150 named C++ checks are inside the first two. The firmware command-path
+program is built twice from the same test file (simulated and hardware configuration): 129 + 51 check
+*executions*, of which 142 are distinct named checks (37 parser checks and the boot-banner check run in both
+configurations). Its log: [firmware command tests](../evidence/firmware-command-tests.log).
 
 Firmware: `esp32s3` (774,509 B flash), `esp32s3-sim` (781,841 B) and `esp32s3-n16r8-bench` (778,189 B) all built;
 GPIO defaults remain disabled and `NODX_ENABLE`/`NODX_BUZZER` default to -1. Compilation is not hardware
 qualification, and the DIO/QIO image-header question from the N16R8 note remains open.
+
+## Firmware command path (host-compiled)
+
+`firmware/src/{runtime,commands,telemetry}.cpp` are compiled **unmodified** natively against stub Arduino, Wire,
+Preferences and NimBLE headers (`tests/firmware_host/stubs`), and `tests/test_firmware_commands.cpp` drives them
+exactly as the device is driven: every command is serial bytes through `serviceRuntime()`, the bounded 80-byte line
+parser, `command()` and the telemetry queue, and each result is judged from the bytes the firmware writes back.
+This replaces the earlier claim that the firmware parser "mirrors" the tested desktop parser: it is now the code
+under test.
+
+* Parser: unknown/empty/trailing-text commands, request-id echo (including the largest id and an out-of-range one),
+  an overlong line that must not execute its valid prefix, CRLF, control characters, a burst of 8 commands larger
+  than the 2-slot acknowledgement queue (all answered, in order, none dropped).
+* Every new command (`enable`, `gesture`, `train`, `handsfree`, `motion`, `fault`, `dwell`, `settings`) with valid and
+  invalid arguments, including NaN/inf, out-of-range and trailing text; one gesture plays at a time.
+* Hardware configuration (no `NODX_SIMULATED`): `enable`, `gesture`, `motion` and `fault` are refused, the source is
+  `HARDWARE`, the unconfigured enable input keeps control inhibited, and with no sensor control is never reached.
+* Whole pipeline in the simulated configuration: calibrate, train both gestures, commit (nothing resumes), gesture
+  resume, drag, switch OFF pauses and releases at once, switch ON never resumes, reboot never resumes and the saved
+  setup persists, an injected fault never resumes, and an oversized stored record is classified corrupt and the next boot
+  fails closed as `CONFIG_INVALID`.
+* Mutation checks on the real firmware sources (run, then reverted): accepting `enable 2` fails 5 checks; no longer
+  feeding the switch every loop pass fails 8; accepting `enable` on hardware fails 2.
+
+Not covered, by construction: real NVS atomicity and wear, I2C, GPIO levels and bounce, the Arduino scheduler, and BLE
+pairing, encryption and delivery (the stub link is declared secured and always accepts notifications). The stubs are
+stand-ins, not models of that hardware. The `main.cpp` entry and the PlatformIO build itself are covered by the
+firmware builds above.
 
 ## Mutation spot checks (development-time, not committed)
 
@@ -92,8 +125,30 @@ DOM mutations in 4 s of idle polling (after a fix: they were being rebuilt every
 this walkthrough: a CSS class collision (`.chip`), a nested telemetry field read at the wrong level, the cursor
 showing in the new view, and live-region churn. Screenshots:
 [desktop](../evidence/handsfree-setup-desktop.jpg), [mobile](../evidence/handsfree-setup-mobile.jpg).
-Not exercised in the browser: a full 12-trial hands-free Lab block (covered by unit tests only), keyboard Tab
-traversal by hand, and a real screen reader.
+Not exercised: keyboard Tab traversal by hand and a real screen reader.
+
+## Hands-free Lab block (browser, synthetic head motion)
+
+Through the real companion UI against the native simulator engine (private port, temporary runtime directory), after
+helper setup (calibrate, train pause and drag, explicit save): one complete **12-trial** hands-free block, driven by a
+closed-loop script that holds the WASD keys the page already supports, then a second block aborted by a
+pause/resume gesture. The persisted `trials.jsonl` rows were checked ([summary](../evidence/handsfree-lab-block.json)):
+
+* Block 1: 12 rows, one `blockId`, trials 1-12, all `interactionMode = HANDS_FREE`, `selectionMethod = DWELL`, one
+  `gestureConfigId`, one profile hash, `blockContext` equal to the row fields on every row, no aborts. The Lab showed a
+  **single** result card for the block (12 attempts, 12 hits, header naming the hands-free configuration).
+* Interruptions: one recognition candidate was deliberately injected during trial 5 (`gesture nod1`, rejected with
+  `GAP_TIMEOUT`, nothing executed). `gestureInterruptions` per trial was `[0,1,0,0,1,0,1,0,0,1,0,0]`: the injected
+  candidate and three more that the *keyboard pointing itself* opened (constant-rate single-axis movement looks like a
+  stroke to the recogniser). Each was rejected, the block continued and no command executed. This is the suppression
+  cost described in the limitations, observed on synthetic input; it says nothing about real heads.
+* Block 2: after two completed trials a pause/resume gesture was executed. The block aborted, a raw row was persisted with
+  `aborted = true` and `abortReason = "gesture command executed"` (not counted in the metrics), and a second card
+  appeared separately from block 1 (distinct `blockId`), never pooled.
+
+The result is the plumbing check the brief asked for. The hit rate and times are synthetic keyboard pointing and are not
+a performance result.
+
 
 ## Wokwi diagnostic
 
@@ -103,16 +158,23 @@ live accel lines with `fail=0`, a live click printed `CONTROL SWITCH: OFF (inhib
 with the SDA wire removed it printed `no I2C reply` / `SENSOR NOT FOUND / WRONG ID` and re-probed every 5 s.
 Part types and pins were checked against docs.wokwi.com (MPU6050, slide switch) and Wokwi's published ESP32-S3
 DevKitC-1 pin map (`wokwi-boards`); the board *part type* came from that repository and a public project, not a
-docs.wokwi.com part page. **Not verified:** dragging the MPU6050 sliders, the 30 ms debounce timing, and anything
-physical. Screenshots: [run](../evidence/wokwi-diagnostic-run.jpg), [missing sensor](../evidence/wokwi-missing-sensor.jpg).
+docs.wokwi.com part page. **Sensor controls verified:** clicking the MPU6050 opens its panel; moving acceleration X to
+1.35 g, rotation X to 191 deg/s, rotation Z to -183 deg/s and temperature to 68.4 C changed the serial line from
+`accel g: 0.00 0.00 1.00 | gyro dps: 0.0 0.0 0.0 | 24.0 C` to
+`accel g: 1.35 0.00 1.00 | gyro dps: 191.0 0.0 -183.0 | 68.4 C`, and the untouched axes did not change
+([transcript](../evidence/wokwi-sensor-controls.txt), [screenshot](../evidence/wokwi-sensor-controls.jpg)).
+**Not verified:** the 30 ms switch debounce timing and anything physical.
+Screenshots: [run](../evidence/wokwi-diagnostic-run.jpg), [missing sensor](../evidence/wokwi-missing-sensor.jpg).
 
 ## Known limitations and open hardware-required checks
 
 * Gesture thresholds, the neutral rule, learned margins and the claim that they separate command from normal
   movement are START values tested only on synthetic input. A rejected candidate costs up to about one stroke of
   pointing. The suppression/discard design needs real-user accidental-activation measurement.
-* Firmware command parsing (`firmware/src/commands.cpp`) is compile-checked and mirrors the tested native parser; it is
-  not executed by any automated test. `nodx_handsfree_tests` does not cover the NVS adapter.
+* The firmware command path is now exercised on the host (see above), but only against stand-ins for the Arduino core,
+  I2C, NVS and BLE. The NVS adapter's size classification is tested; real flash behaviour is not.
+* Keyboard pointing in the Lab opened rejected recognition candidates in 3 of 12 trials (above). The START stroke
+  thresholds may be too sensitive for ordinary pointing; accidental activation needs real-user measurement.
 * A torn first configuration write fails closed to CONFIG_INVALID until a helper repairs it; real NVS atomicity is untested.
 * Unchanged open items: MPU6050 data-ready/`INT_ENABLE` initialisation, exact N16R8 memory and USB configuration, BLE
   pairing/report behaviour including drag during disconnect, electrical enable-switch wiring and bounce, gesture comfort

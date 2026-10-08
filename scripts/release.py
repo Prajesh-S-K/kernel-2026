@@ -31,9 +31,13 @@ def source_digest(root):
 
 
 def artifact_paths():
-    return ["build/nodx_sim", "build/nodx_tests", "build/nodx_handsfree_tests"] + [
-        f".pio/build/{environment}/{image}" for environment in ENVIRONMENTS for image in IMAGES
-    ]
+    return [
+        "build/nodx_sim",
+        "build/nodx_tests",
+        "build/nodx_handsfree_tests",
+        "build/nodx_firmware_sim_tests",
+        "build/nodx_firmware_hw_tests",
+    ] + [f".pio/build/{environment}/{image}" for environment in ENVIRONMENTS for image in IMAGES]
 
 
 def stamp(root=ROOT):

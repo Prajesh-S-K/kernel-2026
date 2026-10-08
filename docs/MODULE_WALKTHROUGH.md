@@ -42,7 +42,7 @@ files implement it. Profiles are copied for proposed changes and accepted only b
 
 Install development tools as shown in BUILD_GUIDE. Run `sh scripts/check.sh` after a change.
 Use `sh scripts/release_gate.sh` for a complete release check, including both firmware targets.
-Individual suites: `./build/nodx_tests`, `./build/nodx_handsfree_tests`, `python3 -m unittest discover -s tests -p 'test_*.py' -v`,
+Individual suites: `./build/nodx_tests`, `./build/nodx_handsfree_tests`, `./build/nodx_firmware_sim_tests` and `./build/nodx_firmware_hw_tests` (the real firmware command path on the host over stubbed Arduino/NVS/BLE headers), `python3 -m unittest discover -s tests -p 'test_*.py' -v`,
 and `node --test tests/*.test.mjs`. Use isolated runtime directories for demos and replay.
 
 Format C++ with `clang-format -i`, Python with `ruff format`, and UI/test JS with

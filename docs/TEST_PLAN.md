@@ -61,7 +61,9 @@ comfort or suitability):
 | Training: repeated examples, too few strokes, noise, insufficient motion, off-axis, inconsistent, NaN/inf/extreme/timing faults, indistinguishable or prefix patterns, cancel, immediate release | `tests/test_handsfree.cpp` |
 | Conflicts, drag (11 release causes), enable switch, recovery, unconfigured switch, dwell lockout | `tests/test_handsfree.cpp` |
 | Native protocol: setup and daily workflow, strict command validation, truthful storage failures, corrupt/oversized records, switch semantics, transport failure, replay determinism, trial-context enforcement, telemetry size | `tests/test_handsfree_protocol.py` |
+| Firmware command path compiled and driven natively with the real `firmware/src/{runtime,commands,telemetry}.cpp` over stubbed Arduino/Wire/NVS/BLE headers: parser bounds and backpressure, every new command's valid/invalid arguments, hardware-configuration refusal of simulation commands, the simulated whole pipeline (setup, gesture resume, switch OFF/ON, reboot, fault, corrupt record) | `tests/test_firmware_commands.cpp` (two ctest programs) |
 | Companion logic: setup steps, training view, recovery guidance, Lab freezing/invalidation/grouping/raw columns, command queueing | `tests/handsfree.test.mjs` |
+| Browser Lab block (manual, recorded): a full 12-trial hands-free block and an aborted block, persisted context/grouping/interruption rows checked | `evidence/handsfree-lab-block.json` |
 | Mutation spot checks run during development: removing suppression, switch-OFF release, neutral rearm, the enable gate or drag release each makes the suite fail | recorded in EVIDENCE |
 
 Browser acceptance additions (manual, recorded in EVIDENCE): helper setup → training with retry → save;
