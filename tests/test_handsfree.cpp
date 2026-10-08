@@ -1,6 +1,7 @@
 // Hands-free revision regression tests. Deterministic, synthetic input only: they show that the
 // logic behaves as specified, not accidental-trigger rates, comfort or suitability for any user.
 #include "hf_support.hpp"
+#include <random>
 #include <cstring>
 
 namespace {
@@ -3442,6 +3443,342 @@ int main() {
                                 "\"preview\"", "\"retries\"", "\"interruptions\"", "\"reason\""}) {
             require(std::strstr(buffer, key), key);
         }
+    });
+
+    // ------------------------------------------------ Q: optional gesture click
+    // Fallback frame: the default axis mapping is the identity in the rig, so the side tilt is axis 2.
+    struct TiltShape {
+        float peak = 60;
+        unsigned ms = 600;
+        std::array<float, 3> axis{0, 0, 1};
+    };
+    auto tiltAt = [](const TiltShape& g, float t) {
+        std::array<float, 3> out{0, 0, 0};
+        if (t >= 0 && t <= float(g.ms)) {
+            const float level = g.peak * std::sin(2 * 3.14159265f * t / float(g.ms));
+            out = {g.axis[0] * level, g.axis[1] * level, g.axis[2] * level};
+        }
+        return out;
+    };
+    auto pointingAt = [](std::mt19937& rng, uint32_t now, uint32_t& until, uint32_t& from,
+                         std::array<float, 3>& dir, float& peak) {
+        std::uniform_real_distribution<float> u(0.f, 1.f);
+        if (now >= until) {
+            from = now;
+            until = now + 400 + unsigned(1200 * u(rng));
+            const float a = 2 * 3.14159265f * u(rng);
+            dir = {std::cos(a), std::sin(a), .2f * (u(rng) - .5f) * 2.f};
+            peak = 15 + 70 * u(rng);
+        }
+        const float level = peak * std::sin(3.14159265f * float(now - from) / float(until - from));
+        return std::array<float, 3>{dir[0] * level, dir[1] * level, dir[2] * level};
+    };
+    // Trains the gesture through the System (cue driven); returns once it is READY.
+    auto clickTrain = [=](HF& h, const M3& m, bool configuredFrame,
+                          const std::function<TiltShape(unsigned)>& shape = nullptr) {
+        require(h.s().clickTrainStart(h.now, configuredFrame), "click training refused");
+        std::mt19937 rng(99);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        ClickCue last = ClickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        TiltShape current;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const ClickStatus st = h.s().clickStatus(h.now);
+            if (st.train.phase == ClickPhase::Ready) {
+                break;
+            }
+            if (st.train.cue == ClickCue::Go && last != ClickCue::Go) {
+                ++attempt;
+                current = shape ? shape(attempt) : TiltShape{};
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.train.cue;
+            std::array<float, 3> body{};
+            if (st.train.phase == ClickPhase::Confusion) {
+                body = pointingAt(rng, h.now, until, from, dir, peak);
+            } else if (moving && h.now >= moveStart) {
+                if (h.now - moveStart > current.ms) {
+                    moving = false;
+                } else {
+                    body = tiltAt(current, float(h.now - moveStart));
+                }
+            }
+            rawTick(h, m, body);
+        }
+        return h.s().clickStatus(h.now).train.phase == ClickPhase::Ready;
+    };
+    auto sessionRig = [=]() {
+        HF h = uncalRig();
+        require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        h.quiet(300);
+        return h;
+    };
+    auto doTilt = [=](HF& h, const TiltShape& shape, unsigned tailMs, const M3* mount = nullptr) {
+        const M3& m = mount ? *mount : mountIdentity;
+        for (unsigned t = 0; t <= shape.ms; t += 10) {
+            rawTick(h, m, tiltAt(shape, float(t)));
+        }
+        for (unsigned t = 0; t < tailMs; t += 10) {
+            rawTick(h, m, {0, 0, 0});
+        }
+    };
+    test("gesture click: off by default, and the pointer never clicks before it is enabled", [=] {
+        HF h = sessionRig();
+        require(!h.s().clickGestureEnabled(), "must start disabled");
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 1000);
+        h.run(hold(0, 60, 500));
+        require(clicksSince(h, mark) == 0, "a click before the gesture was enabled");
+        HF fresh = uncalRig();
+        require(!fresh.s().setClickGesture(true, fresh.now), "enabled without a session");
+        require(clickTrain(fresh, mountIdentity, false) && fresh.s().clickTrainAccept(), "train");
+        require(!fresh.s().setClickGesture(true, fresh.now), "enabled without a running session");
+        require(fresh.s().startUncalibratedDemo(fresh.now), "session");
+        require(fresh.s().setClickGesture(true, fresh.now), "enable refused after training");
+    });
+    test("gesture click: one press and release per gesture, pointer held still during the candidate", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 500);
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not sent last");
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            if (r.down) {
+                ++downs;
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click");
+            }
+            require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "pointer moved during the gesture");
+        }
+        require(downs == 1 && h.s().handsFreeStatus().uncalClicks == 1, "one press only");
+        require(h.s().clickStatus(h.now).accepted == 1, "accepted counter");
+    });
+    test("gesture click: yaw leaking into the gesture is suppressed and never replayed", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        TiltShape leaky; // the same side tilt, with real pointer-moving motion mixed in
+        leaky.axis = {.2f, 0, 1};
+        leaky.peak = 60;
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, leaky, 160); // through the click, before recovery would matter
+        float during = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            during += std::abs(float(h.transport.reports[i].dx));
+        }
+        h.quiet(1500);
+        float after = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            after += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(h.s().clickStatus(h.now).candidates >= 1, "the gesture should have opened a candidate");
+        require(clicksSince(h, mark) <= 1, "at most one click");
+        require(during <= 4.f, "the pointer moved while a candidate was open");
+        require(after - during <= 1.f, "suppressed movement was replayed afterwards");
+        // control: the same yaw WITHOUT the gesture does move the pointer
+        HF g = sessionRig();
+        const size_t markG = g.transport.reports.size();
+        g.run(hold(0, 27, 600));
+        float moved = 0;
+        for (size_t i = markG; i < g.transport.reports.size(); ++i) {
+            moved += std::abs(float(g.transport.reports[i].dx));
+        }
+        require(moved > 20.f, "precondition: that yaw moves the pointer");
+    });
+    test("gesture click: no second click while still, rearming needs a neutral stretch", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 250);
+        doTilt(h, TiltShape{}, 100); // immediately again: still locked out
+        h.quiet(20000);
+        require(clicksSince(h, mark) == 1, "repeat or early second click");
+        doTilt(h, TiltShape{}, 700);
+        require(clicksSince(h, mark) == 2, "rearmed after neutral");
+    });
+    test("gesture click: ordinary pointing never clicks, weak or wrong gestures never click", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        std::mt19937 rng(5);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        for (unsigned i = 0; i < 30000; ++i) {
+            rawTick(h, mountIdentity, pointingAt(rng, h.now, until, from, dir, peak));
+        }
+        require(clicksSince(h, mark) == 0, "false click while pointing");
+        require(h.s().uncalibratedDemo(), "pointing must not stop the session");
+        TiltShape weak;
+        weak.peak = 18;
+        TiltShape yaw;
+        yaw.axis = {1, 0, 0};
+        TiltShape reversed;
+        reversed.peak = -60;
+        for (const TiltShape& g : {weak, yaw, reversed}) {
+            const size_t before = h.transport.reports.size();
+            doTilt(h, g, 900);
+            require(clicksSince(h, before) == 0, "a wrong gesture clicked");
+        }
+    });
+    test("gesture click: a release failure faults, stops the session and disables the gesture", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const uint32_t faultsBefore = h.s().diagnostics.faults;
+        h.transport.failRelease = true;
+        doTilt(h, TiltShape{}, 170); // calm for 150 ms accepts it; recovery needs 200 ms more
+        require(h.s().state == SystemState::SafeState &&
+                    h.s().diagnostics.faults == faultsBefore + 1,
+                "no fault after a failed release");
+        require(!h.s().uncalibratedDemo() && !h.s().clickGestureEnabled(), "session survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 900);
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "output continued after the fault");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+        require(!h.s().clickGestureEnabled(), "gesture must be re-enabled explicitly");
+    });
+    test("gesture click: button, invalid sample, disconnect and pause cancel a candidate", [=] {
+        for (int how = 0; how < 4; ++how) {
+            HF h = sessionRig();
+            require(h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            for (unsigned t = 0; t <= 250; t += 10) {
+                rawTick(h, mountIdentity, tiltAt(TiltShape{}, float(t)));
+            }
+            require(h.s().clickStatus(h.now).suppressing, "candidate not open");
+            if (how == 0) {
+                h.sw = true;
+                h.tick();
+                h.sw = false;
+            } else if (how == 1) {
+                h.now += 10;
+                h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+            } else if (how == 2) {
+                h.transport.online = false;
+                h.quiet(50);
+            } else {
+                h.s().pause();
+            }
+            require(!h.s().clickGestureEnabled() && !h.s().uncalibratedDemo(), "still enabled");
+            h.transport.online = true;
+            h.quiet(1500);
+            for (unsigned t = 250; t <= 600; t += 10) {
+                rawTick(h, mountIdentity, tiltAt(TiltShape{}, float(t)));
+            }
+            h.quiet(900);
+            require(clicksSince(h, mark) == 0, "click after a cancelled candidate");
+        }
+    });
+    test("gesture click: works with a missing or failed calibration and a corrupt profile", [=] {
+        {
+            HF h = sessionRig(); // missing profile (uncalRig)
+            require(h.s().setClickGesture(true, h.now) && !h.s().hasProfile, "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1, "missing profile");
+        }
+        {
+            HF h = uncalRig();
+            h.s().calibrate(h.now);
+            for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+                h.run(hold(0, 40, 100));
+            }
+            h.quiet(400);
+            require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+            h.quiet(300);
+            require(h.s().startUncalibratedDemo(h.now) && h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1 && h.s().calibration.phase == CalPhase::Failed,
+                    "failed calibration");
+        }
+        {
+            HF h(false, EnableKind::Momentary);
+            h.sw = false;
+            require(h.repo.save(UserProfile{}), "save");
+            h.profileStorage.slots[0][20] ^= 0x55;
+            h.profileStorage.slots[1] = h.profileStorage.slots[0];
+            const auto kept = h.profileStorage.slots[0];
+            h.boot();
+            h.quiet(400);
+            require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+            h.quiet(300);
+            require(h.s().startUncalibratedDemo(h.now) && h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1, "corrupt profile");
+            require(h.s().profileState() == ProfileState::Corrupt && h.profileStorage.slots[0] == kept,
+                    "corrupt record must stay reported and untouched");
+        }
+    });
+    test("gesture click: a gesture is bound to the frame it was taught in; relearning invalidates it", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "mapping");
+        h.quiet(300);
+        require(clickTrain(h, mountSideways, true) && h.s().clickTrainAccept(), "train (configured)");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "fallback session");
+        require(!h.s().setClickGesture(true, h.now) &&
+                    std::string(h.s().diagnostics.reason).find("configured") != std::string::npos,
+                "a configured-frame gesture must not enable in the fallback");
+        h.s().stopUncalibratedDemo("test");
+        h.quiet(300);
+        require(h.s().startConfiguredControl(h.now) && h.s().setClickGesture(true, h.now), "configured");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        // the body gesture is a side tilt; in the configured frame that is the third row
+        doTilt(h, TiltShape{}, 500, &mountSideways);
+        require(clicksSince(h, mark) == 1, "configured gesture click");
+        h.s().stopUncalibratedDemo("test");
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "relearn");
+        require(!h.s().clickStatus(h.now).ready, "a gesture from the old learned frame survived");
+        HF g = teachRig();
+        require(!g.s().clickTrainStart(g.now, true), "configured gesture needs a learned mapping");
+    });
+    test("gesture click: training failures keep the previous gesture; status JSON is bounded", [=] {
+        HF h = sessionRig();
+        require(h.s().clickStatus(h.now).ready, "precondition");
+        h.s().stopUncalibratedDemo("test");
+        h.quiet(300);
+        require(h.s().clickTrainStart(h.now, false), "start");
+        for (unsigned i = 0; i < 1000 && h.s().state == SystemState::Teaching; ++i) {
+            rawTick(h, mountIdentity, {(i / 40) % 2 ? 40.f : -40.f, 0, 0});
+        }
+        require(h.s().state != SystemState::Teaching && h.s().clickStatus(h.now).ready,
+                "a failed training must keep the previous gesture");
+        require(h.s().clickTrainStart(h.now, false), "restart");
+        h.s().clickTrainCancel();
+        require(h.s().state != SystemState::Teaching && h.s().clickStatus(h.now).ready, "cancel");
+        char buffer[clickJsonCapacity];
+        const size_t n = clickJson(buffer, sizeof buffer, h.s().clickStatus(h.now));
+        require(n > 100 && n < clickJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        h.s().clickClear();
+        require(!h.s().clickStatus(h.now).ready, "forget");
     });
 
     std::cout << passed << " passed, " << failed << " failed\n";

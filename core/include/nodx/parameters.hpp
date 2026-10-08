@@ -86,5 +86,27 @@ constexpr float mapDeadzoneCap = 10.f;
 constexpr float mapHysteresis = .6f;        // exit threshold / enter threshold
 constexpr float mapMountingToleranceDeg = 25.f; // gravity direction change that needs relearning
 constexpr uint32_t mapPreviewTimeoutMs = 120000;
+// Gesture click (optional, RAM only). START values, not measured on users.
+constexpr uint32_t clickRestMs = 1500;        // qualified stillness before training
+constexpr uint32_t clickRestWindowMs = 6000;
+constexpr unsigned clickExamples = 5;
+constexpr unsigned clickValidations = 2;
+constexpr unsigned clickMaxRetries = 3;
+constexpr float clickEnterFloor = 25.f;       // deg/s, also at least 8 sigma
+constexpr float clickExitFloor = 8.f;         // deg/s, also at least 4 sigma
+constexpr float clickMinPeak = 30.f;          // weaker patterns are rejected
+constexpr uint32_t clickMinMs = 250;          // gesture duration bounds
+constexpr uint32_t clickMaxMs = 1500;
+constexpr uint32_t clickCalmMs = 150;         // calm this long = the gesture ended
+constexpr uint32_t clickNeutralMs = 300;      // neutral return needed before rearming
+constexpr float clickPrincipalShare = .6f;    // energy share of the principal axis
+constexpr float clickDominance = 1.5f;        // principal axis vs the others to open a candidate
+constexpr float clickConsistency = .6f;       // relative distance of an example to the earlier ones
+constexpr float clickMaxExampleError = .45f;  // leave-one-out error that still yields a template
+constexpr float clickThresholdMargin = 1.6f;
+constexpr float clickThresholdMin = .25f;
+constexpr float clickThresholdMax = .5f;
+constexpr uint32_t clickConfusionWindowMs = 15000;
+constexpr uint32_t clickConfusionActivityMs = 5000; // ordinary pointing observed with no false click
 constexpr uint32_t enableDebounceMs = 30;   // ON must be stable; OFF is immediate
 } // namespace nodx::start

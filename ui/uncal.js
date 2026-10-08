@@ -3,8 +3,6 @@
 // calibration, is never saved and never starts by itself.
 export const BANNER = 'UNCALIBRATED DEMO — LIVE SENSOR';
 export const BANNER_DWELL = 'UNCALIBRATED DEMO — DWELL CLICK';
-const CONFIGURED = 'CONFIGURED CONTROL — LIVE SENSOR';
-const CONFIGURED_DWELL = 'CONFIGURED CONTROL — DWELL CLICK';
 const AXIS = ['X', 'Y', 'Z'];
 const SIGN = (value) => (value < 0 ? '−' : '+');
 
@@ -51,6 +49,8 @@ export function uncalView(device) {
         ? 'A saved profile exists; the demo does not use it.'
         : 'No saved profile. This is not a calibration and nothing is saved.';
   const dwellOn = active && u.dwell.enabled;
+  const gestureOn = active && device?.click?.enabled === true;
+  const kind = dwellOn && gestureOn ? 'DWELL + GESTURE CLICK' : gestureOn ? 'GESTURE CLICK' : dwellOn ? 'DWELL CLICK' : 'LIVE SENSOR';
   const dwellStatus = !active
     ? 'Dwell clicking needs the demo running.'
     : !dwellOn
@@ -70,13 +70,7 @@ export function uncalView(device) {
     calibration,
     banner: !active
       ? ''
-      : device?.mapping?.mode === 'CONFIGURED'
-        ? dwellOn
-          ? CONFIGURED_DWELL
-          : CONFIGURED
-        : dwellOn
-          ? BANNER_DWELL
-          : BANNER,
+      : `${device?.mapping?.mode === 'CONFIGURED' ? 'CONFIGURED CONTROL' : 'UNCALIBRATED DEMO'} — ${kind}`,
     dwellOn,
     canEnableDwell: active,
     dwellStatus,

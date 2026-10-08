@@ -428,10 +428,10 @@ void hardwareChecks() {
     expect(has(ack, "\"source\":\"HARDWARE\""), "hardware build is not labelled simulated");
     expect(!has(ack, "FIRMWARE_SIMULATED"), "no simulated label");
     // Hardware frames carry the raw sensor view; the whole frame must stay well inside the
-    // 4096-byte telemetry buffer, otherwise the firmware silently drops it.
+    // 5120-byte telemetry buffer, otherwise the firmware silently drops it.
     expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
            "hardware telemetry has the raw sensor block");
-    expect(ack.size() < 3000, "hardware telemetry frame leaves headroom in the 4096-byte buffer");
+    expect(ack.size() < 3800, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
     std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
@@ -465,6 +465,16 @@ void hardwareChecks() {
     expect(ok(send("control stop")), "stop is always accepted");
     expect(has(status(), "\"mapping\":{\"phase\":\"IDLE\""), "mapping status reported");
     expect(has(status(), "\"stored\":\"MISSING\""), "no stored mapping");
+    expect(refused(send("click train fallback")), "click training refused before the sensor is healthy");
+    expect(refused(send("click train configured")), "configured gesture needs a learned mapping");
+    expect(refused(send("click train sideways")), "bad click frame refused");
+    expect(refused(send("click enable on")), "click enable needs a taught gesture and a session");
+    expect(refused(send("click enable sideways")), "bad click enable value refused");
+    expect(refused(send("click accept")), "nothing to accept");
+    expect(refused(send("click sideways")), "bad click verb refused");
+    expect(ok(send("click cancel")) && ok(send("click clear")) && ok(send("click enable off")),
+           "cancel, clear and disable are always accepted");
+    expect(has(status(), "\"click\":{\"phase\":\"IDLE\""), "click status reported");
     expect(ok(send("handsfree uncal stop")), "stop is always accepted");
     expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.

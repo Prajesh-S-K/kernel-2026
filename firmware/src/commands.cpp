@@ -113,6 +113,29 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "click") {
+        std::string verb, value;
+        input >> verb;
+        if (verb == "train") {
+            input >> value;
+            ok = (value == "fallback" || value == "configured") && (input >> std::ws).eof() &&
+                 system.clickTrainStart(now, value == "configured");
+        } else if (verb == "enable") {
+            input >> value;
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setClickGesture(value == "on", now);
+        } else if (verb == "cancel" || verb == "accept" || verb == "clear") {
+            ok = (input >> std::ws).eof();
+            if (ok && verb == "cancel") {
+                system.clickTrainCancel();
+            } else if (ok && verb == "accept") {
+                ok = system.clickTrainAccept();
+            } else if (ok) {
+                system.clickClear();
+            }
+        } else {
+            ok = false;
+        }
     } else if (ok && operation == "control") {
         std::string verb;
         input >> verb;

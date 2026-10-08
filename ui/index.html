@@ -128,6 +128,35 @@
               </div>
               <p id="mapBlocked" class="uncal-note"></p>
             </article>
+            <article class="panel uncal" id="clickPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">OPTIONAL · OFF BY DEFAULT</span>
+                  <h2>Gesture click</h2>
+                </div>
+                <span class="tag" id="clickTag">OFF</span>
+              </div>
+              <p>
+                Teach one deliberate gesture (a quick side tilt and return, or your own) with five
+                examples and two checks. It is then checked against ordinary pointing. It lives in memory
+                only, never saves, and clicks nothing until you enable it while control is running. While
+                a possible gesture is being recognised the pointer pauses; that movement is discarded.
+              </p>
+              <h3 id="clickTitle"></h3>
+              <div class="map-big" id="clickBig"></div>
+              <div class="uncal-bar"><i id="clickBar"></i></div>
+              <p id="clickInstruction" class="uncal-status"></p>
+              <div class="uncal-actions">
+                <button id="clickTrainFallback" class="primary">Teach for the fallback</button>
+                <button id="clickTrainConfigured" class="quiet">Teach for configured control</button>
+                <button id="clickAccept" class="primary">Accept gesture</button>
+                <button id="clickCancel" class="quiet">Cancel</button>
+                <button id="clickClear" class="quiet">Forget gesture</button>
+              </div>
+              <label><input type="checkbox" id="clickEnable" disabled /> Enable gesture click (temporary)</label>
+              <p id="clickStats" class="uncal-note"></p>
+              <p id="clickBlocked" class="uncal-note"></p>
+            </article>
             <article class="panel uncal" id="uncalPanel" hidden>
               <div class="panel-head">
                 <div>

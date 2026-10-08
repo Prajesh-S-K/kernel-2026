@@ -832,3 +832,47 @@ test("guided setup: a corrupt stored record is reported and the banner names the
   assert.equal(uncalView({ ...hw({ active: true, dwell: { enabled: true } }), mapping: { mode: "CONFIGURED" } }).banner, "CONFIGURED CONTROL — DWELL CLICK");
   assert.equal(uncalView(hw({ active: true })).banner, "UNCALIBRATED DEMO — LIVE SENSOR");
 });
+
+import { clickView, clickOf } from "../ui/click.js";
+const clickDev = (c, extra = {}) => ({ source: "HARDWARE", connected: true, mapping: { learnedValid: false }, click: { phase: "IDLE", cue: "NONE", step: 0, steps: 7, validation: false, retries: 0, cueMs: 0, progress: 0, reason: "idle", activityMs: 0, ready: false, enabled: false, frame: "FALLBACK", state: "OFF", suppressing: false, accepted: 0, rejected: 0, candidates: 0, clicks: 0, lastReject: "NONE", blocked: "", ...c }, ...extra });
+test("gesture click: hardware only, off by default, enabling is explicit", () => {
+  assert.equal(clickView({ source: "SIMULATED", click: {} }).hardware, false);
+  const idle = clickView(clickDev({}));
+  assert.equal(idle.enabled, false);
+  assert.equal(idle.canEnable, false);
+  assert.equal(idle.canTrainFallback, true);
+  assert.equal(idle.canTrainConfigured, false);
+  const ready = clickView(clickDev({ ready: true, blocked: "start the control session first" }));
+  assert.equal(ready.canEnable, false);
+  assert.match(ready.enableBlocked, /control session/);
+  assert.equal(clickView(clickDev({ ready: true })).canEnable, true);
+  assert.equal(clickView(clickDev({ ready: true }, { mapping: { learnedValid: true } })).canTrainConfigured, true);
+  assert.equal(clickView(clickDev({ ready: true, enabled: true })).canEnable, false);
+});
+test("gesture click: training cues, retries and the ordinary-pointing check", () => {
+  assert.equal(clickView(clickDev({ phase: "REST", cue: "HOLD_STILL" })).big, "HOLD STILL");
+  const countdown = clickView(clickDev({ phase: "EXAMPLE", cue: "COUNTDOWN", cueMs: 1200, step: 2 }));
+  assert.equal(countdown.big, "2");
+  assert.match(countdown.title, /Example 3 of 5/);
+  assert.equal(clickView(clickDev({ phase: "EXAMPLE", cue: "GO" })).big, "GO");
+  assert.match(clickView(clickDev({ phase: "EXAMPLE", cue: "COUNTDOWN", validation: true, step: 5, cueMs: 900 })).title, /Check/);
+  assert.match(clickView(clickDev({ phase: "EXAMPLE", cue: "RETURN_TO_CENTRE", retries: 2, reason: "movement too weak: make it clearer" })).instruction, /Retry 2 of 3/);
+  const confusion = clickView(clickDev({ phase: "CONFUSION_CHECK", activityMs: 2500 }));
+  assert.match(confusion.instruction, /2\.5 of 5\.0 s/);
+  assert.equal(confusion.canCancel, true);
+  assert.equal(confusion.canAccept, false);
+  assert.equal(clickView(clickDev({ phase: "READY" })).canAccept, true);
+  assert.match(clickView(clickDev({ phase: "FAILED", reason: "ordinary pointing triggered this gesture; choose a different movement" })).instruction, /ordinary pointing/);
+});
+test("gesture click: statistics and banners", () => {
+  const on = clickView(clickDev({ ready: true, enabled: true, clicks: 3, accepted: 3, rejected: 1, lastReject: "NO_MATCH", state: "NEUTRAL_WAIT" }));
+  assert.match(on.stats, /Gesture clicks: 3/);
+  assert.match(on.stats, /no match/);
+  const device = (extra, mode) => ({ ...hw({ active: true, ...extra }), mapping: { mode }, click: { enabled: !!extra.gesture } });
+  assert.equal(uncalView(device({}, "OFF")).banner, "UNCALIBRATED DEMO — LIVE SENSOR");
+  assert.equal(uncalView(device({ gesture: true }, "OFF")).banner, "UNCALIBRATED DEMO — GESTURE CLICK");
+  assert.equal(uncalView(device({ gesture: true, dwell: { enabled: true } }, "OFF")).banner, "UNCALIBRATED DEMO — DWELL + GESTURE CLICK");
+  assert.equal(uncalView(device({ gesture: true }, "CONFIGURED")).banner, "CONFIGURED CONTROL — GESTURE CLICK");
+  assert.equal(clickOf({ click: { ready: "yes", progress: 9 } }).ready, false);
+  assert.equal(clickOf({ click: { progress: 9 } }).progress, 1);
+});

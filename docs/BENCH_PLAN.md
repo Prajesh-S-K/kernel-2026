@@ -292,3 +292,33 @@ Software evidence only (synthetic recordings, no hardware): learning for identit
 sideways and two oblique mountings; rejection of wobbles, wrong directions, indistinguishable or non-opposite
 directions; One Euro versus the old EMA (run `./build/nodx_mapping_tests` to print the table). Hardware
 measurement of jitter, drift, gentle response and stopping delay is still to do; every parameter stays START.
+
+## Gesture click (optional, software complete, hardware pending)
+
+Off by default and in memory only. Companion Setup page, "Gesture click": teach for the fallback or for
+configured control (a gesture is bound to the frame it was taught in): hold still, five examples and two
+checks (3-2-1, GO, recording, return to centre), then 5 s of ordinary pointing that must not trigger it.
+Enable it explicitly while control runs. One accepted gesture gives exactly one press and release through
+SelectionManager's pulse path, SafetyManager and HIDManager; after it the gesture must not be repeated until a
+300 ms neutral stretch; while a possible gesture is being recognised the pointer is held and that movement is
+discarded. A failed release faults and stops the session. Dwell stays optional and off; scrolling, drag and
+other gestures stay disabled. The existing hands-free pause/resume and drag gestures are not used here: their
+training requires a saved calibrated profile.
+
+Software evidence only (synthetic recordings, no hardware): `./build/nodx_click_tests` prints acceptance of
+varied gestures and false-click counts over 600 s of ordinary and of hard (heavy wrist roll) pointing, with how
+often the pointer was held. Real-user hit and false-trigger rates are still to measure.
+
+## Attended hardware demonstration (needs a firmware upload; do not flash without authorisation)
+
+1. Fallback pointing: press the enable button, "Start without calibration", confirm left/right/up/down, use
+   the reversal boxes if a direction is wrong, Stop.
+2. Guided mapping: "Start guided setup", follow the cues (hold still, four directions x 3 examples, 4 checks),
+   check the preview dot, Accept; the status says the mapping is in memory only; optionally Save settings.
+3. Smooth configured pointing: press the enable button, "Start configured control"; compare the feel with the
+   fallback; record notes (local only).
+4. Gesture click: "Teach for configured control" (or fallback), five examples, two checks, ordinary pointing;
+   Accept; with the pointer parked over a harmless target tick "Enable gesture click"; make the gesture:
+   one click; stay still: no repeat; make it again after a pause: second click.
+5. Immediate stop: press the enable button (or Stop demo): the pointer and clicks stop at once.
+Never test dragging, held buttons or disconnects with a button held.

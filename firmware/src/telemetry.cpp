@@ -5,7 +5,7 @@
 #include <cstring>
 
 namespace {
-constexpr size_t telemetryBytes = 4096; // an oversize frame is dropped, so keep real headroom
+constexpr size_t telemetryBytes = 5120; // an oversize frame is dropped, so keep real headroom
 constexpr size_t transmitBudgetBytes = 64;
 struct Frame {
     char data[telemetryBytes]{};
@@ -114,6 +114,9 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     static char mapping[mappingJsonCapacity];
     const size_t mappingLength = mappingJson(mapping, sizeof(mapping), s.mappingStatus(now));
     append(buffer, sizeof(buffer), used, ",\"mapping\":%s", mappingLength ? mapping : "{}");
+    static char click[clickJsonCapacity];
+    const size_t clickLength = clickJson(click, sizeof(click), s.clickStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"click\":%s", clickLength ? click : "{}");
 #ifndef NODX_SIMULATED
     // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
     const auto& snap = sensorSnapshot;

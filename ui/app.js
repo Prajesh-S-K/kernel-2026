@@ -4,6 +4,7 @@ import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
 import { mappingView } from './mapping.js';
+import { clickView } from './click.js';
 import {
   BANNER,
   DWELL_NOTE,
@@ -214,6 +215,7 @@ function render(data, applyReports = true) {
   }
   renderUncal(data);
   renderMapping(data);
+  renderClick(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -412,6 +414,25 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+function renderClick(data) {
+  const view = clickView(data);
+  $('clickPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('clickTag').textContent = view.enabled ? 'ENABLED' : view.training ? 'TEACHING' : 'OFF';
+  $('clickTitle').textContent = view.title;
+  $('clickBig').textContent = view.big;
+  $('clickBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('clickInstruction').textContent = view.instruction;
+  $('clickTrainFallback').disabled = !view.canTrainFallback;
+  $('clickTrainConfigured').disabled = !view.canTrainConfigured;
+  $('clickAccept').disabled = !view.canAccept;
+  $('clickCancel').disabled = !view.canCancel;
+  $('clickClear').disabled = !view.canClear;
+  $('clickEnable').disabled = !view.canEnable && !view.enabled;
+  $('clickEnable').checked = view.enabled;
+  $('clickStats').textContent = view.stats;
+  $('clickBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+}
 function renderMapping(data) {
   const view = mappingView(data);
   $('mapPanel').hidden = !view.hardware;
@@ -495,6 +516,16 @@ $('reconnect').onclick = async () => {
     toast(`Reconnect failed: ${error.message}`);
   }
 };
+for (const [id, extra] of [
+  ['clickTrainFallback', { op: 'train', frame: 'fallback' }],
+  ['clickTrainConfigured', { op: 'train', frame: 'configured' }],
+  ['clickAccept', { op: 'accept' }],
+  ['clickCancel', { op: 'cancel' }],
+  ['clickClear', { op: 'clear' }],
+])
+  $(id).onclick = () => action('click', extra);
+$('clickEnable').onchange = () =>
+  action('click', { op: 'enable', enabled: $('clickEnable').checked });
 for (const [id, action_, extra] of [
   ['mapStart', 'map', { op: 'start' }],
   ['mapAccept', 'map', { op: 'accept' }],

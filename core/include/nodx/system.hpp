@@ -1,5 +1,6 @@
 #pragma once
 #include "calibration.hpp"
+#include "clickgesture.hpp"
 #include "fault.hpp"
 #include "handsfree.hpp"
 #include "mapping.hpp"
@@ -123,6 +124,17 @@ public:
     bool learnedValid() const {
         return learnedValid_;
     }
+    // Gesture click: train in RAM (needs no profile), then enable explicitly while a session runs.
+    bool clickTrainStart(uint32_t now, bool configuredFrame);
+    void clickTrainCancel();
+    bool clickTrainAccept();
+    void clickClear();
+    bool setClickGesture(bool on, uint32_t now);
+    const char* clickBlocker() const; // why enabling is not possible (nullptr when it is)
+    ClickStatus clickStatus(uint32_t now) const;
+    bool clickGestureEnabled() const {
+        return uncal_ && clickEnabled_;
+    }
     bool uncalibratedDwell() const {
         return uncal_ && uncalDwell_;
     }
@@ -188,6 +200,14 @@ private:
     MappingTeacher teacher_;
     ControlProcessor controlProc_;
     Vec3 lastAccel_{0, 0, 1};
+    // Optional gesture click (RAM only; off until explicitly enabled; cleared by every stop).
+    enum class TeachKind { Mapping, Click };
+    TeachKind teachKind_ = TeachKind::Mapping;
+    ClickTrainer clickTrainer_;
+    ClickRecognizer clickRec_;
+    ClickTemplate clickTemplate_;
+    bool clickReady_ = false, clickConfiguredFrame_ = false, clickEnabled_ = false;
+    bool clickTrainingConfigured_ = false;
     bool uncalDwell_ = false;
     uint32_t uncalDwellMs_ = start::uncalDwellMs;
     float uncalDwellTolerance_ = start::uncalDwellTolerance;
@@ -200,6 +220,7 @@ private:
     bool uncalReverseX_ = false, uncalReverseY_ = false; // RAM only, user controls
     uint32_t refused_ = 0;
 
+    Vec3 clickFrame(const MotionSample& raw, const MotionSample& mapped, bool configuredFrame) const;
     const char* sessionBlocker(bool configured) const;
     bool startSession(uint32_t now, bool configured);
     void enterSafe(FaultCode fault, uint32_t now);

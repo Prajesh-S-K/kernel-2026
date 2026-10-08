@@ -92,6 +92,10 @@ qualification; a held switch must release and the user must resume explicitly.
 | Direction checks | right vs left and up vs down cosine at most -0.8; horizontal vs vertical |cosine| at most 0.5 | cosine | START; rejects inconsistent or indistinguishable directions |
 | Learned gain | 300 / (mean taught rotation in degrees), clamped 3 to 40 px/deg per direction | px/deg | START; 300 is a guess at a comfortable travel |
 | Mounting guard | gravity direction within 25 degrees of the one measured while teaching | degrees | START; larger changes need a new teaching |
+| Gesture click: training | 1.5 s stillness within 6 s; 5 examples + 2 checks, 3 retries each; then 5 s of ordinary pointing must not trigger it | s / count | START |
+| Gesture click: segmentation | enter max(25, 8 sigma) deg/s, exit max(8, 4 sigma), calm 150 ms ends it; duration 250-1500 ms; peak at least 30 deg/s | deg/s / ms | START |
+| Gesture click: matching | 16-point time-normalised trace of the 3-axis gyro vector; accepted when the relative RMS distance is at most 1.6 x the worst leave-one-out training error, clamped 0.25-0.5; duration within 0.5-2x the taught mean | ratio | EXPERIMENTAL START; thresholds chosen on synthetic data only |
+| Gesture click: false-trigger guards | a candidate only opens when the principal axis of the taught gesture dominates the other axes by 1.5x and starts with the taught sign; principal-axis energy share at least 0.6; 300 ms of neutral needed before rearming | ratio / ms | START; in the hard synthetic case (wrist roll larger than the sweep) candidates froze the pointer for about 15 percent of the time, which needs real measurement |
 
 Templates learned in training are also START values: they are stored per user and marked unvalidated
 until measured. The record format bounds are defensive software limits, not human limits.

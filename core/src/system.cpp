@@ -77,6 +77,7 @@ void System::resetInteraction(uint32_t now) {
     selection_.reset(lastRaw_, now);
     processor_.reset();
     controlProc_.reset();
+    clickRec_.reset(now);
     hid_.reset();
     diagnostics_.motion = {};
     dragging_ = false;
@@ -105,7 +106,11 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
     if (state_ == SystemState::Teaching) {
         teacher_.cancel();
     }
+    if (state_ == SystemState::Teaching && teachKind_ == TeachKind::Click) {
+        clickTrainer_.cancel();
+    }
     configured_ = false;
+    clickEnabled_ = false;
     state_ = SystemState::SafeState;
     uncal_ = false; // a fault always ends the demo; restarting is explicit
     uncalDwell_ = false;
@@ -124,6 +129,7 @@ void System::stop(SystemState next, uint32_t now) {
         teacher_.cancel();
     }
     configured_ = false;
+    clickEnabled_ = false;
     uncal_ = false; // every stop path (pause, calibration, training, ...) ends the demo
     uncalDwell_ = false; // dwell clicking never outlives the demo
     if (state_ == SystemState::Training && next != SystemState::Training) {
@@ -292,7 +298,14 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         lastAccel_ = {raw.accel[0], raw.accel[1], raw.accel[2]};
     }
     const MotionSample mapped = axes.apply(raw);
-    if (state_ == SystemState::Teaching && inputsValid) {
+    if (state_ == SystemState::Teaching && inputsValid && teachKind_ == TeachKind::Click) {
+        clickTrainer_.tick(clickFrame(raw, mapped, clickTrainingConfigured_), now);
+        if (clickTrainer_.phase() == ClickPhase::Failed) {
+            const char* why = clickTrainer_.status(now).reason;
+            stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, now);
+            diagnostics_.reason = why;
+        }
+    } else if (state_ == SystemState::Teaching && inputsValid) {
         teacher_.tick(raw, now);
         if (teacher_.phase() == MapPhase::Failed) {
             const char* why = teacher_.status(now).reason;
@@ -306,7 +319,13 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (state_ == SystemState::Training && inputsValid) {
         advanceTraining(mapped, now);
     }
-    const bool recognizing = handsFree && updateGestures(mapped, now, inputsValid);
+    bool recognizing = handsFree && updateGestures(mapped, now, inputsValid);
+    bool gestureClick = false;
+    const bool clickActive = uncal_ && clickEnabled_ && inputsValid && state_ == SystemState::Active;
+    if (clickActive) {
+        gestureClick = clickRec_.update(clickFrame(raw, mapped, configured_), now).accepted;
+        recognizing = recognizing || clickRec_.suppressing(); // candidate: pointer stops, no replay
+    }
 
     // Defensive: control never stays active while the maintained switch inhibits it.
     if (handsFree && !uncal_ && state_ == SystemState::Active && !enable_.permitted()) {
@@ -356,7 +375,11 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (dwellClicking && outputAllowed) {
         // Explicitly enabled dwell in the uncalibrated demo: the normal selection manager with the
         // demo profile. No raw switch, no scrolling; hold/drag can never come out of it.
-        selected = selection_.update(false, x_, y_, true, false, control, now);
+        if (recognizing) {
+            selection_.interrupt(); // no dwell click while a gesture candidate is open
+        } else {
+            selected = selection_.update(false, x_, y_, true, false, control, now);
+        }
         selected.down = false;
     } else if (movementOnly && outputAllowed) {
         selection_.interrupt(); // movement-only demo: no dwell click, no selection, no drag
@@ -370,11 +393,17 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (handsFree && outputAllowed && dragging_) {
         selected.down = true;
     }
+    const bool gestureClicking = gestureClick && outputAllowed;
+    if (gestureClicking) {
+        selection_.interrupt();
+        selected.pulse = true; // exactly one press/release pair through the normal pipeline
+        selected.down = false;
+    }
     Command command = interaction_.compose(intent, selected);
     if (movementOnly) {
         const float limit = uncal_ ? start::uncalDemoMaxStep : start::demoMaxStep;
         command.down = false;
-        command.pulse = command.pulse && dwellClicking;
+        command.pulse = command.pulse && (dwellClicking || gestureClicking);
         command.wheel = 0;
         command.dx = std::clamp(command.dx, -limit, limit);
         command.dy = std::clamp(command.dy, -limit, limit);
@@ -386,7 +415,7 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
         hid_.reset(); // no fractional movement survives a suppressed or inactive period
     }
     const bool delivered = hid_.emit(safeCommand);
-    if (dwellClicking && safeCommand.pulse) {
+    if ((dwellClicking || gestureClicking) && safeCommand.pulse) {
         ++uncalClicks_;
     }
     if (safety_.calculationFault) {
@@ -796,6 +825,7 @@ bool System::startSession(uint32_t now, bool configured) {
         return false;
     }
     uncalDwell_ = false; // every start is movement-only until dwell is enabled again
+    clickEnabled_ = false; // ... and until the gesture click is enabled again
     configured_ = configured;
     uncalProfile_ = uncalibratedDemoProfile();
     if (!emitStationary()) {
@@ -817,6 +847,112 @@ bool System::startUncalibratedDemo(uint32_t now) {
 }
 bool System::startConfiguredControl(uint32_t now) {
     return startSession(now, true);
+}
+
+Vec3 System::clickFrame(const MotionSample& raw, const MotionSample& mapped,
+                        bool configuredFrame) const {
+    if (configuredFrame) {
+        const Vec3 g{raw.gyro[0], raw.gyro[1], raw.gyro[2]};
+        return {dot(learned_.horizontal, g), dot(learned_.vertical, g), dot(learned_.rollRow(), g)};
+    }
+    return {mapped.gyro[0], mapped.gyro[1], mapped.gyro[2]};
+}
+const char* System::clickBlocker() const {
+    if (!uncal_ || state_ != SystemState::Active) {
+        return "start the control session first";
+    }
+    if (!clickReady_) {
+        return "teach the click gesture first";
+    }
+    if (clickConfiguredFrame_ != configured_) {
+        return clickConfiguredFrame_ ? "this gesture was taught for configured control"
+                                     : "this gesture was taught for the uncalibrated fallback";
+    }
+    return nullptr;
+}
+bool System::clickTrainStart(uint32_t now, bool configuredFrame) {
+    if (configuredFrame && !learnedValid_) {
+        diagnostics_.reason = "no learned mapping: teach the movements first";
+        return false;
+    }
+    if (const char* blocker = teachBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    stop(SystemState::Teaching, now);
+    if (state_ != SystemState::Teaching) {
+        return false;
+    }
+    teachKind_ = TeachKind::Click;
+    clickTrainingConfigured_ = configuredFrame;
+    clickTrainer_.begin(now);
+    diagnostics_.reason = "gesture click training: hold the assembly completely still";
+    return true;
+}
+void System::clickTrainCancel() {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Click) {
+        return;
+    }
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ != SystemState::SafeState) {
+        diagnostics_.reason = "gesture training cancelled; the previous gesture is kept";
+    }
+}
+bool System::clickTrainAccept() {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Click ||
+        !clickTrainer_.accept()) {
+        return false;
+    }
+    const ClickTemplate result = clickTrainer_.result();
+    const bool frame = clickTrainingConfigured_;
+    stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
+    if (state_ == SystemState::SafeState || !result.valid()) {
+        return false;
+    }
+    clickTemplate_ = result;
+    clickReady_ = true;
+    clickConfiguredFrame_ = frame;
+    diagnostics_.reason = "gesture taught (in memory only); enable it explicitly while control runs";
+    return true;
+}
+void System::clickClear() {
+    clickEnabled_ = false;
+    clickReady_ = false;
+}
+bool System::setClickGesture(bool on, uint32_t now) {
+    if (!on) {
+        clickEnabled_ = false;
+        return true;
+    }
+    if (const char* blocker = clickBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    clickRec_.configure(clickTemplate_); // needs a neutral stretch before it arms
+    clickRec_.reset(now);
+    clickEnabled_ = true;
+    diagnostics_.reason = "gesture click enabled";
+    return true;
+}
+ClickStatus System::clickStatus(uint32_t now) const {
+    ClickStatus st;
+    st.train = clickTrainer_.status(now);
+    st.ready = clickReady_;
+    st.enabled = uncal_ && clickEnabled_;
+    st.configuredFrame = clickReady_ ? clickConfiguredFrame_ : clickTrainingConfigured_;
+    st.suppressing = st.enabled && clickRec_.suppressing();
+    st.state = !st.enabled ? "OFF"
+               : clickRec_.state() == ClickRecognizer::State::Armed       ? "ARMED"
+               : clickRec_.state() == ClickRecognizer::State::Candidate    ? "CANDIDATE"
+                                                                           : "NEUTRAL_WAIT";
+    st.lastReject = clickRec_.lastReject;
+    st.accepted = clickRec_.accepted;
+    st.rejected = clickRec_.rejected;
+    st.candidates = clickRec_.candidates;
+    st.clicks = uncalClicks_;
+    const char* blocker = clickBlocker();
+    st.blocked = st.enabled ? "" : (blocker ? blocker : "");
+    return st;
 }
 
 void System::setControlRepository(ControlRepository& repository) {
@@ -857,12 +993,13 @@ bool System::teachStart(uint32_t now) {
     if (state_ != SystemState::Teaching) {
         return false;
     }
+    teachKind_ = TeachKind::Mapping;
     teacher_.begin(now);
     diagnostics_.reason = "mapping teaching: hold the assembly completely still";
     return true;
 }
 void System::teachCancel() {
-    if (state_ != SystemState::Teaching) {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Mapping) {
         return;
     }
     stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
@@ -871,7 +1008,7 @@ void System::teachCancel() {
     }
 }
 bool System::teachAccept() {
-    if (state_ != SystemState::Teaching || !teacher_.accept()) {
+    if (state_ != SystemState::Teaching || teachKind_ != TeachKind::Mapping || !teacher_.accept()) {
         return false;
     }
     const LearnedControl candidate = teacher_.candidate();
@@ -882,6 +1019,9 @@ bool System::teachAccept() {
     learned_ = candidate;
     learnedValid_ = true;
     learnedSaved_ = false;
+    if (clickConfiguredFrame_) {
+        clickReady_ = false; // a gesture taught in the old learned frame no longer applies
+    }
     saveResult_ = "";
     diagnostics_.reason = "mapping accepted and active in memory; not saved yet";
     return true;
@@ -918,6 +1058,9 @@ void System::clearLearned() {
     learnedValid_ = false;
     learnedSaved_ = false;
     saveResult_ = "";
+    if (clickConfiguredFrame_) {
+        clickReady_ = false;
+    }
 }
 MappingStatus System::mappingStatus(uint32_t now) const {
     MappingStatus st = teacher_.status(now);

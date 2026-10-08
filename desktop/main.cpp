@@ -182,6 +182,9 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     char mapping[mappingJsonCapacity];
     const size_t mappingLength = mappingJson(mapping, sizeof mapping, s.mappingStatus(now));
     std::cout << ",\"mapping\":" << (mappingLength ? mapping : "{}");
+    char click[clickJsonCapacity];
+    const size_t clickLength = clickJson(click, sizeof click, s.clickStatus(now));
+    std::cout << ",\"click\":" << (clickLength ? click : "{}");
     std::cout << ",\"reports\":[";
     for (size_t j = 0; j < hid.reports.size(); ++j) {
         const auto& r = hid.reports[j];
@@ -482,6 +485,29 @@ int main(int argc, char** argv) {
                     ok = sys.teachSave();
                 } else if (ok && verb == "clear") {
                     sys.clearLearned();
+                } else {
+                    ok = false;
+                }
+            } else if (op == "click") {
+                std::string verb, value;
+                cmd >> verb;
+                if (verb == "train") {
+                    cmd >> value;
+                    ok = (value == "fallback" || value == "configured") && (cmd >> std::ws).eof() &&
+                         sys.clickTrainStart(now, value == "configured");
+                } else if (verb == "enable") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setClickGesture(value == "on", now);
+                } else if (verb == "cancel" || verb == "accept" || verb == "clear") {
+                    ok = (cmd >> std::ws).eof();
+                    if (ok && verb == "cancel") {
+                        sys.clickTrainCancel();
+                    } else if (ok && verb == "accept") {
+                        ok = sys.clickTrainAccept();
+                    } else if (ok) {
+                        sys.clickClear();
+                    }
                 } else {
                     ok = false;
                 }

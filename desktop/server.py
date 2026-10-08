@@ -115,6 +115,15 @@ def command_for(data):
         raise ValueError("Invalid hands-free request")
     if action == "calibrate":
         return "calibrate guided" if data.get("guided") is True else "calibrate"
+    if action == "click":
+        operation = data.get("op")
+        if operation == "train" and data.get("frame") in ("fallback", "configured"):
+            return f"click train {data['frame']}"
+        if operation in ("cancel", "accept", "clear"):
+            return f"click {operation}"
+        if operation == "enable":
+            return "click enable " + ("on" if required_boolean(data, "enabled") else "off")
+        raise ValueError("Invalid click request")
     if action in ("map", "control"):
         operation = data.get("op")
         allowed = {
