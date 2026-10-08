@@ -37,6 +37,7 @@ def artifact_paths():
         "build/nodx_handsfree_tests",
         "build/nodx_firmware_sim_tests",
         "build/nodx_firmware_hw_tests",
+        "build/nodx_diag_tests",
     ] + [f".pio/build/{environment}/{image}" for environment in ENVIRONMENTS for image in IMAGES]
 
 

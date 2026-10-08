@@ -74,6 +74,9 @@ desktop and mobile layout, keyboard-accessible named controls, quiet live region
 
 ### Hardware gate additions (all still required)
 
+The stage-by-stage bench procedure, bench PlatformIO environments and local logging tools are in
+[BENCH_PLAN](BENCH_PLAN.md) (prepared; nothing has been run on hardware).
+
 | Order | Acceptance evidence to record |
 |---|---|
 | Enable button / switch | Wiring (GPIO4 to one contact pair, GND to the other, no 3V3/5V; pairs found by continuity testing), clean waveform and real bounce of the exact tactile switch on press and release; the disabling press releases within one loop pass with the sensor stalled; held-at-power-up; unconfigured/disconnected input inhibits; behaviour with a floating input; whether a glitch disabling control is acceptable |

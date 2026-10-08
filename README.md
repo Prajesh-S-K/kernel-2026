@@ -19,7 +19,8 @@ Install the pinned development tools in BUILD_GUIDE, then run all software check
 
 | Read | Purpose |
 |---|---|
-| [HANDS_FREE_SPEC](docs/HANDS_FREE_SPEC.md) | Hands-free interaction, gestures, enable switch, configuration and recovery |
+| [HANDS_FREE_SPEC](docs/HANDS_FREE_SPEC.md) | Hands-free interaction, gestures, enable button/switch, configuration and recovery |
+| [BENCH_PLAN](docs/BENCH_PLAN.md) | Breadboard bring-up stages, bench environments and local logging (prepared, not yet run) |
 | [MASTER_BLUEPRINT](docs/MASTER_BLUEPRINT.md) | Frozen scope, architecture, module responsibilities and state transitions |
 | [BUILD_GUIDE](docs/BUILD_GUIDE.md) | Desktop, replay, firmware and later USB companion setup |
 | [TEST_PLAN](docs/TEST_PLAN.md) | Test coverage and physical acceptance gates |
