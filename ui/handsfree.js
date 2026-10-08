@@ -22,6 +22,11 @@ const EMPTY = Object.freeze({
     permitted: false,
     switchless: false,
     switchlessStaged: false,
+    kind: 'MAINTAINED', // how the enable input is read; older engines only had a maintained switch
+    kindStaged: 'MAINTAINED',
+    pressed: false, // raw input (button down), NOT a permission
+    latched: false, // momentary button: the permission latch
+    armed: false,
   },
   gesture: {
     state: 'WAIT_NEUTRAL',
@@ -72,11 +77,26 @@ export function modeLabel(mode) {
     }[mode] || 'UNKNOWN MODE'
   );
 }
+export const isButton = (hf) => hf.switch.kind === 'MOMENTARY';
 export function switchLabel(hf) {
   if (hf.mode !== 'HANDS_FREE' && hf.mode !== 'CONFIG_INVALID') return 'Not used in legacy mode';
   if (!hf.switch.present)
     return hf.switch.switchless ? 'Qualified without a switch' : 'NOT CONFIGURED';
+  if (isButton(hf))
+    return hf.switch.permitted
+      ? 'PERMITTED · enable button latched'
+      : 'DISABLED · press enable button';
   return hf.switch.permitted ? 'ON · control permitted' : 'OFF · control inhibited';
+}
+// The raw button, kept apart from the permission it toggles.
+export function buttonLabel(hf) {
+  if (!isButton(hf)) return '';
+  return hf.switch.pressed ? 'PRESSED' : 'released';
+}
+export function enableKindLabel(kind) {
+  return kind === 'MOMENTARY'
+    ? 'Push button (one press permits, the next disables)'
+    : 'Maintained switch (compatibility: its position is the permission)';
 }
 
 export function setupSteps(device) {
@@ -85,6 +105,10 @@ export function setupSteps(device) {
   const detail = (index) =>
     hf.staged[index] ? 'Staged, not saved yet' : hf.stored[index] ? 'Saved' : 'Not trained';
   const switchReady = !!(hf.switch.present || hf.switch.switchless || hf.switch.switchlessStaged);
+  const kindText =
+    hf.switch.kindStaged !== hf.switch.kind
+      ? `Input type staged: ${enableKindLabel(hf.switch.kindStaged)}. Not saved yet`
+      : enableKindLabel(hf.switch.kind);
   const steps = [
     {
       id: 'calibrate',
@@ -101,13 +125,13 @@ export function setupSteps(device) {
     { id: 'drag', title: 'Train the drag gesture', done: learned(1), detail: detail(1) },
     {
       id: 'switch',
-      title: 'Confirm the control-enable switch',
+      title: 'Confirm the control-enable input',
       done: switchReady,
       detail: hf.switch.present
-        ? 'A maintained switch is configured'
+        ? kindText
         : hf.switch.switchless || hf.switch.switchlessStaged
           ? 'Alternative without a switch qualified by the helper'
-          : 'No switch configured: control stays inhibited unless an alternative is qualified',
+          : 'No enable input configured: control stays inhibited unless an alternative is qualified',
     },
     {
       id: 'commit',
@@ -207,8 +231,20 @@ export function recoveryGuidance(device) {
   } else if (hf.mode === 'HANDS_FREE' && !hf.switch.present && !hf.switch.switchless) {
     title = 'No enable switch configured';
     lines.push(
-      'Hands-free control stays inhibited without a configured control-enable switch.',
-      'Wire the switch, or have a helper qualify an alternative during setup.',
+      'Hands-free control stays inhibited without a configured control-enable switch or button.',
+      'Wire the enable input, or have a helper qualify an alternative during setup.',
+    );
+  } else if (
+    hf.mode === 'HANDS_FREE' &&
+    hf.switch.present &&
+    isButton(hf) &&
+    !hf.switch.permitted
+  ) {
+    title = 'Control is disabled';
+    lines.push(
+      'Press the enable button once to permit control. A button that was held when the device started must be released first.',
+      'Permitting does not start control: use your resume gesture afterwards.',
+      'Permission is never saved: it is lost when the device restarts and whenever a fault occurs.',
     );
   } else if (hf.mode === 'HANDS_FREE' && hf.switch.present && !hf.switch.permitted) {
     title = 'Control switch is OFF';
@@ -223,7 +259,9 @@ export function recoveryGuidance(device) {
       hf.drag
         ? 'Dragging: perform the drag gesture to release.'
         : 'Perform the drag gesture to start a drag.',
-      'Perform the pause gesture to stop, or switch the control switch OFF.',
+      isButton(hf)
+        ? 'Perform the pause gesture to stop, or press the enable button to disable control at once.'
+        : 'Perform the pause gesture to stop, or switch the control switch OFF.',
     );
   } else if (device?.state === 'PAUSED' || device?.state === 'READY') {
     title = device.state === 'PAUSED' ? 'Paused' : 'Ready';

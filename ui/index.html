@@ -243,9 +243,10 @@
                 </button>
                 <div id="studioHandsFree" class="hf-group">
                   <span class="eyebrow">HANDS-FREE · SIMULATED INPUT</span>
-                  <label class="toggle"
-                    ><input type="checkbox" id="enableSwitch" checked /> Control-enable switch
-                    ON</label
+                  <label class="toggle" id="enableSwitchRow"
+                    ><input type="checkbox" id="enableSwitch" /> Maintained enable switch ON</label
+                  ><button id="enableButton" class="quiet wide" hidden>
+                    Hold to press the enable button</button
                   ><button id="gesturePause" class="quiet wide">
                     Perform pause / resume gesture</button
                   ><button id="gestureDrag" class="quiet wide">Perform drag gesture</button>
@@ -339,8 +340,11 @@
             <div class="page-top">
               <div>
                 <span class="eyebrow">04 / HANDS-FREE SETUP</span>
-                <h1>No buttons.<br /><em>Just you.</em></h1>
-                <p>A helper trains two gestures once. Daily use needs no button presses.</p>
+                <h1>No selection buttons.<br /><em>Just you.</em></h1>
+                <p>
+                  A helper trains two gestures once. The only physical control is one enable button
+                  that permits or disables control; it never selects, pauses or resumes.
+                </p>
               </div>
               <div class="session">
                 <span class="eyebrow">INTERACTION MODE</span
@@ -355,13 +359,28 @@
                   <span class="eyebrow">HELPER SETUP</span><span class="tag">HELPER ONLY</span>
                 </div>
                 <ol id="hfSteps" class="hf-steps"></ol>
-                <label class="toggle"
-                  ><input type="checkbox" id="hfSwitchless" /> Qualify control without an enable
-                  switch (helper decision)</label
+                <label class="hf-field"
+                  >Enable input (helper decision)
+                  <select id="hfEnableKind">
+                    <option value="momentary">
+                      Push button: one press permits, the next disables (default)
+                    </option>
+                    <option value="maintained">
+                      Maintained switch: its position is the permission (compatibility)
+                    </option>
+                  </select></label
                 >
                 <p class="caption">
-                  Normally one maintained enable switch permits control. Only qualify this if no
-                  switch can be used; control then cannot be disabled by a switch.
+                  Wire the button between the enable GPIO and GND. Permission is never saved: it is
+                  off after every restart and fault, and permitting never resumes control.
+                </p>
+                <label class="toggle"
+                  ><input type="checkbox" id="hfSwitchless" /> Qualify control without an enable
+                  input (helper decision)</label
+                >
+                <p class="caption">
+                  Only qualify this if no switch or button can be used; control then cannot be
+                  disabled by an input.
                 </p>
                 <div class="actions">
                   <button id="hfCommit" class="primary">Convert and save setup</button

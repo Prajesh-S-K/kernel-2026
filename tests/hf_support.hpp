@@ -143,8 +143,14 @@ struct HF {
     TestHID transport;
     std::unique_ptr<System> sys;
     uint32_t now = 0;
+    // Raw enable input: maintained switch ON / push button pressed.
     bool sw = true;
-    explicit HF(bool saveProfile = true) {
+    // Existing tests exercise the maintained-switch compatibility configuration; button tests build
+    // the rig with EnableKind::Momentary (input released at power-up).
+    EnableKind kind = EnableKind::Maintained;
+    explicit HF(bool saveProfile = true, EnableKind enableKind = EnableKind::Maintained)
+        : kind(enableKind) {
+        sw = kind == EnableKind::Maintained;
         if (saveProfile) {
             require(repo.save(UserProfile{}), "profile save");
         }
@@ -193,12 +199,27 @@ struct HF {
     void setup() {
         require(trainGesture(GestureId::PauseResume, "nod2"), "train pause");
         require(trainGesture(GestureId::Drag, "tilt2"), "train drag");
+        s().stageEnableKind(kind);
         require(s().commitHandsFree(), "commit");
     }
-    // Setup, then qualify and resume. Leaves control ACTIVE and neutral.
+    // One complete push-button press and stable release (button kind only).
+    void click(unsigned pressMs = 60, unsigned releaseMs = 60) {
+        sw = true;
+        quiet(pressMs);
+        sw = false;
+        quiet(releaseMs);
+    }
+    // Setup, then qualify and resume. Leaves control ACTIVE and neutral. With the push button the
+    // permission is first latched by one press; the resume itself stays a separate explicit step.
     void active() {
         setup();
         quiet(500);
+        if (kind == EnableKind::Momentary) {
+            sw = false;
+            quiet(100);
+            click();
+            require(s().handsFreeStatus().permitted, "button did not permit control");
+        }
         require(s().resume(), "resume");
         quiet(400);
     }

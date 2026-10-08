@@ -61,14 +61,17 @@ public:
     void invalidateProfile();
 
     // Hands-free mode. Everything here is a validated command; none of it resumes control.
-    void configureEnableInput(bool present);      // adapter: is a maintained switch wired?
-    void setControlSwitch(bool on, uint32_t now); // adapter: raw switch level, every loop pass
-    bool trainStart(GestureId id, uint32_t now);  // helper: stops output, begins training
+    void configureEnableInput(bool present); // adapter: is an enable switch/button wired?
+    // Adapter, every loop pass: the RAW input (switch ON / button pressed). What it means depends
+    // on the stored EnableKind; a disable is applied here at once, without waiting for a sample.
+    void setControlSwitch(bool active, uint32_t now);
+    bool trainStart(GestureId id, uint32_t now); // helper: stops output, begins training
     void trainCancel();
-    bool trainAccept();                   // stage the validated pattern (not saved)
-    bool commitHandsFree();               // helper: convert + save, READY afterwards
-    bool useLegacyMode();                 // helper: explicit compatibility mode
-    void stageSwitchless(bool qualified); // helper: alternative to the enable switch
+    bool trainAccept();                    // stage the validated pattern (not saved)
+    bool commitHandsFree();                // helper: convert + save, READY afterwards
+    bool useLegacyMode();                  // helper: explicit compatibility mode
+    void stageSwitchless(bool qualified);  // helper: alternative to the enable switch
+    void stageEnableKind(EnableKind kind); // helper: maintained switch or momentary button
     HandsFreeStatus handsFreeStatus() const;
     const char* activationBlocker() const; // nullptr when resume would be allowed
 
@@ -114,6 +117,7 @@ private:
     std::array<GestureTemplate, gestureCount> stagedTemplates_{};
     float stagedNeutral_ = 0;
     bool stagedSwitchless_ = false;
+    EnableKind stagedKind_ = EnableKind::Momentary; // a new setup assumes the push button
     bool dragging_ = false;
     uint32_t refused_ = 0;
 

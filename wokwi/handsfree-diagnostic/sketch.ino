@@ -1,20 +1,31 @@
-// NodX Adapt - Wokwi DIAGNOSTIC (sensor + control switch only).
-// No BLE, no mouse output. Just prints what the sensor and switch report.
+// NodX Adapt - Wokwi DIAGNOSTIC (sensor + ONE momentary enable button).
+// No BLE, no mouse output. Just prints what the sensor and the button report.
+//
+// The button is a four-pin momentary tactile pushbutton wired GPIO4 <-> GND (INPUT_PULLUP, pressed =
+// LOW). It is only a control-ENABLE toggle: it never selects, pauses or resumes anything. The sketch
+// keeps the RAW pressed state apart from the LATCHED permission it toggles, mirroring the firmware:
+//   * the permission is DISABLED at every boot, whatever the button is doing;
+//   * a button held at boot enables nothing: release it (stably), then press once;
+//   * one debounced press enables; the next press disables at its first edge;
+//   * holding toggles only once; a stable release is required before the next press.
 #include <Wire.h>
 
 const int PIN_SDA = 8;       // START value, not qualified wiring
 const int PIN_SCL = 9;       // START value, not qualified wiring
-const int PIN_SWITCH = 4;    // START value, not qualified wiring
+const int PIN_BUTTON = 4;    // START value, not qualified wiring
 const uint8_t MPU_ADDR = 0x68;   // AD0 tied to GND
 const uint8_t REG_WHO_AM_I = 0x75, REG_PWR_MGMT_1 = 0x6B, REG_DATA = 0x3B;
 const uint8_t EXPECTED_ID = 0x68;
 const unsigned long PERIOD_MS = 200;     // 5 Hz
-const unsigned long ON_STABLE_MS = 30;   // ON must be stable this long
+const unsigned long DEBOUNCE_MS = 30;    // press / release must be stable this long
 
 bool sensorOk = false;
-bool switchOn = false;            // accepted (debounced) state
-bool lastRawOn = false;
-unsigned long rawChangedAt = 0, lastReadAt = 0, lastProbeAt = 0;
+bool pressed = false;             // RAW button state (LOW on GPIO4); not a permission
+bool latched = false;             // LATCHED permission toggled by accepted presses
+bool armed = false;               // a stable release has been seen since the last accepted press
+bool pressTracked = false, releaseTracked = false;
+unsigned long pressSince = 0, releaseSince = 0, toggles = 0;
+unsigned long lastReadAt = 0, lastProbeAt = 0;
 unsigned long goodReads = 0, failedReads = 0;
 
 bool readBytes(uint8_t reg, uint8_t *buf, uint8_t n) {
@@ -53,19 +64,33 @@ bool initSensor(int attempts) {
   return false;
 }
 
-void printSwitch() {
-  Serial.println(switchOn ? "CONTROL SWITCH: ON (permitted)"
-                          : "CONTROL SWITCH: OFF (inhibited)");
+void printPermission() {
+  Serial.println(latched ? "CONTROL ENABLED (latched; control is NOT resumed by this)"
+                         : "CONTROL DISABLED");
 }
 
-void updateSwitch() {
-  bool rawOn = (digitalRead(PIN_SWITCH) == LOW);   // LOW = switch ON
+// Same rules as the firmware's momentary enable gate.
+void updateButton() {
   unsigned long now = millis();
-  if (rawOn != lastRawOn) { lastRawOn = rawOn; rawChangedAt = now; }
-  bool newState = switchOn;
-  if (!rawOn) newState = false;                                 // OFF: immediate
-  else if (now - rawChangedAt >= ON_STABLE_MS) newState = true; // ON: after 30 ms
-  if (newState != switchOn) { switchOn = newState; printSwitch(); }
+  pressed = (digitalRead(PIN_BUTTON) == LOW);
+  if (!pressed) {
+    pressTracked = false;
+    if (!releaseTracked) { releaseTracked = true; releaseSince = now; }
+    if (!armed && now - releaseSince >= DEBOUNCE_MS) armed = true;   // stable release seen
+    return;
+  }
+  releaseTracked = false;
+  if (!armed) return;              // held at boot, same press, or bouncing: nothing to accept
+  if (latched) {                   // disable at the first press edge (fail safe)
+    latched = false; armed = false; pressTracked = false; toggles++;
+    printPermission();
+    return;
+  }
+  if (!pressTracked) { pressTracked = true; pressSince = now; }
+  if (now - pressSince >= DEBOUNCE_MS) {   // one debounced press enables, exactly once
+    latched = true; armed = false; pressTracked = false; toggles++;
+    printPermission();
+  }
 }
 
 void setup() {
@@ -73,20 +98,26 @@ void setup() {
   delay(1000);
   Serial.println();
   Serial.println("=== NodX Adapt DIAGNOSTIC: no BLE, no mouse output ===");
-  Serial.println("GPIO4 (switch), GPIO8 (SDA), GPIO9 (SCL) are START values,");
+  Serial.println("GPIO4 (enable button), GPIO8 (SDA), GPIO9 (SCL) are START values,");
   Serial.println("not qualified wiring. Check real hardware before wiring.");
-  pinMode(PIN_SWITCH, INPUT_PULLUP);
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(100000);
   Wire.setTimeOut(20);   // ms, bounded I2C wait
-  lastRawOn = switchOn = (digitalRead(PIN_SWITCH) == LOW);
-  printSwitch();
+  // Control is DISABLED at boot whatever the button state; a held button must be released first.
+  pressed = (digitalRead(PIN_BUTTON) == LOW);
+  latched = false;
+  armed = false;
+  printPermission();
+  Serial.println(pressed ? "Button is HELD at boot: release it, then press once to enable."
+                         : "Press the enable button once to enable control.");
   sensorOk = initSensor(5);
   lastProbeAt = millis();
 }
 
 void loop() {
-  updateSwitch();
+  delay(1);   // keeps the simulator light; far finer than the 30 ms debounce
+  updateButton();
   unsigned long now = millis();
 
   if (!sensorOk) {
@@ -108,6 +139,7 @@ void loop() {
   float ax = s16(0) / 16384.0f, ay = s16(2) / 16384.0f, az = s16(4) / 16384.0f;
   float tempC = s16(6) / 340.0f + 36.53f;
   float gx = s16(8) / 131.0f, gy = s16(10) / 131.0f, gz = s16(12) / 131.0f;
-  Serial.printf("accel g: %6.2f %6.2f %6.2f | gyro dps: %7.1f %7.1f %7.1f | %.1f C | switch %s | ok=%lu fail=%lu\n",
-                ax, ay, az, gx, gy, gz, tempC, switchOn ? "ON" : "OFF", goodReads, failedReads);
+  Serial.printf("accel g: %6.2f %6.2f %6.2f | gyro dps: %7.1f %7.1f %7.1f | %.1f C | button %s | control %s | toggles=%lu | ok=%lu fail=%lu\n",
+                ax, ay, az, gx, gy, gz, tempC, pressed ? "PRESSED" : "released",
+                latched ? "ENABLED" : "DISABLED", toggles, goodReads, failedReads);
 }

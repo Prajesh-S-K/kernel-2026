@@ -6,6 +6,9 @@ import {
   isHandsFree,
   modeLabel,
   recoveryGuidance,
+  buttonLabel,
+  enableKindLabel,
+  isButton,
   setupSteps,
   switchLabel,
   trainingView,
@@ -549,4 +552,129 @@ test("the Lab logs interaction identity, gesture interruptions and the abort rea
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+const button = (over = {}) =>
+  handsFree({
+    switch: {
+      present: true,
+      on: false,
+      permitted: false,
+      switchless: false,
+      switchlessStaged: false,
+      kind: "MOMENTARY",
+      kindStaged: "MOMENTARY",
+      pressed: false,
+      latched: false,
+      armed: true,
+      ...over,
+    },
+  });
+
+test("older engines and maintained records read as a maintained switch, never a button", () => {
+  assert.equal(isButton(handsFreeOf({})), false);
+  assert.equal(isButton(handsFreeOf({ handsFree: handsFree() })), false);
+  assert.match(
+    switchLabel(handsFreeOf({ handsFree: handsFree() })),
+    /ON · control permitted/,
+  );
+  assert.equal(buttonLabel(handsFreeOf({ handsFree: handsFree() })), "");
+});
+
+test("the raw button state and the latched permission are labelled separately", () => {
+  const held = handsFreeOf({
+    handsFree: button({
+      pressed: true,
+      latched: true,
+      permitted: true,
+      on: true,
+    }),
+  });
+  assert.equal(buttonLabel(held), "PRESSED");
+  assert.match(switchLabel(held), /PERMITTED/);
+  const released = handsFreeOf({
+    handsFree: button({
+      pressed: false,
+      latched: true,
+      permitted: true,
+      on: true,
+    }),
+  });
+  assert.equal(buttonLabel(released), "released");
+  assert.match(
+    switchLabel(released),
+    /PERMITTED/,
+    "released does not mean disabled",
+  );
+  const disabled = handsFreeOf({ handsFree: button() });
+  assert.match(switchLabel(disabled), /DISABLED · press enable button/);
+  assert.equal(buttonLabel(disabled), "released");
+});
+
+test("button guidance: disabled explains press, never-resume, and loss on restart or fault", () => {
+  const guide = recoveryGuidance({
+    state: "PAUSED",
+    hasProfile: true,
+    faultCode: "NONE",
+    handsFree: button(),
+  });
+  assert.match(guide.title, /disabled/i);
+  const text = guide.lines.join(" ");
+  assert.match(text, /Press the enable button once/);
+  assert.match(text, /does not start control/);
+  assert.match(text, /never saved/);
+  assert.match(text, /held when the device started/);
+});
+
+test("active guidance tells the user the button disables control at once", () => {
+  const guide = recoveryGuidance({
+    state: "ACTIVE",
+    hasProfile: true,
+    faultCode: "NONE",
+    handsFree: button({ permitted: true, latched: true, on: true }),
+  });
+  assert.match(
+    guide.lines.join(" "),
+    /press the enable button to disable control at once/,
+  );
+});
+
+test("the setup step names the input kind and flags an unsaved change of kind", () => {
+  const saved = setupSteps({
+    hasProfile: true,
+    state: "READY",
+    handsFree: button(),
+  });
+  assert.match(saved.find((s) => s.id === "switch").detail, /Push button/);
+  const staged = setupSteps({
+    hasProfile: true,
+    state: "READY",
+    handsFree: button({ kind: "MAINTAINED", kindStaged: "MOMENTARY" }),
+  });
+  assert.match(
+    staged.find((s) => s.id === "switch").detail,
+    /staged.*Not saved yet/,
+  );
+  assert.match(enableKindLabel("MAINTAINED"), /compatibility/);
+});
+
+test("a Lab block freezes the gesture configuration whose identity includes the input kind", () => {
+  const a = { source: "SIMULATED", profile, handsFree: button() };
+  const frozen = freezeContext(a, "SIMULATED", "ADAPTIVE", geometry);
+  const sameConfig = { ...a };
+  assert.equal(
+    invalidates(frozen, sameConfig, geometry, { executed: 0 }) === "",
+    false,
+    "inactive device stops",
+  );
+  const other = { ...a, handsFree: { ...button(), configId: "feedface" } };
+  assert.equal(
+    invalidates(
+      frozen,
+      { ...other, state: "ACTIVE", hasProfile: true },
+      geometry,
+      { executed: 0 },
+    ),
+    "gesture configuration changed",
+  );
 });

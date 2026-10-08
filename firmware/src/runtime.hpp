@@ -10,7 +10,7 @@ extern ProfileRepository repository;
 extern NVSConfigStorage configStorage;
 extern HandsFreeRepository configRepository;
 #ifdef NODX_SIMULATED
-extern bool simulatedEnable;             // simulated maintained switch (default ON)
+extern bool simulatedEnable;             // simulated raw enable input (default released)
 extern std::vector<Rates> gestureScript; // synthetic gesture samples still to play
 #endif
 extern System* systemEngine;

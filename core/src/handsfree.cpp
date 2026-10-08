@@ -90,6 +90,9 @@ const char* name(InteractionMode mode) {
     }
     return "CONFIG_INVALID";
 }
+const char* name(EnableKind kind) {
+    return kind == EnableKind::Momentary ? "MOMENTARY" : "MAINTAINED";
+}
 const char* name(ConfigState state) {
     switch (state) {
     case ConfigState::Missing:
@@ -114,7 +117,8 @@ std::vector<uint8_t> encode(const HandsFreeConfig& config, uint32_t generation) 
     put(bytes, HandsFreeConfig::magic);
     put(bytes, HandsFreeConfig::version);
     put(bytes, generation);
-    put(bytes, (config.enabled ? 1u : 0u) | (config.switchlessQualified ? 2u : 0u));
+    put(bytes, (config.enabled ? 1u : 0u) | (config.switchlessQualified ? 2u : 0u) |
+                   (config.enableKind == EnableKind::Momentary ? 4u : 0u));
     putFloat(bytes, config.gestures.neutralRate);
     for (const auto& item : config.gestures.templates) {
         putTemplate(bytes, item);
@@ -143,12 +147,13 @@ ConfigState decode(const std::vector<uint8_t>& bytes, HandsFreeConfig& config,
     const uint32_t flags = get(bytes, at);
     HandsFreeConfig candidate;
     candidate.gestures.neutralRate = getFloat(bytes, at);
-    bool shaped = flags <= 3;
+    bool shaped = flags <= 7;
     for (auto& item : candidate.gestures.templates) {
         shaped = getTemplate(bytes, at, item) && shaped;
     }
     candidate.enabled = flags & 1;
     candidate.switchlessQualified = flags & 2;
+    candidate.enableKind = (flags & 4) ? EnableKind::Momentary : EnableKind::Maintained;
     if (!shaped || !candidate.valid()) {
         return ConfigState::OutOfBounds;
     }
@@ -218,25 +223,71 @@ bool MemoryConfigStorage::write(unsigned slot, const std::vector<uint8_t>& bytes
     return !tearWrite;
 }
 
-void EnableGate::configure(bool present, bool switchlessQualified) {
+void EnableGate::configure(bool present, bool switchlessQualified, EnableKind kind) {
     present_ = present;
     switchless_ = switchlessQualified;
-    on_ = raw_ = false; // unknown input is OFF until proven stable
+    kind_ = kind;
+    on_ = raw_ = false; // unknown input is OFF / disabled until proven otherwise
+    armed_ = pressTracked_ = releaseTracked_ = false;
 }
-bool EnableGate::update(bool rawOn, uint32_t now) {
+void EnableGate::setKind(EnableKind kind) {
+    configure(present_, switchless_, kind);
+}
+void EnableGate::clearLatch() {
+    if (kind_ == EnableKind::Momentary) {
+        on_ = false;
+        armed_ = pressTracked_ = releaseTracked_ = false; // release and a new press are required
+    }
+}
+bool EnableGate::update(bool active, uint32_t now) {
     if (!present_) {
         return permitted();
     }
-    if (!rawOn) {
-        raw_ = on_ = false;
+    raw_ = active;
+    if (kind_ == EnableKind::Maintained) {
+        if (!active) {
+            on_ = pressTracked_ = false;
+            return false;
+        }
+        if (!pressTracked_) { // start of an ON run: it must stay stable for the debounce window
+            pressTracked_ = true;
+            since_ = now;
+        }
+        if (uint32_t(now - since_) >= start::enableDebounceMs) {
+            on_ = true;
+        }
+        return on_;
+    }
+    // Momentary push button.
+    if (!active) {
+        pressTracked_ = false;
+        if (!releaseTracked_) {
+            releaseTracked_ = true;
+            releaseSince_ = now;
+        }
+        if (!armed_ && uint32_t(now - releaseSince_) >= start::enableDebounceMs) {
+            armed_ = true; // stable release seen: the next press counts
+        }
+        return on_;
+    }
+    releaseTracked_ = false;
+    if (!armed_) {
+        return on_; // held at boot, or still the same press, or bouncing: nothing to accept
+    }
+    if (on_) {
+        on_ = false; // disable at the first press edge; bounce cannot re-enable (needs a release)
+        armed_ = false;
+        pressTracked_ = false;
         return false;
     }
-    if (!raw_) {
-        raw_ = true;
-        since_ = now;
+    if (!pressTracked_) {
+        pressTracked_ = true;
+        pressSince_ = now;
     }
-    if (uint32_t(now - since_) >= start::enableDebounceMs) {
-        on_ = true;
+    if (uint32_t(now - pressSince_) >= start::enableDebounceMs) {
+        on_ = true; // one debounced press: enable, exactly once
+        armed_ = false;
+        pressTracked_ = false;
     }
     return on_;
 }
@@ -244,7 +295,11 @@ const char* EnableGate::blocked() const {
     if (permitted()) {
         return nullptr;
     }
-    return present_ ? "control switch is OFF" : "enable switch not configured";
+    if (!present_) {
+        return "enable switch not configured";
+    }
+    return kind_ == EnableKind::Momentary ? "control disabled: press the enable button"
+                                          : "control switch is OFF";
 }
 
 size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
@@ -252,7 +307,8 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         out, capacity,
         "{\"mode\":\"%s\",\"config\":\"%s\",\"configId\":\"%08lx\","
         "\"switch\":{\"present\":%s,\"on\":%s,\"permitted\":%s,\"switchless\":%s,"
-        "\"switchlessStaged\":%s},"
+        "\"switchlessStaged\":%s,\"kind\":\"%s\",\"kindStaged\":\"%s\",\"pressed\":%s,"
+        "\"latched\":%s,\"armed\":%s},"
         "\"gesture\":{\"state\":\"%s\",\"last\":\"%s\",\"lastReject\":\"%s\",\"candidates\":%lu,"
         "\"rejected\":%lu,\"executed\":%lu,\"refused\":%lu,\"suppressing\":%s},"
         "\"drag\":%s,"
@@ -262,7 +318,9 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.mode, s.config, static_cast<unsigned long>(s.configId),
         s.switchPresent ? "true" : "false", s.switchOn ? "true" : "false",
         s.permitted ? "true" : "false", s.switchless ? "true" : "false",
-        s.switchlessStaged ? "true" : "false", s.recognizer, s.lastGesture, s.lastReject,
+        s.switchlessStaged ? "true" : "false", s.switchKind, s.switchKindStaged,
+        s.switchPressed ? "true" : "false", s.switchLatched ? "true" : "false",
+        s.switchArmed ? "true" : "false", s.recognizer, s.lastGesture, s.lastReject,
         static_cast<unsigned long>(s.candidates), static_cast<unsigned long>(s.rejected),
         static_cast<unsigned long>(s.executed), static_cast<unsigned long>(s.refused),
         s.suppressing ? "true" : "false", s.dragging ? "true" : "false", s.trainPhase,

@@ -25,8 +25,9 @@
 #ifndef NODX_BUZZER
 #define NODX_BUZZER -1
 #endif
-// Maintained control-enable switch to GND (ON = LOW). Disabled by default: hands-free control
-// then stays inhibited unless setup explicitly qualified a switchless configuration.
+// Control-enable input to GND (active = LOW): a momentary push button (default setup) or a
+// maintained switch, as stored in the hands-free configuration. Disabled by default: hands-free
+// control then stays inhibited unless setup explicitly qualified a switchless configuration.
 #ifndef NODX_ENABLE
 #define NODX_ENABLE -1
 #endif

@@ -6,6 +6,8 @@ import {
   recoveryGuidance,
   setupSteps,
   switchLabel,
+  buttonLabel,
+  isButton,
   trainingView,
 } from './handsfree.js';
 
@@ -14,7 +16,9 @@ const LEGACY_ARM_MS = 5000;
 export function createHandsFreeView({ $, action, toast }) {
   let legacyArmedAt = 0,
     latest = null,
-    chipKey = '';
+    chipKey = '',
+    buttonHeld = false,
+    buttonUntil = 0;
   // Live regions are announced on every DOM change, so write only when the text really changed.
   const setText = (id, value) => {
     if ($(id).textContent !== value) $(id).textContent = value;
@@ -42,7 +46,10 @@ export function createHandsFreeView({ $, action, toast }) {
     const chips = [
       chip('State ', device.state.replaceAll('_', ' '), stateTone),
       chip('Mode ', modeLabel(hf.mode), modeTone),
-      chip('Control switch ', switchLabel(hf), switchTone),
+      chip(isButton(hf) ? 'Control ' : 'Control switch ', switchLabel(hf), switchTone),
+      ...(isButton(hf) && hf.mode === 'HANDS_FREE'
+        ? [chip('Button ', buttonLabel(hf), hf.switch.pressed ? 'warn' : 'good')]
+        : []),
       chip('Drag ', hf.drag ? 'ON' : 'off', hf.drag ? 'good' : 'warn'),
       chip(
         'Recognition ',
@@ -118,7 +125,14 @@ export function createHandsFreeView({ $, action, toast }) {
   function renderStudio(device, hf) {
     const driven = canDrive(device);
     const handsFree = isHandsFree(device);
+    const button = isButton(hf);
+    $('enableSwitchRow').hidden = button;
+    $('enableButton').hidden = !button;
     $('enableSwitch').disabled = !driven;
+    $('enableButton').disabled = !driven;
+    $('enableButton').textContent = hf.switch.latched
+      ? 'Hold to press the enable button (control permitted)'
+      : 'Hold to press the enable button (control disabled)';
     $('gesturePause').disabled = !driven || !handsFree;
     $('gestureDrag').disabled = !driven || !handsFree;
     $('switch').disabled = !(device.source === 'SIMULATED') || handsFree;
@@ -148,7 +162,8 @@ export function createHandsFreeView({ $, action, toast }) {
     const unsaved =
       hf.staged.some(Boolean) ||
       hf.mode !== 'HANDS_FREE' ||
-      hf.switch.switchlessStaged !== hf.switch.switchless;
+      hf.switch.switchlessStaged !== hf.switch.switchless ||
+      hf.switch.kindStaged !== hf.switch.kind;
     $('hfCommit').disabled =
       !device.hasProfile ||
       !learned.every(Boolean) ||
@@ -162,6 +177,8 @@ export function createHandsFreeView({ $, action, toast }) {
         ? 'Press again to confirm legacy mode'
         : 'Return to legacy compatibility mode';
     $('hfSwitchless').checked = hf.switch.switchlessStaged;
+    if (document.activeElement !== $('hfEnableKind'))
+      $('hfEnableKind').value = hf.switch.kindStaged === 'MAINTAINED' ? 'maintained' : 'momentary';
     $('hfHelperResume').disabled = device.state === 'ACTIVE';
   }
   async function run(request) {
@@ -195,10 +212,49 @@ export function createHandsFreeView({ $, action, toast }) {
       const result = await run(action('handsfree', { op: 'legacy' }));
       if (result?.ok) toast('Legacy compatibility mode saved.');
     };
+    $('hfEnableKind').onchange = () =>
+      run(action('handsfree', { op: 'enable', kind: $('hfEnableKind').value }));
     $('enableSwitch').onchange = () =>
       run(action('enable', { enabled: $('enableSwitch').checked }));
+    // The simulated push button: a press is held for at least 150 ms so that a quick click is
+    // always seen by at least two polled steps (the firmware debounces for 30 ms).
+    const press = (down) => {
+      if (down) buttonHeld = true;
+      else if (buttonHeld) {
+        buttonHeld = false;
+        buttonUntil = performance.now() + 150;
+      }
+      $('enableButton').classList.toggle('held', buttonHeld);
+      $('enableButton').setAttribute('aria-pressed', String(buttonHeld));
+    };
+    $('enableButton').onpointerdown = (e) => {
+      e.preventDefault();
+      $('enableButton').setPointerCapture(e.pointerId);
+      press(true);
+    };
+    $('enableButton').onpointerup = () => press(false);
+    $('enableButton').onpointercancel = () => press(false);
+    $('enableButton').onblur = () => press(false);
+    $('enableButton').onkeydown = (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        press(true);
+      }
+    };
+    $('enableButton').onkeyup = (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        press(false);
+      }
+    };
     $('gesturePause').onclick = () => run(action('gesture', { name: $('patternPause').value }));
     $('gestureDrag').onclick = () => run(action('gesture', { name: $('patternDrag').value }));
   }
-  return { render, bind };
+  // Raw enable input for the next simulated step: the push button, or the maintained switch box.
+  function enableInput(device) {
+    return isButton(handsFreeOf(device))
+      ? buttonHeld || performance.now() < buttonUntil
+      : $('enableSwitch').checked;
+  }
+  return { render, bind, enableInput };
 }

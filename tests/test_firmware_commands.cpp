@@ -87,7 +87,7 @@ void parserChecks() {
     std::string ack = status();
     expect(ok(ack), "status acknowledged");
     expect(has(ack, "\"protocol\":1,"), "protocol stays 1");
-    expect(has(ack, "\"protocolRevision\":3"), "protocol revision 3");
+    expect(has(ack, "\"protocolRevision\":4"), "protocol revision 4");
     expect(has(ack, "\"handsFree\":{"), "handsFree object present");
     expect(has(ack, "\"mode\":\"LEGACY_SWITCH\""), "no record boots as legacy compatibility");
     expect(has(ack, "\"config\":\"MISSING\""), "missing record reported as MISSING");
@@ -100,6 +100,9 @@ void parserChecks() {
     expect(refused(send("handsfree commit now")), "commit with trailing text refused");
     expect(refused(send("handsfree bogus")), "unknown handsfree verb refused");
     expect(refused(send("handsfree switchless maybe")), "switchless needs on/off");
+    expect(refused(send("handsfree enable")), "enable kind needs a value");
+    expect(refused(send("handsfree enable bogus")), "unknown enable kind refused");
+    expect(refused(send("handsfree enable momentary extra")), "enable kind trailing text refused");
     expect(refused(send("handsfree switchless on extra")), "switchless trailing text refused");
     expect(refused(send("train")), "train without verb refused");
     expect(refused(send("train bogus")), "unknown train verb refused");
@@ -145,6 +148,12 @@ void parserChecks() {
     expect(ok(ack) && has(ack, "\"switchlessStaged\":true"), "switchless staged");
     ack = send("handsfree switchless off");
     expect(ok(ack) && has(ack, "\"switchlessStaged\":false"), "switchless unstaged");
+    ack = send("handsfree enable maintained");
+    expect(ok(ack) && has(ack, "\"kindStaged\":\"MAINTAINED\""), "maintained kind staged");
+    ack = send("handsfree enable momentary");
+    expect(ok(ack) && has(ack, "\"kindStaged\":\"MOMENTARY\"") &&
+               has(ack, "\"kind\":\"MAINTAINED\""),
+           "button kind staged, stored kind unchanged until commit");
 
     // Backpressure: a burst larger than the acknowledgement queue is parsed as capacity frees,
     // so every command is eventually answered, in order, and none is dropped.
@@ -214,14 +223,16 @@ void simulatedChecks() {
     std::string ack = status();
     expect(has(ack, "\"source\":\"FIRMWARE_SIMULATED\""), "source labelled FIRMWARE_SIMULATED");
 
-    // Simulated maintained switch.
-    expect(has(ack, "\"on\":true"), "simulated switch defaults ON");
-    expect(ok(send("enable 0")) && has(status(), "\"on\":false"), "enable 0 turns the switch OFF");
-    expect(ok(send("enable 1")) && has(status(), "\"on\":true"), "enable 1 turns the switch ON");
+    // Simulated raw enable input: starts released; `enable 1` presses / turns ON.
+    expect(has(ack, "\"pressed\":false") && has(ack, "\"on\":false"),
+           "enable input starts released");
+    expect(ok(send("enable 1")) && has(status(), "\"pressed\":true"), "enable 1 presses the input");
+    expect(ok(send("enable 0")) && has(status(), "\"pressed\":false"),
+           "enable 0 releases the input");
     for (const char* bad : {"enable", "enable 2", "enable -1", "enable x", "enable 1 1"}) {
         expect(refused(send(bad)), bad);
     }
-    expect(has(status(), "\"on\":true"), "refused enable commands changed nothing");
+    expect(has(status(), "\"pressed\":false"), "refused enable commands changed nothing");
 
     // Simulated motion and fault injection stay bounded.
     expect(ok(send("motion 1 2 3")), "motion accepted");
@@ -249,7 +260,8 @@ void simulatedChecks() {
 }
 
 // Whole firmware pipeline on the simulated sensor: calibrate, train, commit, gesture control,
-// the maintained switch, reboot and fail-closed corruption. No buttons are touched anywhere.
+// the enable button (and the maintained switch option), reboot and fail-closed corruption. No
+// selection, pause or calibration buttons exist anywhere in this flow.
 void endToEndChecks() {
     // Secure, subscribed host link (set directly: pairing itself is not modelled), then a fresh
     // boot so the transport fault left by the disconnected parser checks is cleared.
@@ -291,37 +303,97 @@ void endToEndChecks() {
     expect(has(ack, "\"config\":\"VALID\""), "config record saved");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "commit never resumes control");
 
-    // Daily use: gestures only, with the maintained switch.
+    // The new setup assumes the push button: disabled until one press, never resumed by it.
+    expect(has(ack, "\"kind\":\"MOMENTARY\"") && has(ack, "\"latched\":false") &&
+               has(ack, "\"permitted\":false"),
+           "a new setup starts with the button kind, disabled");
     pump(500);
     playGesture("nod2");
+    expect(!has(status(), "\"state\":\"ACTIVE\""), "resume gesture ignored while disabled");
+    expect(refused(send("resume")), "helper resume refused while disabled");
+    ack = send("enable 1", 80); // press
+    pump(100);
     ack = status();
-    expect(has(ack, "\"state\":\"ACTIVE\""), "pause/resume gesture resumes control");
+    expect(has(ack, "\"pressed\":true") && has(ack, "\"latched\":true") &&
+               has(ack, "\"permitted\":true"),
+           "one press latches permission");
+    expect(!has(ack, "\"state\":\"ACTIVE\""), "enabling never resumes control");
+    expect(ok(send("enable 0", 80)), "button released");
+    pump(100);
+    ack = status();
+    expect(has(ack, "\"pressed\":false") && has(ack, "\"latched\":true"),
+           "raw pressed state and latched permission are separate");
+    playGesture("nod2");
+    expect(has(status(), "\"state\":\"ACTIVE\""), "explicit gesture resumes after enabling");
     playGesture("tilt2");
     expect(has(status(), "\"drag\":true"), "drag gesture starts a drag");
-    expect(ok(send("enable 0", 80)), "switch OFF accepted");
-    ack = status();
-    expect(has(ack, "\"state\":\"PAUSED\""), "switch OFF pauses at once");
-    expect(has(ack, "\"drag\":false"), "switch OFF releases the drag");
-    expect(ok(send("enable 1")), "switch ON accepted");
-    pump(200);
-    expect(!has(status(), "\"state\":\"ACTIVE\""), "switch ON never resumes");
-    playGesture("nod2");
-    expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes after switch ON");
+    ack = send("enable 1", 80); // the disabling press: effect visible in its own acknowledgement
+    expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"drag\":false") &&
+               has(ack, "\"latched\":false"),
+           "the disabling press pauses, releases the drag and clears the latch at once");
+    pump(1000);
+    expect(has(status(), "\"latched\":false"), "holding the button toggled again");
+    expect(ok(send("enable 0", 80)), "button released");
+    pump(100);
 
-    // Reboot and fault recovery never resume; the saved setup persists in flash.
+    // Reboot with the button HELD: permission is never persisted and a held press enables nothing.
+    expect(ok(send("enable 1", 80)), "button held for the reboot");
     reboot();
+    pump(3000);
     ack = status();
-    expect(has(ack, "\"mode\":\"HANDS_FREE\"") && has(ack, "\"config\":\"VALID\""),
-           "hands-free setup persisted across reboot");
+    expect(has(ack, "\"mode\":\"HANDS_FREE\"") && has(ack, "\"kind\":\"MOMENTARY\"") &&
+               has(ack, "\"config\":\"VALID\""),
+           "hands-free setup and button kind persisted across reboot");
+    expect(has(ack, "\"permitted\":false") && has(ack, "\"pressed\":true"),
+           "a button held at boot enabled control");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "reboot never resumes control");
+    expect(ok(send("enable 0", 80)), "button released after boot");
+    pump(100);
+    expect(has(status(), "\"permitted\":false"), "release alone enabled control");
+    expect(ok(send("enable 1", 80)), "new press after boot");
+    pump(100);
+    expect(ok(send("enable 0", 80)), "button released");
+    pump(100);
+    expect(has(status(), "\"permitted\":true") && !has(status(), "\"state\":\"ACTIVE\""),
+           "a new press after release enables, without resuming");
     playGesture("nod2");
-    expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes after reboot");
+    expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes after reboot and press");
+
     expect(ok(send("fault 1")), "sensor fault injected");
     pump(400);
-    expect(has(status(), "\"state\":\"SAFE_STATE\""), "sensor fault stops control");
+    ack = status();
+    expect(has(ack, "\"state\":\"SAFE_STATE\"") && has(ack, "\"latched\":false"),
+           "sensor fault stops control and drops the button permission");
+    expect(ok(send("enable 1", 80)), "press during the fault");
+    pump(100);
+    expect(ok(send("enable 0", 80)), "release during the fault");
+    pump(100);
+    expect(has(status(), "\"state\":\"SAFE_STATE\"") && refused(send("resume")),
+           "a button press bypassed the fault");
     expect(ok(send("fault 0")), "sensor fault cleared");
     pump(1500);
     expect(!has(status(), "\"state\":\"ACTIVE\""), "fault recovery never resumes control");
+
+    // The maintained switch stays available as an explicit, stored configuration option.
+    expect(ok(send("pause")), "helper pause");
+    expect(ok(send("handsfree enable maintained")), "maintained kind staged");
+    ack = send("handsfree commit");
+    expect(ok(ack) && has(ack, "\"kind\":\"MAINTAINED\"") && has(ack, "\"permitted\":false"),
+           "maintained kind committed; its switch is released so control is inhibited");
+    expect(ok(send("enable 1", 80)), "maintained switch ON");
+    pump(200);
+    ack = status();
+    expect(has(ack, "\"permitted\":true") && has(ack, "\"latched\":false") &&
+               !has(ack, "\"state\":\"ACTIVE\""),
+           "maintained ON permits without a latch and without resuming");
+    playGesture("nod2");
+    expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes under the maintained switch");
+    ack = send("enable 0", 80);
+    expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"permitted\":false"),
+           "maintained OFF pauses at once");
+    reboot();
+    pump(300);
+    expect(has(status(), "\"kind\":\"MAINTAINED\""), "the maintained kind persisted across reboot");
 
     // The NVS adapter: oversize records are reported as corrupt, never trusted or ignored.
     const std::vector<uint8_t> oversize(600, 0x5a);

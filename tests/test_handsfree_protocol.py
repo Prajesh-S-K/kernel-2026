@@ -62,12 +62,20 @@ class HandsFreeCase(unittest.TestCase):
         self.assertEqual(result["handsFree"]["training"]["phase"], "READY", result)
         self.assertTrue(self.send("train accept")["ok"])
 
-    def setup_hands_free(self):
+    def setup_hands_free(self, kind="maintained"):
+        """Helper setup. Most workflow tests use the maintained-switch compatibility
+        configuration (switch ON from the start); the push-button tests pass kind="momentary"."""
         self.calibrate()
         self.train("pause", "nod2")
         self.train("drag", "tilt2")
+        self.assertTrue(self.send(f"handsfree enable {kind}")["ok"])
         result = self.send("handsfree commit")
         self.assertTrue(result["ok"], result)
+        if kind == "maintained":
+            result = self.send("enable 1")
+            self.quiet(10)
+        else:
+            self.quiet(60)  # a new input kind starts disabled: let the button be seen released
         return result
 
     def activate_by_gesture(self):
@@ -83,7 +91,7 @@ class SetupAndDailyWorkflow(HandsFreeCase):
         self.assertEqual(committed["state"], "READY")
         self.assertEqual(committed["handsFree"]["mode"], "HANDS_FREE")
         self.assertTrue(committed["profile"]["dwellEnabled"])
-        self.assertEqual(committed["protocolRevision"], 3)
+        self.assertEqual(committed["protocolRevision"], 4)
         self.assertEqual(committed["protocol"], 1)
         # Daily workflow: only gestures and the maintained switch, no resume/pause/calibrate.
         active = self.activate_by_gesture()
@@ -333,6 +341,148 @@ class SaveFailureAndRecovery(HandsFreeCase):
         recovered = self.quiet(200)
         self.assertEqual(recovered["state"], "READY")
         self.assertFalse(self.send("gesture tilt2")["handsFree"]["drag"])
+
+
+class MomentaryEnableButton(HandsFreeCase):
+    """The enable input is one momentary push button: a debounced press toggles a latch that is
+    never persisted. Raw pressed state and latched permission are reported separately."""
+
+    def press(self, samples=6):
+        self.assertTrue(self.send("enable 1")["ok"])
+        self.send(f"step {samples} 0 0 0 0 1 0 0")
+        result = self.send("enable 0")
+        self.send(f"step {samples} 0 0 0 0 1 0 0")
+        return result
+
+    def switch(self):
+        return self.send("status")["handsFree"]["switch"]
+
+    def test_new_setup_assumes_the_button_and_starts_disabled(self):
+        self.setup_hands_free("momentary")
+        status = self.send("status")
+        switch = status["handsFree"]["switch"]
+        self.assertEqual(switch["kind"], "MOMENTARY")
+        self.assertEqual(switch["kindStaged"], "MOMENTARY")
+        self.assertFalse(switch["pressed"])
+        self.assertFalse(switch["latched"])
+        self.assertFalse(switch["permitted"])
+        self.assertEqual(status["protocolRevision"], 4)
+        self.assertFalse(self.send("resume")["ok"], "helper resume while disabled")
+        self.quiet(60)
+        self.assertNotEqual(self.send("gesture nod2")["state"], "ACTIVE")
+
+    def test_press_enables_without_resuming_and_the_gesture_resumes(self):
+        self.setup_hands_free("momentary")
+        self.quiet(60)
+        self.assertTrue(self.send("enable 1")["ok"])
+        held = self.send("step 6 0 0 0 0 1 0 0")["handsFree"]["switch"]
+        self.assertTrue(held["pressed"] and held["latched"] and held["permitted"])
+        released = self.send("enable 0")
+        self.send("step 6 0 0 0 0 1 0 0")
+        switch = self.switch()
+        self.assertFalse(switch["pressed"], "raw pressed state follows the button")
+        self.assertTrue(switch["latched"], "latched permission outlives the press")
+        self.assertNotEqual(released["state"], "ACTIVE", "enabling resumed control")
+        self.assertEqual(self.send("gesture nod2")["state"], "ACTIVE")
+
+    def test_second_press_disables_and_releases_a_drag_at_once(self):
+        self.setup_hands_free("momentary")
+        self.press()
+        self.quiet(60)
+        self.assertEqual(self.send("gesture nod2")["state"], "ACTIVE")
+        dragging = self.send("gesture tilt2")
+        self.assertTrue(dragging["handsFree"]["drag"])
+        self.assertTrue(dragging["reports"][-1][3])
+        disabled = self.send("enable 1")  # the press edge itself, no sample in between
+        self.assertEqual(disabled["state"], "PAUSED")
+        self.assertFalse(disabled["handsFree"]["drag"])
+        self.assertFalse(disabled["handsFree"]["switch"]["latched"])
+        self.assertEqual(disabled["reports"][-1][3], 0, "button still down after the press")
+
+    def test_holding_the_button_toggles_only_once(self):
+        self.setup_hands_free("momentary")
+        self.quiet(60)
+        self.send("enable 1")
+        for _ in range(20):  # a long hold
+            result = self.send("step 50 0 0 0 0 1 0 0")
+        self.assertTrue(result["handsFree"]["switch"]["latched"])
+        self.send("enable 0")
+        self.send("step 6 0 0 0 0 1 0 0")
+        self.send("enable 1")
+        result = self.send("step 50 0 0 0 0 1 0 0")
+        self.assertFalse(result["handsFree"]["switch"]["latched"], "second press disables")
+        for _ in range(10):
+            result = self.send("step 50 0 0 0 0 1 0 0")
+        self.assertFalse(result["handsFree"]["switch"]["latched"], "a hold toggled twice")
+
+    def test_reboot_resets_permission_and_boot_held_enables_nothing(self):
+        self.setup_hands_free("momentary")
+        self.press()
+        self.assertTrue(self.switch()["latched"])
+        self.restart()
+        switch = self.switch()
+        self.assertEqual(switch["kind"], "MOMENTARY", "the kind is stored")
+        self.assertFalse(switch["latched"], "the latch was persisted")
+        self.assertEqual(self.send("status")["handsFree"]["mode"], "HANDS_FREE")
+        self.restart()
+        self.assertTrue(self.send("enable 1")["ok"])  # held from power-up
+        for _ in range(10):
+            result = self.send("step 50 0 0 0 0 1 0 0")
+        self.assertFalse(result["handsFree"]["switch"]["permitted"], "held button enabled control")
+        self.send("enable 0")
+        self.send("step 6 0 0 0 0 1 0 0")
+        self.assertFalse(self.switch()["permitted"], "release alone enabled control")
+        self.press()
+        self.assertTrue(self.switch()["permitted"])
+        self.assertNotEqual(self.send("status")["state"], "ACTIVE")
+
+    def test_fault_drops_the_permission_and_presses_do_not_recover(self):
+        self.setup_hands_free("momentary")
+        self.press()
+        self.quiet(60)
+        self.assertEqual(self.send("gesture nod2")["state"], "ACTIVE")
+        fault = self.send("step 5 0 0 0 0 1 0 1")  # NaN gyro
+        self.assertEqual(fault["state"], "SAFE_STATE")
+        self.assertFalse(fault["handsFree"]["switch"]["latched"])
+        for _ in range(3):
+            self.send("enable 1")
+            self.send("step 6 0 0 0 0 1 0 1")
+            self.send("enable 0")
+            result = self.send("step 6 0 0 0 0 1 0 1")
+            self.assertEqual(result["state"], "SAFE_STATE", "a press bypassed the fault")
+        self.assertFalse(self.send("resume")["ok"])
+
+    def test_maintained_configuration_keeps_working_and_is_never_reinterpreted(self):
+        self.setup_hands_free("maintained")
+        self.restart()
+        switch = self.send("status")["handsFree"]["switch"]
+        self.assertEqual(switch["kind"], "MAINTAINED")
+        self.send("enable 1")
+        result = self.send("step 10 0 0 0 0 1 0 0")
+        self.assertTrue(result["handsFree"]["switch"]["permitted"])
+        self.assertFalse(result["handsFree"]["switch"]["latched"], "maintained has no latch")
+        self.assertNotEqual(result["state"], "ACTIVE")
+        off = self.send("enable 0")
+        self.assertFalse(off["handsFree"]["switch"]["permitted"], "OFF is immediate")
+        # Retraining and saving must not silently turn it into the button.
+        self.train("pause", "nod2")
+        self.assertTrue(self.send("handsfree commit")["ok"])
+        self.restart()
+        self.assertEqual(self.switch()["kind"], "MAINTAINED")
+
+    def test_kind_commands_are_validated(self):
+        self.assertFalse(self.send("handsfree enable")["ok"])
+        self.assertFalse(self.send("handsfree enable bogus")["ok"])
+        self.assertFalse(self.send("handsfree enable momentary extra")["ok"])
+        self.assertTrue(self.send("handsfree enable momentary")["ok"])
+        self.assertEqual(self.switch()["kindStaged"], "MOMENTARY")
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "enable", "kind": "momentary"}),
+            "handsfree enable momentary",
+        )
+        for bad in ("toggle", None, 3):
+            with self.assertRaises(ValueError):
+                SERVER.command_for({"action": "handsfree", "op": "enable", "kind": bad})
 
 
 class SwitchAndTransport(HandsFreeCase):

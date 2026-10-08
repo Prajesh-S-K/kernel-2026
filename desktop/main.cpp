@@ -131,7 +131,7 @@ void profileJson(const UserProfile& p) {
 void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
     auto& d = s.diagnostics;
     std::cout << std::fixed << std::setprecision(5)
-              << "{\"protocol\":1,\"protocolRevision\":3,\"softwareVersion\":\"0.2.0\",\"source\":"
+              << "{\"protocol\":1,\"protocolRevision\":4,\"softwareVersion\":\"0.2.0\",\"source\":"
                  "\"SIMULATED\",\"ok\":"
               << (ok ? "true" : "false") << ",\"faultCode\":\"" << name(d.faultCode)
               << "\",\"timeMs\":" << now << ",\"state\":\"" << name(s.state) << "\",\"reason\":\""
@@ -234,9 +234,9 @@ int main(int argc, char** argv) {
         HandsFreeRepository configRepo(configStorage);
         SimHID transport;
         System sys(transport, repo, configRepo);
-        sys.configureEnableInput(true); // the simulator has a simulated maintained switch
-        bool simEnable = true;
-        sys.axes.axes = {0, 1, 2}; // desktop inputs already yaw/pitch/roll
+        sys.configureEnableInput(true); // the simulator has a simulated enable input
+        bool simEnable = false;         // raw input: switch ON / button pressed; released at start
+        sys.axes.axes = {0, 1, 2};      // desktop inputs already yaw/pitch/roll
         sys.axes.accelAxes = {0, 1, 2};
         sys.axes.accelSigns = {1, 1, 1};
         uint32_t now = 0;
@@ -443,6 +443,13 @@ int main(int argc, char** argv) {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof();
                     if (ok) {
                         sys.stageSwitchless(value == "on");
+                    }
+                } else if (verb == "enable") {
+                    cmd >> value;
+                    ok = (value == "maintained" || value == "momentary") && (cmd >> std::ws).eof();
+                    if (ok) {
+                        sys.stageEnableKind(value == "momentary" ? EnableKind::Momentary
+                                                                 : EnableKind::Maintained);
                     }
                 } else {
                     ok = false;

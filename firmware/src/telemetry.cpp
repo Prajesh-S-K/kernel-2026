@@ -80,7 +80,7 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
     const char* source = "HARDWARE";
 #endif
     append(buffer, sizeof(buffer), used,
-           "{\"protocol\":1,\"protocolRevision\":3,\"requestId\":%lu,\"source\":\"%s\",\"ok\":%s,"
+           "{\"protocol\":1,\"protocolRevision\":4,\"requestId\":%lu,\"source\":\"%s\",\"ok\":%s,"
            "\"firmware\":\"0.2.0\",\"timeMs\":%lu,\"state\":\"%s\",\"calibration\":\"%s\","
            "\"reason\":\"%s\",\"faults\":%lu,\"dwell\":\"%s\",\"cancellations\":%lu,\"hasProfile\":"
            "%s,\"connected\":%s,",

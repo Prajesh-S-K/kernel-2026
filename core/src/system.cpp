@@ -57,7 +57,10 @@ void System::loadConfig() {
                                                      : InteractionMode::ConfigInvalid;
     }
     stagedSwitchless_ = config_.switchlessQualified;
-    enable_.configure(enablePresent_, config_.switchlessQualified);
+    // A stored record keeps the kind it was saved with (a pre-button record is MAINTAINED). Only a
+    // setup with no usable record assumes the push button.
+    stagedKind_ = configState_ == ConfigState::Valid ? config_.enableKind : EnableKind::Momentary;
+    enable_.configure(enablePresent_, config_.switchlessQualified, config_.enableKind);
     recognizer_.configure(config_.gestures, (1u << gestureCount) - 1);
     if (mode_ == InteractionMode::ConfigInvalid) {
         diagnostics_.reason =
@@ -96,6 +99,7 @@ void System::enterSafe(FaultCode fault, uint32_t now) {
         trainer_.cancel();
     }
     state_ = SystemState::SafeState;
+    enable_.clearLatch(); // a button permission never survives a fault; press again after recovery
     healthyChecks_ = 0;
     diagnostics_.faultCode = fault;
     diagnostics_.reason = description(fault);
@@ -381,19 +385,22 @@ const char* System::activationBlocker() const {
 
 void System::configureEnableInput(bool present) {
     enablePresent_ = present;
-    enable_.configure(present, config_.switchlessQualified);
+    enable_.configure(present, config_.switchlessQualified, config_.enableKind);
 }
 
-void System::setControlSwitch(bool on, uint32_t now) {
+void System::setControlSwitch(bool active, uint32_t now) {
     const bool before = enable_.permitted();
-    enable_.update(on, now);
+    enable_.update(active, now);
     if (mode_ != InteractionMode::HandsFree || !before || enable_.permitted()) {
         return;
     }
     // Permitted -> inhibited. Release now: no further sensor sample is needed.
     if (state_ == SystemState::Active) {
         stop(SystemState::Paused, now);
-        diagnostics_.reason = "control switch OFF; explicit resume required";
+        diagnostics_.reason =
+            enable_.kind() == EnableKind::Momentary
+                ? "control disabled by the enable button; explicit resume required"
+                : "control switch OFF; explicit resume required";
     } else {
         resetInteraction(now);
         if (!emitStationary()) {
@@ -513,6 +520,9 @@ bool System::trainAccept() {
 void System::stageSwitchless(bool qualified) {
     stagedSwitchless_ = qualified;
 }
+void System::stageEnableKind(EnableKind kind) {
+    stagedKind_ = kind;
+}
 
 bool System::commitFailed(const char* reason, bool storage) {
     if (storage) {
@@ -529,6 +539,7 @@ bool System::commitHandsFree() {
     HandsFreeConfig next;
     next.enabled = true;
     next.switchlessQualified = stagedSwitchless_;
+    next.enableKind = stagedKind_;
     next.gestures.neutralRate = std::max(
         stagedNeutral_, configState_ == ConfigState::Valid ? config_.gestures.neutralRate : 0.f);
     for (unsigned id = 0; id < gestureCount; ++id) {
@@ -567,6 +578,9 @@ bool System::commitHandsFree() {
     staged_ = {};
     stagedNeutral_ = 0;
     enable_.setSwitchless(next.switchlessQualified);
+    if (enable_.kind() != next.enableKind) {
+        enable_.setKind(next.enableKind); // a different input kind starts disabled again
+    }
     recognizer_.configure(next.gestures, (1u << gestureCount) - 1);
     recognizer_.reset(lastTick_);
     diagnostics_.faultCode = FaultCode::None;
@@ -580,6 +594,9 @@ bool System::useLegacyMode() {
     }
     HandsFreeConfig next = configState_ == ConfigState::Valid ? config_ : HandsFreeConfig{};
     next.enabled = false;
+    if (configState_ != ConfigState::Valid) {
+        next.enableKind = stagedKind_; // no stored record to keep: use what the helper staged
+    }
     stop(hasProfile_ ? SystemState::Ready : SystemState::CalibrationRequired, lastTick_);
     if (state_ == SystemState::SafeState) {
         return false;
@@ -606,6 +623,11 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.permitted = enable_.permitted();
     s.switchless = enable_.switchless();
     s.switchlessStaged = stagedSwitchless_;
+    s.switchKind = name(enable_.kind());
+    s.switchKindStaged = name(stagedKind_);
+    s.switchPressed = enable_.pressed();
+    s.switchLatched = enable_.kind() == EnableKind::Momentary && enable_.on();
+    s.switchArmed = enable_.armed();
     s.recognizer = name(recognizer_.state());
     s.lastGesture = recognizer_.lastGesture < 0
                         ? "NONE"

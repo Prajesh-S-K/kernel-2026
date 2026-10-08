@@ -9,6 +9,11 @@ const char* name(InteractionMode mode);
 enum class ConfigState { Missing, Valid, Corrupt, Unsupported, OutOfBounds };
 const char* name(ConfigState state);
 
+// How the one control-enable input is read. MAINTAINED: its level is the permission (the original
+// slide switch). MOMENTARY: a push button whose debounced presses toggle a permission latch.
+enum class EnableKind : uint8_t { Maintained, Momentary };
+const char* name(EnableKind kind);
+
 // Separate versioned record. The 84-byte UserProfile is not involved in its encoding.
 struct HandsFreeConfig {
     static constexpr uint32_t magic = 0x4846444e; // "NDFH" little endian
@@ -16,6 +21,9 @@ struct HandsFreeConfig {
     static constexpr size_t wireSize = 136;
     bool enabled = false;
     bool switchlessQualified = false; // setup explicitly allows control without a switch
+    // Stored in flag bit 2. A record written before the button existed has the bit clear and keeps
+    // its original maintained-switch meaning; it is never silently reinterpreted.
+    EnableKind enableKind = EnableKind::Maintained;
     GestureSet gestures;
     bool valid() const;
 };
@@ -51,23 +59,42 @@ public:
     bool write(unsigned slot, const std::vector<uint8_t>& bytes) override;
 };
 
-// Maintained control-enable switch. ON permits; OFF inhibits. OFF is immediate, ON needs a
-// stable debounce window, and an unknown or unconfigured input never permits control.
+// Control-enable input. The gate only ever PERMITS or INHIBITS control; it never resumes it.
+// MAINTAINED: ON permits, OFF inhibits; OFF is immediate and ON needs a stable debounce window.
+// MOMENTARY (push button): the permission is a latch that is ALWAYS disabled at boot. It must see
+// a stable release first (so a button held at boot enables nothing), then one debounced press
+// enables; the next press disables at its first edge (fail safe, no sensor sample needed). Every
+// accepted press toggles exactly once and a stable release is required before the next press.
+// The latch is never persisted. An unknown or unconfigured input never permits control.
 class EnableGate {
 public:
-    void configure(bool present, bool switchlessQualified);
+    void configure(bool present, bool switchlessQualified,
+                   EnableKind kind = EnableKind::Maintained);
     void setSwitchless(bool qualified) {
         switchless_ = qualified;
     }
-    bool update(bool rawOn, uint32_t now);
+    void setKind(EnableKind kind); // resets the latch and requires a fresh release
+    // `active` is the raw input: switch ON / button pressed.
+    bool update(bool active, uint32_t now);
+    void clearLatch(); // momentary: drop permission (fault); a release and new press are required
     bool permitted() const {
         return present_ ? on_ : switchless_;
     }
     bool present() const {
         return present_;
     }
+    // Maintained: the switch is ON (debounced). Momentary: the permission latch.
     bool on() const {
         return on_;
+    }
+    bool pressed() const { // raw input as last seen (not debounced, not a permission)
+        return raw_;
+    }
+    bool armed() const { // momentary: a stable release has been seen since the last accepted press
+        return armed_;
+    }
+    EnableKind kind() const {
+        return kind_;
     }
     bool switchless() const {
         return switchless_;
@@ -76,7 +103,9 @@ public:
 
 private:
     bool present_ = false, switchless_ = false, on_ = false, raw_ = false;
-    uint32_t since_ = 0;
+    EnableKind kind_ = EnableKind::Maintained;
+    bool armed_ = false, pressTracked_ = false, releaseTracked_ = false;
+    uint32_t since_ = 0, pressSince_ = 0, releaseSince_ = 0;
 };
 
 // Everything the companion needs about hands-free operation, with static strings only.
@@ -86,6 +115,9 @@ struct HandsFreeStatus {
     uint32_t configId = 0;
     bool switchPresent = false, switchOn = false, permitted = false, switchless = false;
     bool switchlessStaged = false;
+    const char* switchKind = "MAINTAINED"; // how the enable input is read (stored)
+    const char* switchKindStaged = "MAINTAINED";
+    bool switchPressed = false, switchLatched = false, switchArmed = false; // raw vs permission
     const char* recognizer = "WAIT_NEUTRAL";
     const char* lastGesture = "NONE";
     const char* lastReject = "NONE";

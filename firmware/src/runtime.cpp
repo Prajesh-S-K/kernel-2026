@@ -8,7 +8,7 @@ ProfileRepository repository(storage);
 NVSConfigStorage configStorage;
 HandsFreeRepository configRepository(configStorage);
 #ifdef NODX_SIMULATED
-bool simulatedEnable = true;
+bool simulatedEnable = false; // raw enable input: released
 std::vector<Rates> gestureScript;
 size_t gesturePosition = 0;
 #endif
@@ -43,7 +43,8 @@ void initializeRuntime() {
     Serial.println(imuOK ? "[IMU] detected" : "[IMU] unavailable; outputs inhibited");
     ble.begin();
     systemEngine = new System(ble, repository, configRepository);
-    // Hands-free needs the maintained switch; without NODX_ENABLE control stays inhibited.
+    // Hands-free needs the enable input (switch or push button); without NODX_ENABLE control stays
+    // inhibited unless setup qualified an alternative.
 #ifdef NODX_SIMULATED
     systemEngine->configureEnableInput(true);
 #else
@@ -76,7 +77,8 @@ void serviceRuntime() {
             }
         }
     }
-    // The maintained switch is read on every pass so OFF releases without waiting for a sample.
+    // The raw enable input is read on every pass so a disable releases without waiting for a
+    // sample.
 #ifdef NODX_SIMULATED
     s.setControlSwitch(simulatedEnable, now);
 #else

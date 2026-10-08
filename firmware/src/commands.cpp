@@ -108,6 +108,13 @@ void command(const std::string& line, uint32_t now, bool truncated) {
             if (ok) {
                 system.stageSwitchless(value == "on");
             }
+        } else if (verb == "enable") {
+            input >> value;
+            ok = (value == "maintained" || value == "momentary") && (input >> std::ws).eof();
+            if (ok) {
+                system.stageEnableKind(value == "momentary" ? nodx::EnableKind::Momentary
+                                                            : nodx::EnableKind::Maintained);
+            }
         } else {
             ok = false;
         }

@@ -142,6 +142,46 @@ std::vector<Rates> held(unsigned axis, float rate, unsigned holdMs, unsigned res
     sim::neutral(out, restAfter);
     return out;
 }
+// ---- the momentary enable push button --------------------------------------------------------
+// Drives the gate alone at 1 ms resolution and counts permission changes ("toggles").
+struct GateRig {
+    EnableGate gate;
+    uint32_t t = 1000;
+    unsigned toggles = 0;
+    bool last = false;
+    explicit GateRig(EnableKind kind = EnableKind::Momentary) {
+        gate.configure(true, false, kind);
+    }
+    void raw(bool active, unsigned ms) {
+        for (unsigned i = 0; i < ms; ++i) {
+            ++t;
+            gate.update(active, t);
+            if (gate.permitted() != last) {
+                last = gate.permitted();
+                ++toggles;
+            }
+        }
+    }
+    // A press that bounces for `bounceMs` (2 ms down / 2 ms up) before it settles pressed.
+    void bouncyPress(unsigned bounceMs, unsigned settledMs) {
+        for (unsigned i = 0; i < bounceMs; i += 4) {
+            raw(true, 2);
+            raw(false, 2);
+        }
+        raw(true, settledMs);
+    }
+    void bouncyRelease(unsigned bounceMs, unsigned settledMs) {
+        for (unsigned i = 0; i < bounceMs; i += 4) {
+            raw(false, 2);
+            raw(true, 2);
+        }
+        raw(false, settledMs);
+    }
+};
+HF buttonRig() {
+    return HF(true, EnableKind::Momentary);
+}
+
 // Candidate suppression stops at the learned stroke limit (300 ms here) plus one sample.
 constexpr unsigned maxSuppressionMs = 320;
 
@@ -595,7 +635,7 @@ int main() {
                 "range");
         require(mutate([](auto& b) { setWord(b, strokesWord[0], 9); }) == ConfigState::OutOfBounds,
                 "stroke count");
-        require(mutate([](auto& b) { setWord(b, 3, 4); }) == ConfigState::OutOfBounds, "flags");
+        require(mutate([](auto& b) { setWord(b, 3, 8); }) == ConfigState::OutOfBounds, "flags");
         require(mutate([](auto& b) { setWord(b, 10, 1); }) == ConfigState::OutOfBounds,
                 "unused stroke slot");
         require(mutate([](auto& b) { setWord(b, 6, 3); }) == ConfigState::OutOfBounds, "axis");
@@ -1914,6 +1954,7 @@ int main() {
         };
         train(GestureId::PauseResume, script("tilt2"));
         train(GestureId::Drag, reversed);
+        h.s().stageEnableKind(EnableKind::Maintained);
         require(h.s().commitHandsFree(), "commit");
         h.quiet(500);
         require(h.s().resume(), "resume");
@@ -1934,6 +1975,378 @@ int main() {
         h.quiet(400);
         require(h.s().state == SystemState::Paused, "roll pattern no longer pauses");
     });
+
+    // ------------------------------------------------ K: momentary enable push button
+    test("button: boot released, control stays disabled until one debounced press", [] {
+        GateRig g;
+        g.raw(false, 100);
+        require(!g.gate.permitted() && g.gate.armed(), "armed after a stable release");
+        g.raw(true, 29);
+        require(!g.gate.permitted(), "enabled before the debounce window");
+        g.raw(true, 2);
+        require(g.gate.permitted() && g.gate.on() && g.gate.pressed(), "one press did not enable");
+        require(g.toggles == 1, "toggle count");
+    });
+    test("button: held at boot never enables; a release and a new press are required", [] {
+        GateRig g;
+        g.raw(true, 5000);
+        require(!g.gate.permitted() && !g.gate.armed() && g.toggles == 0, "enabled while held");
+        g.raw(false, 20);
+        g.raw(true, 200); // a press after only 20 ms of release is not a stable release
+        require(!g.gate.permitted(), "enabled without a stable release");
+        g.raw(false, 100);
+        g.raw(true, 100);
+        require(g.gate.permitted() && g.toggles == 1, "new press after release did not enable");
+    });
+    test("button: press and release bounce produce exactly one toggle", [] {
+        GateRig g;
+        g.raw(false, 100);
+        g.bouncyPress(24, 100);
+        require(g.gate.permitted() && g.toggles == 1, "bouncy press");
+        g.bouncyRelease(24, 100); // release chatter must not look like another press
+        require(g.gate.permitted() && g.toggles == 1, "release bounce toggled");
+        g.bouncyPress(24, 100); // disable press: its bounce must not re-enable
+        require(!g.gate.permitted() && g.toggles == 2, "bouncy disable");
+        g.bouncyRelease(24, 100);
+        require(!g.gate.permitted() && g.toggles == 2, "release bounce re-enabled");
+    });
+    test("button: a long hold toggles once, repeated presses toggle once each", [] {
+        GateRig g;
+        g.raw(false, 100);
+        g.raw(true, 30000);
+        require(g.gate.permitted() && g.toggles == 1, "long hold");
+        g.raw(false, 100);
+        g.raw(true, 30000);
+        require(!g.gate.permitted() && g.toggles == 2, "long hold disable");
+        for (unsigned press = 3; press <= 12; ++press) {
+            g.raw(false, 60);
+            g.raw(true, 60);
+            require(g.toggles == press, "not exactly one toggle per press");
+            require(g.gate.permitted() == (press % 2 == 1), "wrong permission after press");
+        }
+    });
+    test("button: a second press needs a stable release first", [] {
+        GateRig g;
+        g.raw(false, 100);
+        g.raw(true, 60);
+        require(g.gate.permitted(), "enabled");
+        g.raw(false, 20); // too short to count as released
+        g.raw(true, 60);
+        require(g.gate.permitted() && g.toggles == 1, "accepted without a stable release");
+        g.raw(false, 40);
+        g.raw(true, 5);
+        require(!g.gate.permitted() && g.toggles == 2, "stable release then press did not disable");
+    });
+    test("button: disable acts at the first press edge; a glitch can only disable, never enable",
+         [] {
+             GateRig g;
+             g.raw(false, 100);
+             g.raw(true, 60);
+             g.raw(false, 100);
+             g.raw(true, 1); // a one-sample spike while permitted
+             require(!g.gate.permitted(), "a press edge did not disable immediately");
+             g.raw(false, 100);
+             g.raw(true, 10); // a spike shorter than the debounce window while disabled
+             g.raw(false, 100);
+             require(!g.gate.permitted() && g.toggles == 2, "a short spike enabled control");
+         });
+    test("button: clearing the latch (fault) requires a release and a new press", [] {
+        GateRig g;
+        g.raw(false, 100);
+        g.raw(true, 60);
+        require(g.gate.permitted(), "enabled");
+        g.gate.clearLatch();
+        g.raw(true, 500); // still held: the same press does not count
+        require(!g.gate.permitted(), "re-enabled without a new press");
+        g.raw(false, 100);
+        g.raw(true, 60);
+        require(g.gate.permitted(), "new press after the fault did not enable");
+    });
+    test("button: pressed and latched are reported separately", [] {
+        HF h = buttonRig();
+        h.setup();
+        h.quiet(300);
+        auto st = h.s().handsFreeStatus();
+        require(std::string(st.switchKind) == "MOMENTARY" && !st.switchPressed &&
+                    !st.switchLatched && !st.permitted && st.switchArmed,
+                "initial status");
+        h.sw = true;
+        h.quiet(100);
+        st = h.s().handsFreeStatus();
+        require(st.switchPressed && st.switchLatched && st.permitted, "pressed and latched");
+        h.sw = false;
+        h.quiet(100);
+        st = h.s().handsFreeStatus();
+        require(!st.switchPressed && st.switchLatched && st.permitted && st.switchArmed,
+                "released but still latched");
+        char buffer[1024];
+        require(handsFreeJson(buffer, sizeof(buffer), st) > 0, "telemetry does not fit");
+        require(std::strstr(buffer, "\"kind\":\"MOMENTARY\"") &&
+                    std::strstr(buffer, "\"pressed\":false") &&
+                    std::strstr(buffer, "\"latched\":true"),
+                "telemetry fields");
+    });
+    test("button: boot released and boot held both start disabled and never resume", [] {
+        for (bool heldAtBoot : {false, true}) {
+            HF h = buttonRig();
+            h.setup();
+            h.quiet(300);
+            h.click(); // permit, then reboot with the button in the state under test
+            require(h.s().handsFreeStatus().permitted, "setup press");
+            h.boot();
+            h.sw = heldAtBoot;
+            h.quiet(1000);
+            require(!h.s().handsFreeStatus().permitted, "permission survived the reboot");
+            require(h.s().state != SystemState::Active, "reboot resumed control");
+            require(!h.s().resume(), "resume allowed while disabled");
+            if (heldAtBoot) {
+                h.quiet(3000);
+                require(!h.s().handsFreeStatus().permitted, "held button enabled control");
+                h.sw = false;
+                h.quiet(100);
+            }
+            h.click();
+            require(h.s().handsFreeStatus().permitted, "press after boot did not enable");
+            require(h.s().state != SystemState::Active, "enabling resumed control");
+        }
+    });
+    test("button: enabling needs the explicit resume gesture, then daily use works", [] {
+        HF h = buttonRig();
+        h.setup();
+        h.quiet(300);
+        require(!h.s().resume(), "resume before enabling");
+        h.click();
+        h.quiet(1000);
+        require(h.s().state == SystemState::Ready, "enabling changed the state");
+        perform(h, "nod2"); // the resume gesture
+        require(h.s().state == SystemState::Active, "resume gesture refused after enabling");
+        perform(h, "nod2");
+        require(h.s().state == SystemState::Paused, "pause gesture");
+        h.click(); // disable by button
+        require(!h.s().handsFreeStatus().permitted, "second press did not disable");
+        perform(h, "nod2");
+        require(h.s().state != SystemState::Active, "gesture resumed while disabled");
+    });
+    test("button: the disabling press stops movement at once, without another sample", [] {
+        HF h = buttonRig();
+        h.active();
+        h.run(hold(0, 25, 500)); // pointer moving
+        require(anyMovement(h.last()), "no movement precondition");
+        const size_t before = h.transport.reports.size();
+        h.s().setControlSwitch(true, h.now + 1); // the press edge; no tick follows
+        require(h.transport.reports.size() > before && h.released(), "movement not stopped");
+        require(h.s().state == SystemState::Paused && !h.s().handsFreeStatus().permitted, "state");
+    });
+    test("button: the disabling press stops scrolling at once", [] {
+        HF h = buttonRig();
+        h.active();
+        {
+            UserProfile profile = h.s().profile;
+            profile.scrollThreshold = 5;
+            profile.scrollGain = 3;
+            profile.scrollEnabled = true;
+            require(h.s().setProfile(profile, false), "profile");
+            h.quiet(300);
+            require(h.s().resume(), "resume");
+            h.quiet(400);
+        }
+        h.run(hold(2, -60, 1000));
+        bool scrolled = false;
+        for (const auto& r : h.transport.reports) {
+            scrolled = scrolled || r.wheel != 0;
+        }
+        require(scrolled, "no scrolling precondition");
+        h.s().setControlSwitch(true, h.now + 1);
+        require(h.released() && h.s().state == SystemState::Paused, "scrolling not stopped");
+    });
+    test("button: the disabling press cancels a dwell in progress, no click follows", [] {
+        HF h = buttonRig();
+        h.active();
+        moveAway(h);
+        h.quiet(900);
+        require(h.s().selection.dwell == DwellState::Progress, "dwell precondition");
+        h.s().setControlSwitch(true, h.now + 1);
+        const size_t mark = h.transport.reports.size();
+        h.sw = true;
+        h.quiet(60);
+        h.sw = false;
+        h.quiet(3000);
+        require(clicksSince(h, mark - 1) == 0 && quietSince(h, mark), "a dwell click survived");
+        require(h.s().state == SystemState::Paused, "state");
+    });
+    test("button: the disabling press releases a drag at once and never re-presses it", [] {
+        HF h = buttonRig();
+        h.active();
+        beginDrag(h);
+        const size_t before = h.transport.reports.size();
+        h.s().setControlSwitch(true, h.now + 1);
+        require(h.transport.reports.size() > before && h.released(), "no immediate release");
+        require(!h.s().dragging && h.s().state == SystemState::Paused, "drag survived");
+        h.sw = true;
+        h.quiet(100);
+        h.sw = false;
+        h.quiet(100);
+        h.click(); // enable again
+        perform(h, "nod2");
+        h.quiet(1000);
+        require(!h.last().down && !h.s().dragging, "drag came back");
+    });
+    test("button: failed neutral delivery keeps output inhibited and presses cannot bypass it", [] {
+        HF h = buttonRig();
+        h.active();
+        h.run(hold(0, 25, 300));
+        h.transport.fail = true; // the neutral report cannot be delivered
+        h.s().setControlSwitch(true, h.now + 1);
+        require(h.s().state == SystemState::SafeState, "undeliverable release was not a fault");
+        require(!h.s().handsFreeStatus().permitted, "permission survived the fault");
+        h.sw = true;
+        h.quiet(100);
+        h.sw = false;
+        h.quiet(100);
+        for (int press = 0; press < 3; ++press) { // presses while still failing
+            h.click();
+            require(h.s().state == SystemState::SafeState && !h.s().resume(), "bypassed fault");
+        }
+        h.transport.fail = false;
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovered into ACTIVE");
+        require(!h.s().handsFreeStatus().permitted || h.s().state != SystemState::Active,
+                "recovery bypassed");
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 40, 300));
+        require(quietSince(h, mark), "output without an explicit resume");
+    });
+    test("button: sensor fault recovery is not bypassed by presses; a new press is needed", [] {
+        HF h = buttonRig();
+        h.active();
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        require(h.s().state == SystemState::SafeState, "fault");
+        require(!h.s().handsFreeStatus().permitted, "permission survived the fault");
+        auto badTicks = [&](unsigned count) {
+            for (unsigned i = 0; i < count; ++i) {
+                h.now += 10;
+                h.s().setControlSwitch(h.sw, h.now);
+                h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+            }
+        };
+        for (int press = 0; press < 4; ++press) { // presses while the sensor is still bad
+            h.sw = true;
+            badTicks(6);
+            h.sw = false;
+            badTicks(6);
+            require(h.s().state == SystemState::SafeState && !h.s().resume(),
+                    "press bypassed fault");
+        }
+        h.quiet(600);
+        require(h.s().state == SystemState::Ready || h.s().state == SystemState::Paused,
+                "no recovery");
+        // The press count above was even, so permission is off again; an odd count permits.
+        if (!h.s().handsFreeStatus().permitted) {
+            h.click();
+        }
+        require(h.s().handsFreeStatus().permitted && h.s().state != SystemState::Active,
+                "enabling resumed control");
+        perform(h, "nod2");
+        require(h.s().state == SystemState::Active, "explicit gesture resume");
+    });
+    test("button: an invalid stored configuration stays inhibited whatever the button does", [] {
+        HF h = buttonRig();
+        h.setup();
+        h.s().pause();
+        for (auto& slot : h.configStorage.slots) {
+            if (!slot.empty()) {
+                slot[10] ^= 0xff;
+            }
+        }
+        h.boot();
+        require(h.s().interaction == InteractionMode::ConfigInvalid, "not invalid");
+        h.quiet(300);
+        for (int press = 0; press < 3; ++press) {
+            h.click();
+            require(!h.s().resume() && h.s().state != SystemState::Active,
+                    "bypassed invalid config");
+        }
+    });
+    test("button: a saved maintained-switch configuration keeps its meaning after reboot", [] {
+        HF h; // maintained rig
+        h.setup();
+        h.quiet(300);
+        h.boot();
+        h.sw = true;
+        h.quiet(300);
+        auto st = h.s().handsFreeStatus();
+        require(std::string(st.switchKind) == "MAINTAINED", "kind changed on reboot");
+        require(st.permitted && st.switchLatched == false, "maintained switch ON did not permit");
+        h.sw = false;
+        h.quiet(50);
+        require(!h.s().handsFreeStatus().permitted, "maintained OFF did not inhibit at once");
+        // Retraining and saving again must not silently convert it to the button.
+        require(h.trainGesture(GestureId::PauseResume, "nod2"), "retrain");
+        require(h.s().commitHandsFree(), "commit");
+        require(std::string(h.s().handsFreeStatus().switchKind) == "MAINTAINED", "converted");
+        h.boot();
+        require(std::string(h.s().handsFreeStatus().switchKind) == "MAINTAINED",
+                "converted on boot");
+    });
+    test("button: records written before the button existed decode as maintained, byte for byte",
+         [] {
+             // Golden record produced by the previous revision's encoder (generation 7).
+             const std::vector<uint8_t> golden = {
+                 0x4e, 0x44, 0x46, 0x48, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00,
+                 0x00, 0x00, 0x00, 0x00, 0x40, 0x40, 0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
+                 0x01, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x70, 0x41, 0x00, 0x00, 0xf0, 0x41,
+                 0x00, 0x00, 0x0c, 0x43, 0x3c, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x00, 0xc8, 0x00,
+                 0x00, 0x00, 0xdc, 0x05, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00,
+                 0x02, 0x00, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x70, 0x41, 0x00, 0x00, 0xf0, 0x41,
+                 0x00, 0x00, 0x0c, 0x43, 0x3c, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x00, 0xc8, 0x00,
+                 0x00, 0x00, 0xdc, 0x05, 0x00, 0x00, 0xd3, 0xad, 0x1a, 0xe9};
+             require(golden.size() == HandsFreeConfig::wireSize, "golden size");
+             HandsFreeConfig decoded;
+             uint32_t generation = 0;
+             require(decode(golden, decoded, generation) == ConfigState::Valid && generation == 7,
+                     "old record not accepted");
+             require(decoded.enabled && decoded.enableKind == EnableKind::Maintained,
+                     "reinterpreted");
+             require(encode(decoded, 7) == golden, "re-encoding an old record changed its bytes");
+             decoded.enableKind = EnableKind::Momentary;
+             const auto button = encode(decoded, 7);
+             HandsFreeConfig back;
+             require(decode(button, back, generation) == ConfigState::Valid &&
+                         back.enableKind == EnableKind::Momentary,
+                     "button record round trip");
+             HandsFreeConfig other = back;
+             other.enableKind = EnableKind::Maintained;
+             require(configId(other) != configId(back),
+                     "kind is not part of the configuration identity");
+         });
+    test("button: changing the input kind at commit starts disabled again", [] {
+        HF h; // saved maintained, switch ON and permitted
+        h.setup();
+        h.quiet(300);
+        require(h.s().handsFreeStatus().permitted, "maintained precondition");
+        h.s().stageEnableKind(EnableKind::Momentary);
+        require(h.s().commitHandsFree(), "commit");
+        require(std::string(h.s().handsFreeStatus().switchKind) == "MOMENTARY", "kind");
+        h.quiet(300); // the switch is still ON (pressed): not an enabling press
+        require(!h.s().handsFreeStatus().permitted, "kind change kept permission");
+        h.sw = false;
+        h.quiet(100);
+        h.click();
+        require(h.s().handsFreeStatus().permitted, "press after conversion");
+    });
+    test("button: an unconfigured enable input still inhibits and the button cannot be bypassed",
+         [] {
+             HF h = buttonRig();
+             h.setup();
+             h.s().configureEnableInput(false); // no pin wired
+             h.quiet(300);
+             h.click();
+             require(!h.s().handsFreeStatus().permitted && !h.s().resume(),
+                     "unwired input permitted");
+         });
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;

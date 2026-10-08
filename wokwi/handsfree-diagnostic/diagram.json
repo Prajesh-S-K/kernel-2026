@@ -5,7 +5,13 @@
   "parts": [
     { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 330, "attrs": {} },
     { "type": "wokwi-mpu6050", "id": "imu", "top": 20, "left": 0, "attrs": {} },
-    { "type": "wokwi-slide-switch", "id": "sw1", "top": 300, "left": 40, "attrs": { "value": "" } }
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn1",
+      "top": 300,
+      "left": 40,
+      "attrs": { "color": "green", "label": "ENABLE", "key": "e" }
+    }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
@@ -15,8 +21,8 @@
     [ "imu:SDA", "esp:8", "green", [] ],
     [ "imu:SCL", "esp:9", "blue", [] ],
     [ "imu:AD0", "esp:GND.1", "black", [] ],
-    [ "sw1:2", "esp:4", "orange", [] ],
-    [ "sw1:1", "esp:GND.1", "black", [] ]
+    [ "btn1:1.l", "esp:4", "orange", [] ],
+    [ "btn1:2.l", "esp:GND.1", "black", [] ]
   ],
   "dependencies": {}
 }

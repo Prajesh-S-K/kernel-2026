@@ -413,7 +413,7 @@ async function tick() {
       connected: $('ble').checked,
       automatic: true,
       fault: Number($('fault').value),
-      enabled: $('enableSwitch').checked,
+      enabled: handsFree.enableInput(device),
     });
     render(result);
   } catch (error) {
