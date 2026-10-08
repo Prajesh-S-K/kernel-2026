@@ -53,3 +53,50 @@ mark failures. Summaries show blocks separately and split incompatible settings 
 reused. Profile/source/geometry changes invalidate a block. Generic/adaptive comparisons apply
 identical temporary selection toggles; saved profiles remain unchanged by these overrides.
 HOST_CLICK trials on the desktop measure ordinary host pointing, not NodX adaptation.
+
+## Revision 3 additions: hands-free (additive)
+
+`protocol` stays 1; `protocolRevision` is 3. Every existing command, field and the 84-byte profile
+encoding are unchanged; old clients ignore the new object.
+
+**Commands** (native line protocol / serial; the bridge uses `action` objects):
+
+| Command | Bridge action | Notes |
+|---|---|---|
+| `enable 0\|1` | `{"action":"enable","enabled":bool}` | Simulated maintained switch (simulators only; refused by hardware firmware). `enabled` is required. OFF releases at once |
+| `step … fault [enable]` | `step` with optional `"enabled":bool` | Optional ninth integer 0/1; omitted keeps the current simulated switch state |
+| `gesture <nod\|turn\|tilt><1-3> [scale]` | `{"action":"gesture","name":"nod2","scale":1}` | Scripted synthetic motion (simulators only); scale 0.25–3 |
+| `train start pause\|drag` | `{"action":"train","op":"start","gesture":"pause"}` | Stops and releases output; needs a valid profile |
+| `train cancel` / `train accept` | `{"action":"train","op":"cancel\|accept"}` | Cancel keeps all stored/staged data; accept needs a validated pattern, stages only |
+| `handsfree commit` | `{"action":"handsfree","op":"commit"}` | Explicit conversion + save; `ok:false` with `faultCode:"STORAGE"` on a failed write |
+| `handsfree legacy` | `{"action":"handsfree","op":"legacy"}` | Saves the explicit compatibility choice; also repairs CONFIG_INVALID |
+| `handsfree switchless on\|off` | `{"action":"handsfree","op":"switchless","enabled":bool}` | Stages the alternative-to-switch qualification for the next commit |
+
+Malformed IDs, booleans, counts, names and nonfinite or out-of-range numbers are rejected by both
+the bridge (`ValueError` → HTTP 400) and the native/firmware parsers (`ok:false`); firmware lines
+stay bounded to 80 bytes.
+
+**Telemetry** `handsFree` object: `mode` (`LEGACY_SWITCH|HANDS_FREE|CONFIG_INVALID`), `config`
+(`MISSING|VALID|CORRUPT|UNSUPPORTED|OUT_OF_BOUNDS`), `configId` (8 hex digits of the CRC of the
+configuration *content*, `00000000` if none), `switch{present,on,permitted,switchless,switchlessStaged}`,
+`gesture{state,last,lastReject,candidates,rejected,executed,refused,suppressing}`, `drag`,
+`training{phase,gesture,accepted,required,rejects,validated,reason}`, `staged[2]`, `stored[2]`,
+`blocked` (why a resume would be refused, empty if allowed). `training.validated` means only that the helper's validation repeat was recognised by the software; it is **not** hardware or user validation, and every learned value stays a START value. Strings are static, quote-free text and
+all numbers are integers, so the JSON stays valid and finite in every state. System state `TRAINING`
+and cursor state `GESTURE` are new.
+
+**Configuration record** (`hf0.bin`/`hf1.bin`, NVS keys `hf0`/`hf1`): 136 bytes, little-endian words:
+magic `0x4846444e`, version 1, generation, flags (bit0 enabled, bit1 switchlessQualified), neutralRate
+(float), two templates of 14 words each (stroke count, six stroke slots `axis | 0x100 if sign +`,
+enterRate, peakMin, peakMax, strokeMin/Max, gapMax, totalMax), CRC32 of the preceding bytes. The
+two-slot rule matches profiles: newest valid generation wins, the older/invalid slot is rewritten and
+read back. Records that fail length, magic or CRC are CORRUPT; valid CRC with another version is
+UNSUPPORTED; non-finite, out-of-range, unused-slot or indistinct content is OUT_OF_BOUNDS. Only an
+empty pair of slots is MISSING (= legacy).
+
+**Raw trials** gain `interactionMode`, `gestureConfigId` and `gestureInterruptions` (recognition
+candidates opened during the attempt); the block context freezes the first two and the server rejects a
+trial that differs from its context. Aborted rows keep `abortReason` (for example
+`gesture configuration changed`, `drag active`, `gesture command executed`).
+
+**Replay CSV** may carry a ninth `enable` column (0/1, default 1). Native recordings now write it.

@@ -48,3 +48,35 @@ two-space JS, format/lint, native UBSAN and both ESP32-S3 builds.
 Browser acceptance additionally checks block abort after profile/state/geometry changes, matched
 selection toggles between conditions, per-block results, CSV persistence status and mobile controls.
 The GitHub workflow installs pinned development tools; remote execution is not claimed as evidence.
+
+## Hands-free revision (unreleased)
+
+Software gate additions (all deterministic, synthetic input; none proves an accidental-trigger rate,
+comfort or suitability):
+
+| Coverage | Where |
+|---|---|
+| Recognition: exactly once, partial/wrong-order/too-fast/too-slow/weak/strong/diagonal/gap/total rejections, neutral rearm, held posture, rollover, jitter, ambiguity, NaN, determinism, normal-movement corpus (150+ sequences) | `tests/test_handsfree.cpp` |
+| Configuration: bounds, distinctness, round trip and identity, every-byte corruption, unsupported/out-of-bounds/truncated, two-slot, save failures, torn write, interrupted multi-record setup (power-loss model), legacy preservation | `tests/test_handsfree.cpp` |
+| Training: repeated examples, too few strokes, noise, insufficient motion, off-axis, inconsistent, NaN/inf/extreme/timing faults, indistinguishable or prefix patterns, cancel, immediate release | `tests/test_handsfree.cpp` |
+| Conflicts, drag (11 release causes), enable switch, recovery, unconfigured switch, dwell lockout | `tests/test_handsfree.cpp` |
+| Native protocol: setup and daily workflow, strict command validation, truthful storage failures, corrupt/oversized records, switch semantics, transport failure, replay determinism, trial-context enforcement, telemetry size | `tests/test_handsfree_protocol.py` |
+| Companion logic: setup steps, training view, recovery guidance, Lab freezing/invalidation/grouping/raw columns, command queueing | `tests/handsfree.test.mjs` |
+| Mutation spot checks run during development: removing suppression, switch-OFF release, neutral rearm, the enable gate or drag release each makes the suite fail | recorded in EVIDENCE |
+
+Browser acceptance additions (manual, recorded in EVIDENCE): helper setup → training with retry → save;
+daily gesture resume, drag and switch OFF/ON; dwell click without a button; save-failure display;
+desktop and mobile layout, keyboard-accessible named controls, quiet live regions, reduced motion.
+
+### Hardware gate additions (all still required)
+
+| Order | Acceptance evidence to record |
+|---|---|
+| Enable switch | Wiring, clean waveform and bounce; OFF releases within one loop pass with the sensor stalled; unconfigured/disconnected switch inhibits; behaviour with a floating input |
+| Gestures | Per user: comfortable distinct patterns, training burden, repeatability across sessions and head mounts, noise at rest, drift; stroke thresholds against real gyro scale |
+| Accidental activation | Long unscripted sessions of normal pointing, scrolling, talking, reading, eating and fatigue; count candidates, rejections and executions per hour; report honestly |
+| Dwell + drag | Missed/unwanted clicks, lockout comfort, drag release on every stop cause including BLE disconnect during drag and host sleep |
+| Recovery | Fault, disconnect and reconnect never resume; qualification; resume by gesture only; held button after power cycle |
+| Storage | Hands-free record power-loss behaviour on NVS; corrupt/missing record handling; conversion interrupted at each step |
+| Companion | Hardware source labels, training over USB telemetry latency, recovery guidance accuracy |
+| Prior hardware items | Sensor initialisation/data-ready, exact N16R8 memory and USB configuration, BLE behaviour remain open |

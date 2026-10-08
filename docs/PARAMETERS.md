@@ -60,3 +60,24 @@ The lab's 32/56/80px target diameters, 12 trials and geometry are experiment des
 All V1 motion/filter/selection defaults and wire bytes are preserved. Recovery requires 20
 consecutive healthy checks including successful neutral output while connected. A fault resets
 qualification; a held switch must release and the user must resume explicitly.
+
+## Hands-free START values (unreleased, unvalidated)
+
+| Parameter | START | Unit / bound | Measurement needed |
+|---|---:|---|---|
+| Gesture smoothing | 0.5 | EMA alpha | Noise vs latency on the real sensor |
+| Neutral hold before arming | 300 | ms | Accidental-trigger rate vs responsiveness |
+| Slow-motion disarm | 120 | ms in [0.5·enter, enter) | Pointing that resembles a stroke start |
+| Stroke end / cross-axis ratio | 0.5 / 0.6 | × enterRate / × peak | Single-axis cleanliness of real nods and tilts |
+| Minimum trained peak | 20 | °/s | Weakest comfortable movement of target users |
+| Training examples / rejects allowed | 4 / 8 | count | Training burden |
+| Rest capture | 1000 ms, ≥80 samples | σ ≤ 4 °/s, \|mean\| ≤ 10 °/s | Real rest noise and bias |
+| Example wait / capture / validation | 6000 / 3000 / 20000 | ms | Helper pacing |
+| Learned neutralRate | clamp(3σ+1.5, 2, 8) | °/s, record bounds 1–10 | Real noise |
+| Learned template | peakMin 0.5×min, peakMax min(240,1.5×max); enter 0.5×peakMin; stroke 0.5×min–2×max; gap max(2×max,150); total 1.5×max | see spec bounds | Whether these margins fit real repeats |
+| Enable debounce | ON stable 30 ms, OFF immediate | ms | Switch bounce on a scope |
+| Enable GPIO | -1 (disabled); candidate GPIO4 | pin | Board schematic, wiring |
+| Dwell in hands-free | existing dwell values; lockout after resume/drag | ms / px | Unwanted-click rate, comfort |
+
+Templates learned in training are also START values: they are stored per user and marked unvalidated
+until measured. The record format bounds are defensive software limits, not human limits.

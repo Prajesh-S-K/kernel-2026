@@ -1,0 +1,109 @@
+PASS recognizer executes the nod pattern exactly once
+PASS recognizer tells the two patterns apart
+PASS partial pattern is rejected and executes nothing
+PASS wrong-order pattern is rejected
+PASS pattern whose first stroke has the wrong sign is not a candidate
+PASS too-fast pattern is rejected
+PASS too-slow pattern is rejected before it can suppress for long
+PASS weak motion never starts a candidate; a sub-minimum peak is rejected
+PASS excessive peak is rejected
+PASS diagonal movement is rejected as not single axis
+PASS gap and total time limits reject
+PASS neutral return is required before another command
+PASS held posture and repeated samples cannot retrigger indefinitely
+PASS timestamp rollover does not disturb recognition
+PASS irregular sample intervals still recognise exactly once
+PASS neutral hold is required before the first stroke
+PASS lingering slow motion disarms recognition
+PASS two identical templates are ambiguous and execute nothing
+PASS nonfinite sample resets recognition without executing
+PASS a disabled template is never recognised
+PASS recognition is deterministic for identical input
+PASS normal pointing, scrolling and drift never execute a command pattern
+PASS distinct requires different sequences and no prefix relation
+PASS template and set bounds are enforced
+PASS configuration round trip keeps identity independent of generation
+PASS configuration decode rejects every single-byte corruption
+PASS unsupported version is classified separately from corruption
+PASS out-of-bounds fields are classified even with a correct checksum
+PASS bad lengths are corrupt records
+PASS two-slot configuration: newest valid wins, torn write keeps prior, corrupt falls back
+PASS unusable configurations are refused at save time
+PASS telemetry strings are escape-free and the JSON is finite and bounded
+PASS new hands-free setup converts the profile to dwell and keeps the 84-byte format
+PASS an existing profile is untouched by boot, load, status, pause and unsaved training
+PASS missing configuration keeps legacy compatibility with the physical switch
+PASS a corrupt configuration inhibits control until the helper acts
+PASS unsupported and out-of-bounds configurations are inhibited and reported
+PASS a truncated configuration slot is corrupt, not silently ignored
+PASS explicit legacy mode survives a reboot and never silently re-enables
+PASS legacy constructor has no hands-free store and refuses setup commands
+PASS prior valid configuration survives a failed replacement and a reboot
+PASS failed profile write during conversion aborts without any change
+PASS failed configuration write restores the prior profile
+PASS interrupted multi-record setup never leaves hands-free partially enabled
+PASS profile reload without dwell blocks resume in hands-free mode
+PASS training learns a valid template from repeated examples and validates it
+PASS training rejects too few strokes and allows a retry
+PASS training rejects excessive rest noise
+PASS training rejects a rest period that is not at rest
+PASS training rejects insufficient motion
+PASS training rejects movement that is not on a single axis
+PASS training rejects inconsistent examples
+PASS training fails after too many rejected attempts
+PASS training cancels through the safe path on NaN data
+PASS training cancels through the safe path on infinity data
+PASS training cancels through the safe path on negative infinity data
+PASS training cancels through the safe path on extreme data
+PASS training cancels through the safe path on a timing fault
+PASS training with too few samples fails instead of accepting sparse data
+PASS training rejects patterns indistinguishable from the other gesture
+PASS training cancel preserves the prior configuration
+PASS training inhibits and releases output immediately
+PASS recalibration while hands-free keeps dwell enabled
+PASS recognition inhibits pointing, scrolling and dwell
+PASS no delayed dwell click after cancelled recognition
+PASS cancelled recognition does not replay accumulated pointer movement
+PASS normal pointing and scrolling examples never execute the trained commands
+PASS pause gesture takes priority over drag and dwell
+PASS helper pause outranks drag and a dwell in progress
+PASS simultaneous or ambiguous candidates execute no unsafe action
+PASS recognition beginning during a drag holds the button and suppresses movement
+PASS drag gesture starts and ends a drag with a dwell lockout afterwards
+PASS no dwell clicks while dragging
+PASS drag is released immediately on helper pause
+PASS drag is released immediately on pause gesture
+PASS drag is released immediately on enable switch OFF
+PASS drag is released immediately on calibration
+PASS drag is released immediately on training
+PASS drag is released immediately on profile change
+PASS drag is released immediately on configuration change
+PASS drag is released immediately on sensor fault
+PASS drag is released immediately on timing fault
+PASS drag is released immediately on transport failure
+PASS drag is released immediately on disconnect
+PASS no automatic re-press after fault recovery
+PASS switch OFF always inhibits output
+PASS switch OFF releases without waiting for another sensor sample
+PASS switch ON returns to an inhibited state, never ACTIVE
+PASS switch bounce does not produce unintended activation
+PASS a brief OFF flicker while active pauses and does not resume by itself
+PASS boot with the switch ON remains inhibited
+PASS resume gesture cannot override the switch being OFF
+PASS resume gesture cannot override faults
+PASS resume works after healthy qualification and a valid intentional gesture
+PASS a refused resume gesture is counted and changes nothing
+PASS an unconfigured switch cannot silently enable output; qualification can
+PASS reconnect and fault recovery never activate hands-free control
+PASS drag gesture is ignored unless control is active
+PASS enable gate: unknown input is OFF, OFF is immediate, ON needs a stable window
+PASS enable gate: an absent switch never permits unless qualified
+PASS legacy mode save failure is reported and leaves the mode unchanged
+PASS a torn first configuration write fails closed and a helper can repair it
+PASS training and commit need a profile, a healthy idle system and both patterns
+PASS gestures are not recognised while calibrating or training
+PASS after a resume gesture the user must move before the first dwell click
+PASS dwell click is exactly one press and release pair
+PASS staged patterns are discarded by a reboot and never persisted implicitly
+PASS replaying the same samples through two systems gives identical output
+108 passed, 0 failed
