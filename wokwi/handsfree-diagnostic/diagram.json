@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "author": "NodX Adapt diagnostic",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 330, "attrs": {} },
+    { "type": "wokwi-mpu6050", "id": "imu", "top": 20, "left": 0, "attrs": {} },
+    { "type": "wokwi-slide-switch", "id": "sw1", "top": 300, "left": 40, "attrs": { "value": "" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "imu:VCC", "esp:3V3.1", "red", [] ],
+    [ "imu:GND", "esp:GND.1", "black", [] ],
+    [ "imu:SDA", "esp:8", "green", [] ],
+    [ "imu:SCL", "esp:9", "blue", [] ],
+    [ "imu:AD0", "esp:GND.1", "black", [] ],
+    [ "sw1:2", "esp:4", "orange", [] ],
+    [ "sw1:1", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}
