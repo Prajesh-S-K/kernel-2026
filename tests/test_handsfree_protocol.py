@@ -229,6 +229,10 @@ class CommandValidation(HandsFreeCase):
                 SERVER.command_for(data)
         self.assertEqual(SERVER.command_for({"action": "enable", "enabled": False}), "enable 0")
         self.assertEqual(
+            SERVER.command_for({"action": "calibrate", "guided": True}), "calibrate guided"
+        )
+        self.assertEqual(SERVER.command_for({"action": "calibrate"}), "calibrate")
+        self.assertEqual(
             SERVER.command_for({"action": "gesture", "name": "tilt2"}), "gesture tilt2 1"
         )
         self.assertEqual(

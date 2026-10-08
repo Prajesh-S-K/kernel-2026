@@ -128,9 +128,13 @@ function render(data, applyReports = true) {
   $('pause').textContent = data.state === 'ACTIVE' ? 'Ⅱ Pause' : '▷ Resume';
   const cal = data.calibration;
   if (instructions[cal]) {
-    $('instruction').textContent = instructions[cal][0];
-    $('phaseDescription').textContent =
-      cal === 'FAILED'
+    const cue = Math.ceil((data.calibrationCueMs || 0) / 1000);
+    $('instruction').textContent = cue
+      ? `${cue} — get ready: ${instructions[cal][0].toLowerCase()}`
+      : instructions[cal][0];
+    $('phaseDescription').textContent = cue
+      ? 'Nothing is measured during the countdown.'
+      : cal === 'FAILED'
         ? data.calibrationReason
         : cal === 'COMPLETE'
           ? `Your ${labels.profile} profile is saved. Resume when ready.`
@@ -267,7 +271,7 @@ const performanceLab = createPerformanceLab({
 const handsFree = createHandsFreeView({ $, action, toast });
 handsFree.bind();
 document.querySelectorAll('.nav').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
-$('calibrate').onclick = () => action('calibrate');
+$('calibrate').onclick = () => action('calibrate', { guided: true });
 $('cancel').onclick = () => action('cancel');
 $('resume').onclick = () => action('resume');
 $('pause').onclick = () => action(device?.state === 'ACTIVE' ? 'pause' : 'resume');

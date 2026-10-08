@@ -21,6 +21,7 @@ constexpr uint32_t debounceMs = 30;
 constexpr float scrollThreshold = 12.f; // roll angle degrees
 constexpr float scrollGain = .8f;       // wheel units/second/degree beyond threshold
 constexpr uint32_t phaseMs = 1500;
+constexpr uint32_t calibrationCueMs = 3000; // guided calibration countdown before each phase
 constexpr uint32_t minPhaseSamples = 100;
 constexpr float minimumRange = 3.f;
 constexpr float maxRestSigma = 4.f;

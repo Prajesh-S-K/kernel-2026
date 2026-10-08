@@ -137,7 +137,7 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
               << "\",\"timeMs\":" << now << ",\"state\":\"" << name(s.state) << "\",\"reason\":\""
               << d.reason << "\",\"cursor\":\"" << d.cursor << "\",\"calibration\":\""
               << name(s.calibration.phase) << "\",\"calibrationReason\":\"" << s.calibration.reason
-              << "\",\"calibrationProgress\":" << s.calibration.progress(now) << ",\"dwell\":\""
+              << "\",\"calibrationProgress\":" << s.calibration.progress(now) << ",\"calibrationCueMs\":" << s.calibration.cueRemainingMs(now) << ",\"dwell\":\""
               << name(s.selection.dwell)
               << "\",\"dwellProgress\":" << s.selection.progress(now, s.profile)
               << ",\"cancellations\":" << s.selection.cancellations << ",\"faults\":" << d.faults
@@ -457,6 +457,14 @@ int main(int argc, char** argv) {
                     }
                 } else {
                     ok = false;
+                }
+            } else if (op == "calibrate" && !(cmd >> std::ws).eof()) {
+                std::string mode;
+                cmd >> mode;
+                ok = mode == "guided" && (cmd >> std::ws).eof();
+                if (ok) {
+                    sys.calibrate(now, start::calibrationCueMs);
+                    ok = sys.state == SystemState::Calibrating;
                 }
             } else if (!(cmd >> std::ws).eof()) {
                 ok = false;

@@ -52,7 +52,7 @@ public:
     System& operator=(const System&) = delete;
 
     void tick(MotionSample sample, uint32_t now, bool rawSwitch);
-    void calibrate(uint32_t now);
+    void calibrate(uint32_t now, uint32_t leadMs = 0);
     void cancelCalibration();
     bool resume();
     void pause();

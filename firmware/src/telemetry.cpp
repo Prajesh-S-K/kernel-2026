@@ -91,10 +91,11 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            ble.connected() ? "true" : "false");
     append(buffer, sizeof(buffer), used,
            "\"faultCode\":\"%s\",\"cursor\":\"%s\",\"calibrationReason\":\"%s\","
-           "\"calibrationProgress\":%.5f,\"dwellProgress\":%.5f,\"stability\":%.5f,\"motion\":[%."
+           "\"calibrationProgress\":%.5f,\"calibrationCueMs\":%lu,\"dwellProgress\":%.5f,\"stability\":%.5f,\"motion\":[%."
            "5f,%.5f,%.5f],\"reports\":[],\"profile\":{\"schema\":1,",
            name(s.diagnostics.faultCode), s.diagnostics.cursor, s.calibration.reason,
-           s.calibration.progress(now), s.selection.progress(now, s.profile),
+           s.calibration.progress(now), (unsigned long)s.calibration.cueRemainingMs(now),
+           s.selection.progress(now, s.profile),
            s.diagnostics.motion.stability, s.diagnostics.motion.x, s.diagnostics.motion.y,
            s.diagnostics.motion.roll);
     auto& p = s.profile;

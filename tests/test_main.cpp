@@ -210,6 +210,25 @@ int main() {
         c.tick({1500, {}, {0, 0, 1}, true}, 1500);
         require(c.phase == CalPhase::Failed, "sparse");
     });
+    test("guided calibration ignores samples during each countdown cue", [] {
+        CalibrationEngine c;
+        c.start(0, 3000);
+        require(c.cueRemainingMs(0) == 3000 && c.cueRemainingMs(2000) == 1000, "cue length");
+        // Motion during the cue must not reach the rest statistics (would fail 'rest too unstable').
+        for (uint32_t t = 10; t < 3000; t += 10) {
+            c.tick({t, {40, -40, 40}, {0, 0, 1}, true}, t);
+        }
+        require(c.phase == CalPhase::Rest && c.cueRemainingMs(2990) == 10, "still cueing");
+        uint32_t t = 3000;
+        for (; c.phase == CalPhase::Rest; t += 10) {
+            c.tick({t, {0.1f, 0, 0}, {0, 0, 1}, true}, t);
+        }
+        require(c.phase == CalPhase::Left && c.cueRemainingMs(t) > 2900, "next cue starts");
+        require(c.progress(t) >= 1.f / 6 - .01f && c.progress(t) < .2f, "progress stays sane");
+        CalibrationEngine plain;
+        plain.start(0);
+        require(plain.cueRemainingMs(0) == 0, "unguided has no cue");
+    });
     test("failed calibration storage preserves last profile", [] {
         Rig r;
         r.active();

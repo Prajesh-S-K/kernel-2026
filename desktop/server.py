@@ -93,7 +93,9 @@ def command_for(data):
         if operation == "enable" and data.get("kind") in ("maintained", "momentary"):
             return f"handsfree enable {data['kind']}"
         raise ValueError("Invalid hands-free request")
-    if action in ("status", "calibrate", "cancel", "resume", "pause", "generic", "load", "corrupt"):
+    if action == "calibrate":
+        return "calibrate guided" if data.get("guided") is True else "calibrate"
+    if action in ("status", "cancel", "resume", "pause", "generic", "load", "corrupt"):
         return action
     if action in ("dwell", "scroll"):
         return f"{action} {int(boolean(data, 'enabled'))}"

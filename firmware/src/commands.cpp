@@ -122,6 +122,14 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "calibrate" && !(input >> std::ws).eof()) {
+        std::string mode;
+        input >> mode;
+        ok = mode == "guided" && (input >> std::ws).eof();
+        if (ok) {
+            system.calibrate(now, nodx::start::calibrationCueMs);
+            ok = system.state == SystemState::Calibrating;
+        }
     } else if (ok && !(input >> std::ws).eof()) {
         ok = false;
     } else if (ok && operation == "calibrate") {

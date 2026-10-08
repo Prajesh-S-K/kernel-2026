@@ -277,6 +277,11 @@ void endToEndChecks() {
     reboot();
     pump(1500);
     expect(refused(send("resume")), "resume refused before calibration");
+    expect(refused(send("calibrate sideways")), "unknown calibrate argument refused");
+    expect(ok(send("calibrate guided")), "guided calibration started");
+    expect(has(status(), "\"calibrationCueMs\":2"),
+           "guided calibration reports its countdown cue");
+    expect(ok(send("cancel")), "guided calibration cancelled");
     expect(ok(send("calibrate")), "calibration started");
     runCalibration(12000);
     std::string ack = status();

@@ -121,12 +121,12 @@ void System::stop(SystemState next, uint32_t now) {
     feedback_.update(state_, now);
 }
 
-void System::calibrate(uint32_t now) {
+void System::calibrate(uint32_t now, uint32_t leadMs) {
     stop(SystemState::Calibrating, now);
     if (state_ != SystemState::Calibrating) {
         return;
     }
-    calibration_.start(now);
+    calibration_.start(now, leadMs);
     diagnostics_.reason = "calibration collecting";
 }
 
