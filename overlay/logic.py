@@ -207,8 +207,16 @@ class Dwell:
         self.since = 0.0
         self.locked: str | None = None
         self.progress = 0.0
+        self.restarts = 0  # diagnostics: movement beyond the tolerance restarted the dwell
+        self.events: list[dict] = []  # diagnostics: why a dwell restarted or was dropped
 
-    def reset(self) -> None:
+    def note(self, kind: str, **kw) -> None:
+        if len(self.events) < 200:
+            self.events.append({"kind": kind, "target": self.target, **kw})
+
+    def reset(self, why: str = "reset") -> None:
+        if self.target is not None and self.progress >= 0:
+            self.note(why, progress=round(self.progress, 2))
         self.target = None
         self.progress = 0.0
 
@@ -218,16 +226,21 @@ class Dwell:
         if target != self.locked:
             self.locked = None  # the control that was just chosen has been left
         if target is None:
-            self.reset()
+            self.reset("left")
             return False
         if target == self.locked:
             self.target, self.progress = target, 0.0  # chosen a moment ago: leave it first
             return False
         if target != self.target:
+            if self.target is not None:
+                self.note("changed", to=target)
             self.target, self.anchor, self.since, self.progress = target, pos, now, 0.0
             return False
-        if math.hypot(pos[0] - self.anchor[0], pos[1] - self.anchor[1]) > self.tolerance:
+        moved = math.hypot(pos[0] - self.anchor[0], pos[1] - self.anchor[1])
+        if moved > self.tolerance:
+            self.note("moved", moved=round(moved, 1), progress=round(self.progress, 2))
             self.anchor, self.since, self.progress = pos, now, 0.0
+            self.restarts += 1
             return False
         self.progress = min(1.0, (now - self.since) / max(0.05, dwell_s))
         if self.progress >= 1.0:
@@ -289,6 +302,9 @@ class OverlayModel:
             keyboard_clicks  # macos: suppress NodX target clicks while the keyboard is open
         )
         self.dwell = Dwell()
+        from .osk import Osk
+
+        self.osk = Osk()  # the NodX on-screen keyboard (typing requests come out of tick)
         self.claimed = False
         self.menu_open = (
             False  # the menu is expanded (selections possible once the device acknowledges)
@@ -323,7 +339,9 @@ class OverlayModel:
         self.notice, self.notice_until = text, now + seconds
 
     # ---- one tick ---------------------------------------------------------------------------------
-    def tick(self, now: float, pointer: tuple[float, float], layout: Layout) -> list[Command]:
+    def tick(
+        self, now: float, pointer: tuple[float, float], layout: Layout, osk_layout=None
+    ) -> list[Command]:
         out: list[Command] = []
         s = self.status
         a = _actions(s)
@@ -349,7 +367,9 @@ class OverlayModel:
                 self.say("The browser palette is active: turn it off first.", now)
             self._lose(now)
         hit = hit_test(layout, *pointer)
-        zone = on_overlay(layout, *pointer)
+        menu_zone = on_overlay(layout, *pointer)  # the tile/menu window
+        on_keyboard = bool(self.osk.open and osk_layout and osk_layout.frame.contains(*pointer))
+        zone = menu_zone or on_keyboard  # anywhere on the overlay: the device must not act on targets there
         dwell_s = (a.get("dwellMs") or DEFAULT_DWELL_S * 1000) / 1000.0
         if hit != "tile":
             self.tile_locked = False  # leaving the tile unlocks it
@@ -363,13 +383,22 @@ class OverlayModel:
             if ready and self.dwell.update(target, pointer, now, dwell_s):
                 out += self._choose(target, now)
             elif not ready:
-                self.dwell.reset()
-            if zone:
+                self.dwell.reset("not-ready")
+            if menu_zone:
                 self.left_at = None
             elif self.left_at is None:
                 self.left_at = now
             elif now - self.left_at > LEAVE_GRACE_S:
                 self._collapse()
+        if self.osk.open and osk_layout is not None:
+            busy = a.get("dragging") or a.get("scroll") == "ACTIVE"
+            typed = None
+            if self.claimed and self.state in ("tile", "menu") and not menu_zone and not busy:
+                typed = self.osk.update(osk_layout, pointer, now, dwell_s)
+            else:
+                self.osk.dwell.update(None, pointer, now, dwell_s)
+            if typed is not None:
+                out.append(Command("key", typed, self.session, self.epoch))
         # the overlay repeats whether the pointer is on it; the device acts on target dwells only while it is not
         if self.claimed and self.state in ("tile", "menu"):
             if zone != self.last_zone or now - self.last_beat >= HEARTBEAT_S:
@@ -415,8 +444,17 @@ class OverlayModel:
         self.tile_locked = True
         return out
 
+    def toggle_osk(self) -> bool:
+        """The Keyboard item: show or hide the NodX keyboard. Returns whether it is now shown."""
+        if self.osk.open:
+            self.osk.close()
+        else:
+            self.osk.show()
+        return self.osk.open
+
     def _lose(self, now: float) -> None:
         self.epoch += 1  # everything queued or in flight so far is now stale
+        self.osk.close()
         self.claimed = False
         self.menu_open = False
         self.state = "lost"
@@ -428,12 +466,44 @@ class OverlayModel:
             self.epoch += (
                 1  # the session ended: a delayed reply or queued command from it must not act
             )
+        self.osk.close()
         self.claimed = False
         self.menu_open = False
         self.state = "hidden"
         self.tile_locked = False
         self.dwell = Dwell()
         self.last_zone = False
+
+    # ---- diagnostics ------------------------------------------------------------------------------
+    def diagnostics(self, now: float, pointer: tuple[float, float], layout: Layout) -> dict:
+        """Why a menu dwell is or is not progressing (temporary bench aid, NODX_OVERLAY_DIAG=1)."""
+        a = _actions(self.status)
+        hit = hit_test(layout, *pointer)
+        if self.state != "menu":
+            reason = f"state {self.state}"
+        elif hit not in self_items(layout):
+            reason = "pointer not on an item" + (f" ({hit})" if hit else " (off the overlay)")
+        elif not (a.get("menu") is True and a.get("ready") is True):
+            reason = f"device not ready (menu={a.get('menu')} ready={a.get('ready')})"
+        elif self.dwell.locked == hit:
+            reason = "locked: leave the item first"
+        elif self.dwell.target != hit:
+            reason = "starting"
+        else:
+            reason = "dwelling"
+        return {
+            "hit": hit,
+            "target": self.dwell.target,
+            "progress": round(self.dwell.progress, 2),
+            "restarts": self.dwell.restarts,
+            "moved": round(math.hypot(pointer[0] - self.dwell.anchor[0], pointer[1] - self.dwell.anchor[1]), 1)
+            if self.dwell.target
+            else None,
+            "reason": reason,
+            "menu": a.get("menu"),
+            "ready": a.get("ready"),
+            "controller": a.get("controller"),
+        }
 
     # ---- the picture ------------------------------------------------------------------------------
     def view(self, now: float, layout: Layout | None = None) -> View:
@@ -469,7 +539,8 @@ class OverlayModel:
             one = (
                 " · one shot" if not a.get("keep") and a.get("mode") in ("RIGHT", "DOUBLE") else ""
             )
-            v.title, v.sub, v.colour = "NodX ▾", f"{label}{keep}{one}", "ready"
+            kbd = " · keyboard" if self.osk.open else ""
+            v.title, v.sub, v.colour = "NodX ▾", f"{label}{keep}{one}{kbd}", "ready"
             if a.get("keyboard"):
                 v.alert, v.colour = "KEYBOARD", "warn"
             if a.get("scroll") == "ACTIVE":

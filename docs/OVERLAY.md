@@ -69,8 +69,35 @@ So **Keyboard** does this:
   **KEYBOARD**, pointing continues, and NodX's own target dwell clicks are paused so a key is never pressed
   twice (the keyboard supplies its own dwell). Choosing **any action** in the menu, or **Keyboard** again, returns
   to ordinary NodX control; so do Pause/Stop, a fault and a disconnect.
-- Otherwise: it opens System Settings at the Accessibility pane (a supported deep link) and shows the one-time
-  setup. It does not claim the keyboard opened and does not change any setting.
+- Otherwise, with the default `--open-keyboard switch`: it asks macOS to switch the keyboard on by setting the
+  same preference the Settings switch stores (`virtualKeyboardOnOff` in `com.apple.universalaccess`; it sets only
+  that, never a dwell option, and never turns it off). This is **undocumented and unverified** on other macOS
+  versions, so the overlay waits up to 4 s for the keyboard's host process; if it does not start, it falls back to
+  opening System Settings at the Accessibility pane (a supported deep link) and shows the one-time setup. It never
+  claims the keyboard opened, and a host process that runs does not prove a keyboard is on screen.
+- With `--open-keyboard settings` it only opens the Settings pane and changes no setting.
+
+### The NodX keyboard (default, `--keyboard osk`)
+
+The **Keyboard** item shows a keyboard window at the bottom of the display that holds the tile. Keys are chosen by
+the overlay's own dwell (60 % of the device dwell time, never under 0.45 s); each key must be left before it can
+type again, **Shift** is one-shot, and **Close** (or **Keyboard** again, Pause / Stop, a lost link) hides it. Click
+where the text should go with the normal NodX click first: the keyboard never takes focus.
+
+- **One click generator.** The device does not act on target dwells while the pointer is over the overlay, and
+  the keyboard window is part of the overlay (reported to the device like the tile and menu), so a key is never
+  also clicked by NodX. The macOS Accessibility Keyboard and its dwell are not involved, and NodX clicking
+  elsewhere is not paused.
+- **Key events only, one permission.** The overlay posts key events (never mouse events) from one place,
+  `overlay/typing.py`, and only while it holds the controls, the link is fresh and the pointer is on a key. macOS
+  drops them unless the app running the overlay (named *Python*) is allowed under System Settings > Privacy &
+  Security > Accessibility. Until then the keyboard shows a "typing not allowed" line, opens that pane once, and
+  sends nothing; it starts typing within 2 s of the permission being granted.
+- **Not typed.** Nothing types while a button is held (Drag) or Scroll is active. Secure text fields may refuse
+  posted key events; do not use it for passwords. Layout is QWERTY letters, digits, a few punctuation keys,
+  space, Backspace and Return; there is no key repeat and no modifiers other than Shift.
+
+`--keyboard apple` keeps the macOS Accessibility Keyboard behaviour described above.
 
 One-time setup (do it yourself): System Settings > Accessibility > Keyboard > **Accessibility Keyboard** on, and
 turn on its **dwell** option so its keys are chosen by holding the pointer still. The exact wording of those

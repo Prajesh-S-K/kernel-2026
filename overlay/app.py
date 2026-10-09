@@ -53,9 +53,12 @@ from AppKit import (
 from Foundation import NSAttributedString, NSObject
 
 from . import logic as L
+from . import osk as K
 from .bridge import Bridge, Worker, body_for
 from .controller import Controller
+from .typing import Typer
 
+PAD_TEXT = 12.0
 SETTINGS = Path.home() / "Library" / "Application Support" / "NodX Overlay" / "position.json"
 
 COLOURS = {
@@ -147,6 +150,41 @@ class OverlayView(NSView):
         self.app.draw(self)
 
 
+class OskView(NSView):
+    """The NodX keyboard's content view: keys are drawn here, chosen only by the overlay's dwell."""
+
+    def initWithApp_(self, app):
+        self = objc.super(OskView, self).initWithFrame_(NSMakeRect(0, 0, 100, 100))
+        if self is None:
+            return None
+        self.app = app
+        return self
+
+    def isFlipped(self):
+        return True
+
+    def acceptsFirstMouse_(self, event):
+        return True
+
+    def mouseDown_(self, event):  # absorbed, like the tile: a physical click never reaches the window below
+        pass
+
+    def mouseUp_(self, event):
+        pass
+
+    def mouseDragged_(self, event):
+        pass
+
+    def rightMouseDown_(self, event):
+        pass
+
+    def scrollWheel_(self, event):
+        pass
+
+    def drawRect_(self, dirty):
+        self.app.draw_osk(self)
+
+
 class Target(NSObject):
     """The Objective-C target of the timer and the screen-change notification."""
 
@@ -177,11 +215,17 @@ class OverlayApp:
         self.tile = base
         self.layout = L.collapsed_layout(base)
         self.panel = self._make_panel(base)
+        self.osk_panel = self._make_panel(base)
+        self.osk_view = OskView.alloc().initWithApp_(self)
+        self.osk_panel.setContentView_(self.osk_view)
+        self.osk_shown = False
+        self.osk_layout = None
         self.view = OverlayView.alloc().initWithApp_(self)
         self.panel.setContentView_(self.view)
         self.shown = False
         self.timer = None
         self.pointer = None
+        self.diag = None
         self.quit_requested = False
         self.target = Target.alloc().initWithApp_(self)
         NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
@@ -269,14 +313,19 @@ class OverlayApp:
             1 / 30, self.target, "tick:", None, True
         )
 
+    def read_pointer(self):
+        loc = NSEvent.mouseLocation()
+        return loc.x, loc.y
+
     def tick(self):
         if self.quit_requested:
             self.shutdown()
             return
         now = time.monotonic()
-        loc = NSEvent.mouseLocation()  # global points, origin bottom-left, any display
+        px, py = self.read_pointer()  # global points, origin bottom-left, any display
         self.relayout()
-        self.controller.tick(now, (loc.x, loc.y), self.layout)
+        self.osk_layout = self._wanted_osk()
+        self.controller.tick(now, (px, py), self.layout, self.osk_layout)
         self.relayout()  # the state may have changed (expanded / collapsed)
         view = self.controller.model.view(now)
         if view.visible and not self.shown:
@@ -285,9 +334,40 @@ class OverlayApp:
         elif not view.visible and self.shown:
             self.panel.orderOut_(None)
             self.shown = False
-        self.pointer = (loc.x, loc.y)
+        self._show_osk(view)
+        self.pointer = (px, py)
+        self.diag = None
+        if os.environ.get("NODX_OVERLAY_DIAG") and view.visible:
+            self.diag = self.controller.model.diagnostics(now, self.pointer, self.layout)
+            self._diag_log(now, self.diag)
+        events, self.controller.model.dwell.events = self.controller.model.dwell.events, []
+        if os.environ.get("NODX_OVERLAY_DIAG") and events:
+            self._event_log(events)
         self.view.setNeedsDisplay_(True)
         self._debug(now, view)
+
+    def _wanted_osk(self):
+        """The NodX keyboard's layout on the display that holds the tile (None while it is closed)."""
+        if not self.controller.model.osk.open:
+            return None
+        visibles = [r for _n, r in screens()]
+        here = next((v for v in visibles if v.contains(self.tile.x + 1, self.tile.y + 1)), None)
+        return K.osk_layout(here or visibles[0])
+
+    def _show_osk(self, view):
+        want = self.osk_layout is not None and view.visible
+        if want:
+            f = self.osk_layout.frame
+            cur = self.osk_panel.frame()
+            if (cur.origin.x, cur.origin.y, cur.size.width, cur.size.height) != (f.x, f.y, f.w, f.h):
+                self.osk_panel.setFrame_display_(NSMakeRect(f.x, f.y, f.w, f.h), True)
+            if not self.osk_shown:
+                self.osk_panel.orderFrontRegardless()
+                self.osk_shown = True
+            self.osk_view.setNeedsDisplay_(True)
+        elif self.osk_shown:
+            self.osk_panel.orderOut_(None)
+            self.osk_shown = False
 
     def release_controls(self):
         """Tell the device the overlay is going away: close the menu report and release the claim, both under the
@@ -303,6 +383,28 @@ class OverlayApp:
         device's normal path). A crash or kill -9 cannot do this: the device then times the overlay out in 5 s."""
         self.release_controls()
         NSApplication.sharedApplication().terminate_(None)
+
+    def _event_log(self, events):
+        """Every dwell restart/drop with its cause, the pointer and the device's menu/ready (never rate-limited)."""
+        path = os.environ.get("NODX_OVERLAY_LOG")
+        if not path:
+            return
+        a = (self.controller.model.status or {}).get("actions") or {}
+        with open(path, "a") as out:
+            for e in events:
+                row = {"t": round(time.time(), 3), "event": e, "pointer": self.pointer,
+                       "menu": a.get("menu"), "ready": a.get("ready"), "controller": a.get("controller")}
+                out.write(json.dumps(row) + "\n")
+
+    def _diag_log(self, now, d):
+        """Append a diagnostics row (NODX_OVERLAY_LOG) when the reason or hovered item changes, at most 5 Hz."""
+        path = os.environ.get("NODX_OVERLAY_LOG")
+        row = (d["hit"], d["reason"], d["ready"], round(d["progress"], 1))
+        if not path or row == getattr(self, "_last_diag", None) or now - getattr(self, "_diag_at", 0) < 0.2:
+            return
+        self._last_diag, self._diag_at = row, now
+        with open(path, "a") as out:
+            out.write(json.dumps({"t": round(time.time(), 3), "diag": d, "pointer": self.pointer}) + "\n")
 
     def _debug(self, now, view):
         """NODX_OVERLAY_LOG=<file>: append one JSON line whenever the overlay's state changes (for bench notes)."""
@@ -348,6 +450,10 @@ class OverlayApp:
         ptr = getattr(self, "pointer", None)
         hover = L.hit_test(lay, *ptr) if ptr else None
         self._tile(lay.tile, v, fill, edge, hover == "tile", v.progress.get("tile", 0.0))
+        d = getattr(self, "diag", None)
+        if d:
+            text = f"{d['hit']} {d['progress']:.2f} r{d['restarts']} m{d['moved']} {d['reason']}"
+            _text(text, NSMakeRect(lay.tile.x + 4, lay.tile.y + lay.tile.h - 14, lay.tile.w - 8, 13), _attrs(9, False, (1, 1, 0.6)))
         for ident, label in L.MENU_ITEMS:
             rect = lay.items.get(ident)
             if rect is not None:
@@ -357,6 +463,39 @@ class OverlayApp:
                 self._banner(lay.banner, v)
             else:
                 self._notice(lay.banner, v.notice)
+
+    def draw_osk(self, view):
+        lay = self.osk_layout
+        model = self.controller.model
+        if lay is None or not model.osk.open:
+            return
+        self._rrect(L.Rect(0, 0, lay.frame.w, lay.frame.h), 14, (0.08, 0.10, 0.13), (0.45, 0.55, 0.60), 2.0)
+        ptr = getattr(self, "pointer", None)
+        over = K.osk_hit(lay, *ptr) if ptr else None
+        osk = model.osk
+        for key in lay.keys:
+            hovered = over is not None and over.ident == key.ident
+            on = key.kind == "shift" and osk.shift
+            fill = (0.30, 0.07, 0.08) if key.kind == "close" else ((0.07, 0.30, 0.26) if on else (0.16, 0.20, 0.24))
+            line = (1, 1, 1) if hovered else (0.45, 0.55, 0.60)
+            self._rrect(key.rect, 8, fill, line, 3.0 if hovered else 1.5)
+            label = key.label
+            if key.kind == "char" and osk.shift:
+                label = K.SHIFTED.get(label, label.upper())
+            size = 20 if key.kind in ("char", "backspace", "return", "shift") else 15
+            _text(
+                label,
+                NSMakeRect(key.rect.x + 8, key.rect.y + (key.rect.h - size - 6) / 2, key.rect.w - 16, size + 6),
+                _attrs(size, True, (0.95, 0.97, 0.98)),
+            )
+            if hovered and osk.dwell.target == key.ident and osk.dwell.progress > 0:
+                self._ring(key.rect.x + key.rect.w - 12, key.rect.y + 12, 7, osk.dwell.progress, (0.18, 0.83, 0.69))
+        if not osk.typing_allowed:
+            _text(
+                "TYPING NOT ALLOWED YET: see the notice",
+                NSMakeRect(PAD_TEXT, lay.frame.h - 18, lay.frame.w - 2 * PAD_TEXT, 14),
+                _attrs(11, True, (1.0, 0.69, 0.13)),
+            )
 
     def _rrect(self, r, radius, fill, line, width=2.0):
         path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
@@ -449,12 +588,20 @@ class OverlayApp:
         )
 
 
-def run(url: str, edge: str, keyboard_clicks: str) -> None:
+def run(
+    url: str, edge: str, keyboard_clicks: str, open_keyboard: str = "settings", keyboard: str = "apple"
+) -> None:
     bridge = Bridge(url)
     worker = Worker(bridge)
     from .logic import OverlayModel
 
-    controller = Controller(worker, OverlayModel(keyboard_clicks))
+    controller = Controller(
+        worker,
+        OverlayModel(keyboard_clicks),
+        opener=open_keyboard,
+        keyboard_kind=keyboard,
+        typer=Typer() if keyboard == "osk" else None,
+    )
     NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     app = OverlayApp(controller, edge)
 
@@ -526,6 +673,24 @@ def selftest(png_dir: str | None = None) -> dict:
             data.writeToFile_atomically_(path, True)
             written.append(path)
         results["png"] = written
+        # the NodX keyboard (Shift on, one key mid-dwell)
+        m = controller.model
+        m.osk.show()
+        m.osk.shift = True
+        app.osk_layout = K.osk_layout(L.Rect(0, 0, 1440, 870))
+        f = app.osk_layout.frame
+        app.osk_panel.setContentSize_((f.w, f.h))
+        app.osk_view.setFrame_(NSMakeRect(0, 0, f.w, f.h))
+        m.osk.dwell.target, m.osk.dwell.progress = "g", 0.6
+        k = app.osk_layout.key("g").rect
+        app.pointer = (f.x + k.x + k.w / 2, f.top - (k.y + k.h / 2))
+        rep = app.osk_view.bitmapImageRepForCachingDisplayInRect_(app.osk_view.bounds())
+        app.osk_view.cacheDisplayInRect_toBitmapImageRep_(app.osk_view.bounds(), rep)
+        path = os.path.join(png_dir, "overlay-9-nodx-keyboard.png")
+        rep.representationUsingType_properties_(NSBitmapImageFileTypePNG, {}).writeToFile_atomically_(
+            path, True
+        )
+        results["osk_png"] = path
     return results
 
 

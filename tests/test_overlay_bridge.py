@@ -160,6 +160,16 @@ class FakeKeyboard:
         self.opened += 1
         return True
 
+    switched = 0
+    switch_works = True
+
+    def switch_on(self):
+        self.switched += 1
+        return self.switch_works
+
+    def __getattr__(self, name):  # the message helpers live in the real module
+        return getattr(kb, name)
+
 
 def session_status(**kw):
     a = {"controller": "OVERLAY", "keyboard": False, "mode": "LEFT", "dwellMs": 1200}
@@ -189,6 +199,70 @@ class ControllerKeyboard(unittest.TestCase):
         self.assertNotIn(("keyboard", True), w.sent)
         self.assertIn("not running", m.notice)
         self.assertIn("One-time setup", m.notice)
+
+    def switching(self, running=False, clicks="macos"):
+        c, w, k, m = self.make(running, clicks)
+        c.opener = "switch"
+        m.claimed = True
+        return c, w, k, m
+
+    def test_switch_asks_macos_then_enters_keyboard_mode_once_the_host_runs(self):
+        c, w, k, m = self.switching()
+        c._keyboard(10.0)
+        self.assertEqual((k.switched, k.opened), (1, 0))
+        self.assertNotIn(("keyboard", True), w.sent, "asked, not yet opened")
+        self.assertIn("asked macOS", m.notice)
+        k.running = True
+        c._watch_keyboard(11.0)
+        self.assertIn(("keyboard", True), w.sent)
+        self.assertIn("cannot see whether a keyboard is on screen", m.notice)
+
+    def test_switch_falls_back_to_settings_when_the_host_never_starts(self):
+        c, w, k, m = self.switching()
+        c._keyboard(10.0)
+        c._watch_keyboard(12.0)
+        self.assertEqual(k.opened, 0, "still waiting")
+        c._watch_keyboard(15.0)
+        self.assertEqual(k.opened, 1)
+        self.assertNotIn(("keyboard", True), w.sent)
+        self.assertIn("did not start", m.notice)
+        self.assertIn("One-time setup", m.notice)
+
+    def test_a_failed_preference_write_opens_settings_at_once(self):
+        c, w, k, m = self.switching()
+        k.switch_works = False
+        c._keyboard(10.0)
+        self.assertEqual(k.opened, 1)
+        self.assertIsNone(c._opening_until)
+
+    def test_a_lost_claim_cancels_a_pending_keyboard_open(self):
+        c, w, k, m = self.switching()
+        c._keyboard(10.0)
+        m.claimed = False
+        k.running = True
+        c._watch_keyboard(11.0)
+        self.assertNotIn(("keyboard", True), w.sent)
+        self.assertIsNone(c._opening_until)
+
+    def test_settings_opener_never_writes_a_preference(self):
+        c, w, k, m = self.make(False)
+        c._keyboard(10.0)
+        self.assertEqual((k.switched, k.opened), (0, 1))
+
+    def test_the_preference_command_sets_only_the_keyboard_switch(self):
+        seen = []
+
+        class Done:
+            returncode = 0
+
+        def runner(cmd, **kw):
+            seen.append(cmd)
+            return Done()
+
+        self.assertTrue(kb.switch_on(runner))
+        self.assertEqual(
+            seen, [["defaults", "write", "com.apple.universalaccess", "virtualKeyboardOnOff", "-bool", "true"]]
+        )
 
     def test_selecting_keyboard_again_is_the_way_back_to_nodx_clicks(self):
         c, w, k, m = self.make(True, keyboard=True)
@@ -243,6 +317,13 @@ class KeyboardHelper(unittest.TestCase):
         self.assertIn("One-time setup", kb.SETUP_TEXT)
         self.assertIn("Accessibility Keyboard", kb.SETUP_TEXT)
         self.assertIn("not running", kb.MISSING_TEXT)
+
+    def test_with_nodx_clicking_the_setup_says_to_leave_macos_dwell_off(self):
+        nodx = kb.missing_text("nodx")
+        self.assertIn("not running", nodx)
+        self.assertIn("OFF", nodx)
+        self.assertNotIn("turn on its dwell", nodx)
+        self.assertIn("turn on its dwell", kb.missing_text("macos"))
 
 
 def free_port():
@@ -349,14 +430,18 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(L.session_active(final), False)
 
     def test_the_overlay_never_uses_a_serial_port_or_a_second_mouse_path(self):
-        source = (ROOT / "overlay").glob("*.py")
-        text = "\n".join(p.read_text() for p in source)
+        files = {p.name: p.read_text() for p in (ROOT / "overlay").glob("*.py")}
+        text = "\n".join(files.values())
+        # Key events are posted in exactly one place (the NodX keyboard's typer), and never mouse events.
+        for name, content in files.items():
+            if name != "typing.py":
+                self.assertNotIn("CGEventPost", content, name)
+        self.assertNotIn("Mouse", files["typing.py"])
         for forbidden in (
             "import serial",
             "serial.Serial",
             "pyserial",
             "/dev/cu.",
-            "CGEventPost",
             "CGEventCreateMouseEvent",
             "CGPostMouseEvent",
             "NSEventTypeLeftMouseDown",

@@ -1,4 +1,4 @@
-"""Launch: python -m overlay [--url URL] [--edge left|right] [--keyboard-clicks macos|nodx] [--selftest [DIR]]"""
+"""Launch: python -m overlay [--url URL] [--edge left|right] [--keyboard-clicks macos|nodx] [--keyboard osk|apple] [--open-keyboard switch|settings] [--selftest [DIR]]"""
 
 import argparse
 import json
@@ -19,6 +19,20 @@ def main(argv=None) -> int:
         default="macos",
         help="who clicks the Accessibility Keyboard's keys: the macOS dwell (NodX target clicks paused while "
         "the keyboard is open, the default) or NodX's own dwell clicks",
+    )
+    parser.add_argument(
+        "--keyboard",
+        choices=("osk", "apple"),
+        default="osk",
+        help="what the Keyboard item shows: the NodX keyboard (NodX dwell presses the keys; needs the macOS "
+        "permission to post key events) or the macOS Accessibility Keyboard",
+    )
+    parser.add_argument(
+        "--open-keyboard",
+        choices=("switch", "settings"),
+        default="switch",
+        help="what the Keyboard item does when the Accessibility Keyboard is not running: ask macOS to switch it "
+        "on (its own on/off preference; undocumented, checked, falls back to Settings) or only open Settings",
     )
     parser.add_argument(
         "--selftest",
@@ -44,7 +58,7 @@ def main(argv=None) -> int:
     if args.selftest is not None:
         print(json.dumps(app.selftest(args.selftest or None), indent=2))
         return 0
-    app.run(args.url, args.edge, args.keyboard_clicks)
+    app.run(args.url, args.edge, args.keyboard_clicks, args.open_keyboard, args.keyboard)
     return 0
 
 

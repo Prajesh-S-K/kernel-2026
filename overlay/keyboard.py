@@ -38,6 +38,17 @@ CLOSED_TEXT = (
 )
 GONE_TEXT = "The Accessibility Keyboard stopped running: NodX clicks are active again."
 MISSING_TEXT = "The Accessibility Keyboard is not running. " + SETUP_TEXT
+SETUP_TEXT_NODX = (
+    "One-time setup: System Settings > Accessibility > Keyboard > Accessibility Keyboard: switch it on and "
+    "leave all its dwell options OFF: NodX makes the clicks, so only one thing clicks. Then choose Keyboard again."
+)
+
+
+def missing_text(keyboard_clicks: str = "macos") -> str:
+    """What to tell the user when the keyboard is not running. With NodX doing the clicking, the macOS dwell
+    options must stay off (two click generators would double-click keys)."""
+    setup = SETUP_TEXT_NODX if keyboard_clicks == "nodx" else SETUP_TEXT
+    return "The Accessibility Keyboard is not running. " + setup
 
 
 def running_apps() -> list[tuple[str, str]]:
@@ -59,6 +70,26 @@ def keyboard_running(apps: list[tuple[str, str]] | None = None) -> bool:
         ):
             return True
     return False
+
+
+PREF_DOMAIN = "com.apple.universalaccess"
+PREF_KEY = "virtualKeyboardOnOff"  # the preference behind the Accessibility Keyboard switch (macOS 27.0.1)
+REQUESTED_TEXT = "Opening the Accessibility Keyboard (asked macOS to switch it on)..."
+NOT_STARTED_TEXT = "macOS did not start the Accessibility Keyboard. "
+
+
+def switch_on(runner=subprocess.run) -> bool:
+    """Ask macOS to switch the Accessibility Keyboard on by setting its own on/off preference, exactly what the
+    switch in System Settings stores. UNDOCUMENTED and unverified across macOS versions: the caller must check
+    that the host process really starts, and fall back to opening the Settings pane when it does not. It sets only
+    this one preference (never any dwell option) and never turns the keyboard off."""
+    try:
+        done = runner(
+            ["defaults", "write", PREF_DOMAIN, PREF_KEY, "-bool", "true"], timeout=5, check=False
+        )
+        return done.returncode == 0
+    except Exception:
+        return False
 
 
 def open_settings(runner=subprocess.run) -> bool:
