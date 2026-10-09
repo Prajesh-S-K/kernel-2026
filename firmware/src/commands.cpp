@@ -180,6 +180,9 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         if (verb == "enable") {
             ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
                  system.setActionPalette(value == "on", now);
+        } else if (verb == "keep") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setActionKeep(value == "on");
         } else if (verb == "hover") {
             nodx::PaletteTarget target;
             ok = nodx::parsePaletteTarget(value.c_str(), target) && (input >> std::ws).eof() &&
@@ -247,6 +250,11 @@ void command(const std::string& line, uint32_t now, bool truncated) {
                 if (ok) {
                     system.setUncalibratedReversal(horizontal == 1, vertical == 1);
                 }
+            } else if (value == "speed") {
+                // speed <factor 0.25-2>   (RAM only; works whether or not a session is running)
+                float factor = 0;
+                ok = bool(input >> factor) && (input >> std::ws).eof() &&
+                     system.setUncalibratedSpeed(factor, now);
             } else if (value == "dwell") {
                 // dwell on|off  |  dwell set <ms> <tolerance>   (RAM only, demo must be running)
                 std::string action;

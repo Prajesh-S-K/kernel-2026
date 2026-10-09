@@ -219,8 +219,100 @@ main {
   font-size: 22px;
   color: var(--stop);
 }
-@media (max-width: 380px) {
+@media (max-width: 220px) {
   .grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Compact layout: small enough to sit beside the working application (about 300 px wide). The hint text is
+   kept as the tile's tooltip and accessible name; the exit panel and DRAGGING banner stay large. */
+body {
+  font-size: 15px;
+}
+main {
+  padding: 8px;
+}
+.label {
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+.banner {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-width: 2px;
+  border-radius: 10px;
+}
+.banner strong {
+  font-size: 20px;
+}
+.banner span {
+  font-size: 12px;
+}
+.banner.dragging strong {
+  font-size: 34px;
+}
+.selected {
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  font-size: 14px;
+  border-width: 2px;
+}
+.grid {
+  gap: 8px;
+}
+.control {
+  min-height: 62px;
+  padding: 8px 10px;
+  border-width: 2px;
+  border-radius: 12px;
+}
+.control strong {
+  font-size: 17px;
+  padding-right: 34px;
+}
+.control small {
+  display: none;
+}
+.control.locked small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  padding-right: 0;
+}
+.control .ring {
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+}
+.control .ring::after {
+  inset: 6px;
+}
+.control.stop {
+  min-height: 52px;
+}
+.exit {
+  margin-bottom: 8px;
+  padding: 10px;
+  border-width: 3px;
+}
+.exit strong {
+  font-size: 22px;
+}
+.exit .bar {
+  height: 14px;
+  margin: 6px 0;
+}
+.exit span {
+  font-size: 12px;
+}
+.note {
+  margin: 4px 0;
+  font-size: 11px;
+}
+.more summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
 }

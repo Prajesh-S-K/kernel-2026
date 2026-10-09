@@ -122,6 +122,28 @@ unsigned waitFor(HF& h, const std::function<bool()>& done, unsigned maxMs) {
 void dwellOnTarget(HF& h) {
     qt(h, 1900);
 }
+// Move the pointer (head movement at `rate`) until `units` of outgoing movement have accumulated; returns
+// the ticks it took. This is what the dwell tolerance and the re-arming lockout actually count.
+unsigned moveUnits(HF& h, float units, float rate = 40.f) {
+    float sum = 0;
+    unsigned ticks = 0;
+    while (std::fabs(sum) < units && ticks < 4000) {
+        const size_t before = h.transport.reports.size();
+        tk(h, {rate, 0, 0});
+        for (size_t i = before; i < h.transport.reports.size(); ++i) {
+            sum += h.transport.reports[i].dx;
+        }
+        ++ticks;
+    }
+    return ticks;
+}
+float totalDx(const HF& h, size_t from) {
+    float sum = 0;
+    for (size_t i = from; i < h.transport.reports.size(); ++i) {
+        sum += h.transport.reports[i].dx;
+    }
+    return sum;
+}
 const char* mode(HF& h) {
     return h.s().actionsStatus(h.now).mode;
 }
@@ -1168,6 +1190,285 @@ int main() {
         g.transport.online = true;
         qt(g, 3000);
         require(!g.s().actionsStatus(g.now).frozen && g.s().state != SystemState::Active, "scroll survived");
+    });
+
+    test("pointer speed: validated, RAM only, default 1x, kept across session restarts until a reboot", [] {
+        HF h = rig();
+        require(h.s().uncalibratedSpeed() == 1.f, "default speed");
+        for (float bad : {0.f, -1.f, 0.24f, 2.01f, 5.f, std::nanf(""), INFINITY}) {
+            require(!h.s().setUncalibratedSpeed(bad, h.now), "an invalid speed was accepted");
+            require(h.s().uncalibratedSpeed() == 1.f, "an invalid speed changed the speed");
+        }
+        for (float good : {0.25f, 0.5f, 1.f, 1.5f, 2.f}) {
+            require(h.s().setUncalibratedSpeed(good, h.now) && h.s().uncalibratedSpeed() == good, "valid speed");
+        }
+        require(h.s().handsFreeStatus().uncalSpeed == 2.f, "speed not reported");
+        h.s().stopUncalibratedDemo("test");
+        require(h.s().uncalibratedSpeed() == 2.f, "a stop cleared the speed");
+        require(h.s().startUncalibratedDemo(h.now), "restart");
+        require(h.s().uncalibratedSpeed() == 2.f, "a restart changed the speed");
+        require(h.s().setUncalibratedSpeed(1.f, h.now), "reset");
+        h.s().setUncalibratedSpeed(0.5f, h.now);
+        h.boot(); // a reboot: nothing is remembered
+        require(h.s().uncalibratedSpeed() == 1.f, "the speed survived a reboot");
+        // saved profile untouched
+        HF p(true, EnableKind::Momentary);
+        UserProfile before, after;
+        require(p.repo.load(before), "profile");
+        p.s().setUncalibratedSpeed(2.f, p.now);
+        require(p.repo.load(after) && before.gain[0] == after.gain[0] && before.dwellMs == after.dwellMs,
+                "speed touched the saved profile");
+    });
+
+    test("pointer speed scales the pointer step before the output bounds, at 0.25x, 1x and 2x", [] {
+        float total[3];
+        const float speeds[3] = {.25f, 1.f, 2.f};
+        for (int i = 0; i < 3; ++i) {
+            HF h = rig();
+            require(h.s().setUncalibratedSpeed(speeds[i], h.now), "speed");
+            const size_t m = mark(h);
+            for (int t = 0; t < 150; ++t) {
+                tk(h, {10.f, 0, 0}); // a gentle movement: well inside the bounds at every speed
+            }
+            total[i] = totalDx(h, m);
+        }
+        std::printf("   INFO gentle 1.5 s movement: %.0f / %.0f / %.0f HID units at 0.25x / 1x / 2x\n",
+                    total[0], total[1], total[2]);
+        require(total[1] > 20, "no movement at 1x");
+        require(std::fabs(total[0] / total[1] - .25f) < .05f, "0.25x is not a quarter of 1x");
+        require(std::fabs(total[2] / total[1] - 2.f) < .2f, "2x is not double 1x");
+    });
+
+    test("pointer speed never lets a report beat the existing output bounds", [] {
+        for (float speed : {.25f, 1.f, 2.f}) {
+            HF h = rig();
+            require(h.s().setUncalibratedSpeed(speed, h.now), "speed");
+            const size_t m = mark(h);
+            for (int t = 0; t < 200; ++t) {
+                tk(h, {t % 2 ? 230.f : -230.f, 230.f, 0}); // the sensor range is 240 deg/s
+            }
+            int worst = 0;
+            for (size_t i = m; i < h.transport.reports.size(); ++i) {
+                worst = std::max({worst, std::abs(int(h.transport.reports[i].dx)),
+                                  std::abs(int(h.transport.reports[i].dy))});
+            }
+            require(worst <= int(start::uncalDemoMaxStep), "a report beat the demo step bound");
+            require(worst <= start::maxPointer, "a report beat the pointer bound");
+        }
+        // at 2x a strong movement is clipped by the SAME bound (the bound is not scaled)
+        HF h = rig();
+        h.s().setUncalibratedSpeed(2.f, h.now);
+        const size_t m = mark(h);
+        for (int t = 0; t < 100; ++t) {
+            tk(h, {230.f, 0, 0});
+        }
+        int worst = 0;
+        for (size_t i = m; i < h.transport.reports.size(); ++i) {
+            worst = std::max(worst, int(h.transport.reports[i].dx));
+        }
+        std::printf("   INFO strongest report at 2x: %d (bound %d)\n", worst, int(start::uncalDemoMaxStep));
+        require(worst == int(start::uncalDemoMaxStep), "the step bound was changed by the speed");
+    });
+
+    test("pointer speed does not change the wheel speed or button behaviour", [] {
+        float wheel[2];
+        const float speeds[2] = {.25f, 2.f};
+        for (int i = 0; i < 2; ++i) {
+            HF h = paletteRig();
+            require(h.s().setUncalibratedSpeed(speeds[i], h.now), "speed");
+            selectControl(h, PaletteTarget::Scroll);
+            moveUnits(h, 40.f);
+            qt(h, 300);
+            dwellOnTarget(h);
+            require(h.s().actionsStatus(h.now).frozen, "scroll did not start");
+            const size_t m = mark(h);
+            for (int t = 0; t < 200; ++t) {
+                tk(h, {0, 40.f, 0});
+            }
+            wheel[i] = float(seen(h, m).wheelAbs);
+            require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a button report while scrolling");
+        }
+        std::printf("   INFO wheel notches in 2 s of scrolling: %.0f at 0.25x, %.0f at 2x\n", wheel[0], wheel[1]);
+        require(wheel[0] > 5 && wheel[0] == wheel[1], "the wheel speed depends on the pointer speed");
+    });
+
+    test("dwell cancellation and re-arming at minimum, default and maximum pointer speed", [] {
+        unsigned ticksFor[3];
+        const float speeds[3] = {.25f, 1.f, 2.f};
+        for (int i = 0; i < 3; ++i) {
+            const float speed = speeds[i];
+            HF h = paletteRig();
+            require(h.s().setUncalibratedSpeed(speed, h.now), "speed");
+            // cancellation: part of a dwell, then movement beyond the tolerance (3 x 8 units)
+            qt(h, 700);
+            require(seen(h, 0).primary == 0, "clicked early");
+            const size_t m = mark(h);
+            ticksFor[i] = moveUnits(h, 24.f, 12.f);
+            qt(h, 900);
+            require(seen(h, m).primary == 0, "the interrupted dwell still clicked");
+            qt(h, 1500);
+            require(seen(h, m).primary == 1, "no click after the fresh dwell");
+            // lockout: movement under 1.5 x tolerance (12 units) does not re-arm, over it does
+            const size_t after = mark(h);
+            moveUnits(h, 6.f, 10.f); // a gentle movement; the filter tail adds a little more
+            qt(h, 300);
+            require(std::fabs(totalDx(h, after)) < 11.5f, "the test movement is not under the lockout radius");
+            qt(h, 4000);
+            require(seen(h, after).primary == 0, "re-armed by movement under the lockout radius");
+            moveUnits(h, 20.f, 12.f);
+            qt(h, 2300);
+            require(seen(h, after).primary == 1, "not re-armed by deliberate movement");
+        }
+        std::printf("   INFO ticks of head movement to accumulate 24 units: %u at 0.25x, %u at 1x, %u at 2x\n",
+                    ticksFor[0], ticksFor[1], ticksFor[2]);
+        require(ticksFor[0] >= 3 * ticksFor[2] && ticksFor[0] > ticksFor[1] && ticksFor[1] > ticksFor[2],
+                "a slower pointer did not need more head movement");
+    });
+
+    test("changing the pointer speed restarts a dwell in progress (its movement units changed meaning)", [] {
+        HF h = paletteRig();
+        qt(h, 900);
+        require(h.s().actionsStatus(h.now).dwellProgress > .2f, "no dwell progress to lose");
+        const size_t m = mark(h);
+        require(h.s().setUncalibratedSpeed(.5f, h.now), "speed");
+        tk(h);
+        require(h.s().actionsStatus(h.now).dwellProgress < .05f, "the old dwell survived a speed change");
+        qt(h, 900);
+        require(seen(h, m).primary == 0, "clicked on the old dwell");
+        qt(h, 1500);
+        require(seen(h, m).primary == 1, "no click after the fresh dwell");
+    });
+
+    test("the same head movement re-arms at 1x but not at 0.25x (the documented effect of speed)", [] {
+        // find a movement length that gives about 20 units at 1x
+        unsigned n = 0;
+        {
+            HF probe = paletteRig();
+            n = moveUnits(probe, 20.f, 12.f);
+        }
+        require(n >= 2 && n < 200, "calibration of the movement failed");
+        auto rearms = [&](float speed) {
+            HF h = paletteRig();
+            require(h.s().setUncalibratedSpeed(speed, h.now), "speed");
+            dwellOnTarget(h);
+            const size_t m = mark(h);
+            for (unsigned t = 0; t < n; ++t) {
+                tk(h, {12.f, 0, 0});
+            }
+            qt(h, 2500);
+            return seen(h, m).primary == 1;
+        };
+        require(rearms(1.f), "1x did not re-arm");
+        require(rearms(2.f), "2x did not re-arm");
+        require(!rearms(.25f), "0.25x re-armed from a movement that is too small in HID units");
+    });
+
+    test("keep selected action: off by default; Right and Double return to Left unless it is on", [] {
+        HF h = paletteRig();
+        require(!h.s().actionsStatus(h.now).keep, "keep is on by default");
+        selectControl(h, PaletteTarget::Right);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(std::strcmp(mode(h), "LEFT") == 0, "Right did not return to Left by default");
+        // turn it on: Right stays through three executions
+        require(h.s().setActionKeep(true), "keep refused");
+        selectControl(h, PaletteTarget::Right);
+        const size_t m = mark(h);
+        for (int i = 0; i < 3; ++i) {
+            moveAway(h);
+            dwellOnTarget(h);
+            require(std::strcmp(mode(h), "RIGHT") == 0, "Right did not stay selected");
+        }
+        require(seen(h, m).secondary == 3 && seen(h, m).primary == 0, "not three right clicks");
+        // Double likewise
+        selectControl(h, PaletteTarget::Double);
+        const size_t d = mark(h);
+        for (int i = 0; i < 2; ++i) {
+            moveAway(h);
+            dwellOnTarget(h);
+            require(std::strcmp(mode(h), "DOUBLE") == 0, "Double did not stay selected");
+        }
+        require(seen(h, d).primary == 4, "not two double-clicks");
+        // turning it off: the next execution is the last
+        h.s().setActionKeep(false);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(std::strcmp(mode(h), "LEFT") == 0, "mode did not return after keep was turned off");
+    });
+
+    test("keep selected action never applies to Drag or Scroll, and Cancel still clears the action", [] {
+        for (bool keep : {false, true}) {
+            HF h = paletteRig();
+            h.s().setActionKeep(keep);
+            // Scroll: the exit always returns to Left; starting again needs its own dwell on the content
+            selectControl(h, PaletteTarget::Scroll);
+            moveAway(h);
+            dwellOnTarget(h);
+            require(h.s().actionsStatus(h.now).frozen, "scroll did not start");
+            qt(h, 2000);
+            require(!h.s().actionsStatus(h.now).frozen && std::strcmp(mode(h), "LEFT") == 0,
+                    "scroll did not exit to Left");
+            moveAway(h);
+            dwellOnTarget(h);
+            require(!h.s().actionsStatus(h.now).frozen, "scroll restarted by itself");
+            // Drag: a release never presses again without its own dwell
+            selectControl(h, PaletteTarget::Drag);
+            moveAway(h);
+            dwellOnTarget(h);
+            require(h.s().actionsStatus(h.now).dragging, "no press");
+            qt(h, 2000);
+            require(!h.s().actionsStatus(h.now).dragging, "no release");
+            const size_t m = mark(h);
+            qt(h, 4000);
+            require(seen(h, m).primary == 0, "a drag restarted by itself");
+            // Cancel clears the selected action even with keep on
+            selectControl(h, PaletteTarget::Right);
+            selectControl(h, PaletteTarget::Cancel);
+            require(std::strcmp(mode(h), "LEFT") == 0, "Cancel did not clear the action");
+            require(h.s().actionsStatus(h.now).keep == keep, "Cancel changed the keep option");
+        }
+    });
+
+    test("session restart defaults: keep off, palette off, Left-click; speed is kept (RAM)", [] {
+        HF h = paletteRig();
+        h.s().setActionKeep(true);
+        h.s().setUncalibratedSpeed(1.5f, h.now);
+        selectControl(h, PaletteTarget::Right);
+        require(std::strcmp(mode(h), "RIGHT") == 0 && h.s().actionsStatus(h.now).keep, "precondition");
+        h.s().stopUncalibratedDemo("test");
+        require(h.s().startUncalibratedDemo(h.now), "restart");
+        qt(h, 300);
+        require(!h.s().actionPaletteEnabled(), "palette on after a restart");
+        require(!h.s().setActionKeep(true), "keep accepted with the palette off");
+        require(h.s().setActionPalette(true, h.now), "palette refused");
+        report(h, PaletteTarget::None);
+        qt(h, 100);
+        const auto st = h.s().actionsStatus(h.now);
+        require(!st.keep && std::strcmp(st.mode, "LEFT") == 0, "stale keep or action after a restart");
+        require(h.s().uncalibratedSpeed() == 1.5f, "speed lost across a restart");
+    });
+
+    test("website Stop and the physical button stop immediately at 0.25x and 2x with keep on", [] {
+        for (float speed : {.25f, 2.f}) {
+            for (bool physical : {false, true}) {
+                HF h = paletteRig();
+                h.s().setUncalibratedSpeed(speed, h.now);
+                h.s().setActionKeep(true);
+                selectControl(h, PaletteTarget::Drag);
+                moveUnits(h, 30.f);
+                qt(h, 300);
+                dwellOnTarget(h);
+                require(h.s().actionsStatus(h.now).dragging, "precondition");
+                if (physical) {
+                    h.click();
+                } else {
+                    h.s().stopUncalibratedDemo("website stop");
+                }
+                require(h.s().state != SystemState::Active && h.released(), "not stopped at once");
+                qt(h, 2000);
+                require(h.s().state != SystemState::Active && h.released(), "output after the stop");
+            }
+        }
     });
 
     std::printf("%d passed, %d failed\n", passed, failed);

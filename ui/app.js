@@ -6,10 +6,12 @@ import { createHandsFreeView } from './handsfree-view.js';
 import { mappingView } from './mapping.js';
 import { clickView } from './click.js';
 import { quickView } from './quick.js';
-import { LINK_NOTE, PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
+import { KEEP_NOTE, LINK_NOTE, PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
 import {
   BANNER,
   DWELL_NOTE,
+  SPEED_NOTE,
+  speedText,
   ROTATION_GUIDE,
   mappingLines,
   pauseOnBlur,
@@ -431,6 +433,8 @@ function renderActions(data) {
     `${view.banner.exitHint ? `${view.banner.exitHint}. ` : ''}${view.banner.detail}`;
   $('actionsEnable').disabled = !view.canEnable && !view.enabled;
   $('actionsEnable').checked = view.enabled;
+  $('actionsKeep').disabled = !view.enabled;
+  $('actionsKeep').checked = view.enabled && a.keep;
   $('actionsStop').disabled = data.state !== 'ACTIVE';
   $('actionsBar').style.width = `${Math.round((a.scroll === 'ACTIVE' ? a.exitProgress : a.dwell.progress) * 100)}%`;
   for (const [id, value] of [
@@ -438,7 +442,7 @@ function renderActions(data) {
     ['actionsTol', a.tolerance],
   ])
     if (document.activeElement !== $(id) && value) $(id).value = value;
-  $('actionsNote').textContent = `${PALETTE_NOTE} ${SCROLL_NOTE} ${LINK_NOTE}`;
+  $('actionsNote').textContent = `${PALETTE_NOTE} ${KEEP_NOTE} ${SCROLL_NOTE} ${LINK_NOTE}`;
   $('actionsStats').textContent = [view.stats, view.link].filter(Boolean).join(' · ');
   $('actionsBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
   if (view.enabled) {
@@ -544,6 +548,9 @@ function renderUncal(data) {
   $('uncalStart').disabled = !view.canStart;
   $('uncalStop').disabled = !view.active;
   $('uncalStopBanner').disabled = !view.active;
+  if (document.activeElement !== $('uncalSpeed')) $('uncalSpeed').value = view.u.speed;
+  $('uncalSpeedValue').textContent = speedText(view.u.speed);
+  $('uncalSpeedNote').textContent = SPEED_NOTE;
   if (document.activeElement !== $('uncalRevX')) $('uncalRevX').checked = view.u.reverseX;
   if (document.activeElement !== $('uncalRevY')) $('uncalRevY').checked = view.u.reverseY;
   $('uncalDwell').disabled = !view.canEnableDwell;
@@ -575,6 +582,12 @@ for (const id of ['uncalRevX', 'uncalRevY'])
       horizontal: $('uncalRevX').checked,
       vertical: $('uncalRevY').checked,
     });
+$('uncalSpeed').oninput = () => {
+  $('uncalSpeedValue').textContent = speedText($('uncalSpeed').value);
+};
+$('uncalSpeed').onchange = () =>
+  action('handsfree', { op: 'uncalspeed', factor: Number($('uncalSpeed').value) });
+$('uncalSpeedReset').onclick = () => action('handsfree', { op: 'uncalspeed', factor: 1 });
 $('uncalDwell').onchange = () =>
   action('handsfree', { op: 'uncaldwell', enabled: $('uncalDwell').checked });
 $('uncalDwellApply').onclick = () =>
@@ -602,6 +615,8 @@ for (const [id, extra] of [
   $(id).onclick = () => action('quick', extra);
 $('actionsEnable').onchange = () =>
   action('actions', { op: 'enable', enabled: $('actionsEnable').checked });
+$('actionsKeep').onchange = () =>
+  action('actions', { op: 'keep', enabled: $('actionsKeep').checked });
 $('actionsStop').onclick = () => action('control', { op: 'stop' });
 $('actionsApply').onclick = () =>
   action('handsfree', {
@@ -610,7 +625,7 @@ $('actionsApply').onclick = () =>
     tolerance: Number($('actionsTol').value),
   });
 $('actionsOpen').onclick = () => {
-  const opened = window.open('palette.html', 'nodxPalette', 'popup,width=420,height=700');
+  const opened = window.open('palette.html', 'nodxPalette', 'popup,width=300,height=560');
   if (!opened) toast('The palette window was blocked: allow pop-ups for this page, then try again.');
 };
 $('quickEnable').onchange = () =>

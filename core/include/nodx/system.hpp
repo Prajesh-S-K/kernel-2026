@@ -102,6 +102,14 @@ public:
     bool setUncalibratedDwellSettings(uint32_t dwellMs, float tolerance);
     // Fallback pointing controls (RAM only): swap the sign of horizontal and/or vertical movement.
     void setUncalibratedReversal(bool horizontal, bool vertical);
+    // Fallback pointer speed (RAM only, never saved; kept until a reboot or a reset to 1x): a 0.25x-2x
+    // multiplier on the pointer step, applied BEFORE the existing output bounds. Wheel speed, gesture
+    // thresholds and button behaviour do not use it. The dwell tolerance counts accumulated outgoing
+    // movement, so it changes with the speed: a slower pointer needs more head movement to leave it.
+    bool setUncalibratedSpeed(float factor, uint32_t now);
+    float uncalibratedSpeed() const {
+        return uncalSpeed_;
+    }
     // Physical enable permission for the fallback demo. On by default; only tests relax it.
     void setUncalibratedNeedsEnable(bool required) {
         uncalNeedsEnable_ = required;
@@ -164,6 +172,8 @@ public:
     // and never clicks. Leaving the palette clears and re-arms the dwell.
     bool setActionPalette(bool on, uint32_t now);
     bool setActionHover(PaletteTarget target, uint32_t now);
+    // "Keep selected action" (needs the palette on; off at every start): Right and Double stay selected.
+    bool setActionKeep(bool on);
     bool actionPaletteEnabled() const {
         return uncal_ && actionsEnabled_;
     }
@@ -265,6 +275,7 @@ private:
     bool uncalNeedsEnable_ = true; // physical enable permission is required (tests may relax it)
     bool uncalPrevPress_ = false;  // without the requirement a press still only STOPS the demo
     bool uncalReverseX_ = false, uncalReverseY_ = false; // RAM only, user controls
+    float uncalSpeed_ = start::uncalSpeedDefault;        // RAM only, fallback pointer speed multiplier
     uint32_t refused_ = 0;
 
     Vec3 clickFrame(const MotionSample& raw, const MotionSample& mapped, bool configuredFrame) const;

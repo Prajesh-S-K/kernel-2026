@@ -84,6 +84,7 @@ void ActionPalette::reset() {
     pending_ = false;
     releaseUnconfirmed_ = false;
     lockedTarget_ = PaletteTarget::None;
+    keep_ = false; // the option is off at every session and every reset
 }
 void ActionPalette::clearCounters() {
     last = PaletteTarget::None;
@@ -160,12 +161,16 @@ void ActionPalette::execute(ActionOutput& out, uint32_t now) {
     case ActionMode::Right:
         out.pulse = out.right = true;
         ++right;
-        mode_ = ActionMode::Left;
+        if (!keep_) {
+            mode_ = ActionMode::Left;
+        }
         break;
     case ActionMode::Double:
         out.pulse = out.twice = true;
         ++doubles;
-        mode_ = ActionMode::Left;
+        if (!keep_) {
+            mode_ = ActionMode::Left;
+        }
         break;
     case ActionMode::Drag:
         dragging_ = true;
@@ -302,7 +307,7 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
     const int written = std::snprintf(
         out, capacity,
         "{\"enabled\":%s,\"mode\":\"%s\",\"dragging\":%s,\"scroll\":\"%s\",\"frozen\":%s,"
-        "\"hover\":\"%s\",\"inPalette\":%s,\"last\":\"%s\",\"selections\":%lu,"
+        "\"hover\":\"%s\",\"inPalette\":%s,\"last\":\"%s\",\"keep\":%s,\"selections\":%lu,"
         "\"dwellMs\":%lu,\"tolerance\":%.1f,\"neutral\":%.1f,"
         "\"dwell\":{\"state\":\"%s\",\"progress\":%.3f},\"exit\":{\"progress\":%.3f},"
         "\"locked\":\"%s\","
@@ -314,7 +319,7 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         "\"blocked\":\"%s\"}",
         s.enabled ? "true" : "false", s.mode, s.dragging ? "true" : "false", s.scroll,
         s.frozen ? "true" : "false", s.hover, s.inPalette ? "true" : "false", s.last,
-        static_cast<unsigned long>(s.selections), static_cast<unsigned long>(s.dwellMs),
+        s.keep ? "true" : "false", static_cast<unsigned long>(s.selections), static_cast<unsigned long>(s.dwellMs),
         s.tolerance, s.neutral, s.dwellState, s.dwellProgress, s.exitProgress, s.locked,
         static_cast<unsigned long>(s.left), static_cast<unsigned long>(s.right),
         static_cast<unsigned long>(s.doubles), static_cast<unsigned long>(s.dragStarts),

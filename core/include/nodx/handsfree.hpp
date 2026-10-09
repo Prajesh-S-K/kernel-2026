@@ -136,7 +136,7 @@ struct HandsFreeStatus {
     const char* uncalPermission = "NONE"; // WEBSITE_START (fallback), ENABLE_BUTTON (configured)
     const char* uncalBlocked = "";
     const char* profileState = "MISSING";
-    float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0;
+    float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0, uncalSpeed = 1.f;
     bool uncalDwellEnabled = false;
     uint32_t uncalDwellMs = 0, uncalClicks = 0;
     float uncalDwellTolerance = 0, uncalDwellProgress = 0;

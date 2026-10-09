@@ -384,6 +384,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     if (uncal_ && !configured_) { // learned mapping needs no reversal: relearn instead
         intent.dx = uncalReverseX_ ? -intent.dx : intent.dx;
         intent.dy = uncalReverseY_ ? -intent.dy : intent.dy;
+        // Pointer speed: before every output bound (the demo step bound, the gate, the HIDManager).
+        intent.dx *= uncalSpeed_;
+        intent.dy *= uncalSpeed_;
     }
     if (movementOnly) {
         intent.wheel = 0; // scrolling still suppresses pointing, but nothing is scrolled
@@ -1456,6 +1459,26 @@ bool System::setActionPalette(bool on, uint32_t now) {
     diagnostics_.reason = "EXPERIMENTAL dwell action palette on; Left-click is selected";
     return true;
 }
+bool System::setActionKeep(bool on) {
+    if (!uncal_ || !actionsEnabled_) {
+        return false;
+    }
+    palette_.setKeep(on);
+    return true;
+}
+bool System::setUncalibratedSpeed(float factor, uint32_t now) {
+    if (!std::isfinite(factor) || factor < start::uncalSpeedMin || factor > start::uncalSpeedMax) {
+        return false;
+    }
+    if (factor != uncalSpeed_) {
+        uncalSpeed_ = factor;
+        if (uncal_) {
+            // Accumulated movement now means something different: start a fresh dwell.
+            selection_.reset(false, now);
+        }
+    }
+    return true;
+}
 bool System::setActionHover(PaletteTarget target, uint32_t now) {
     if (!uncal_ || !actionsEnabled_) {
         return false;
@@ -1483,6 +1506,7 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
     st.cancelled = palette_.cancelled;
     st.paletteReleases = palette_.paletteReleases;
     st.commitMs = start::actionCommitMs;
+    st.keep = palette_.keep();
     st.drops = palette_.drops;
     st.cancels = palette_.cancels;
     st.confirmedReleases = palette_.confirmedReleases;
@@ -1563,6 +1587,7 @@ HandsFreeStatus System::handsFreeStatus() const {
     s.uncalPermission = !uncal_ ? "NONE" : configured_ ? "ENABLE_BUTTON" : "WEBSITE_START";
     s.uncalPresent = uncalGate_.present();
     s.uncalPermitted = uncalGate_.permitted();
+    s.uncalSpeed = uncalSpeed_;
     s.uncalReverseX = uncalReverseX_;
     s.uncalReverseY = uncalReverseY_;
     s.uncalDwellEnabled = uncal_ && uncalDwell_;

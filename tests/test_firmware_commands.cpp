@@ -431,7 +431,7 @@ void hardwareChecks() {
     // 5120-byte telemetry buffer, otherwise the firmware silently drops it.
     expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
            "hardware telemetry has the raw sensor block");
-    expect(ack.size() < 4200, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
+    expect(ack.size() < 4400, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
     std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
@@ -509,6 +509,16 @@ void hardwareChecks() {
     expect(refused(send("actions hover drop")) && refused(send("actions hover cancel")) &&
                refused(send("actions hover frame")),
            "new hover targets are parsed but refused while the palette is off");
+    expect(refused(send("actions keep on")) && refused(send("actions keep off")) &&
+               refused(send("actions keep maybe")) && refused(send("actions keep")),
+           "keep selected action needs the palette");
+    for (const char* bad : {"handsfree uncal speed", "handsfree uncal speed 0.2", "handsfree uncal speed 2.1",
+                            "handsfree uncal speed x", "handsfree uncal speed nan", "handsfree uncal speed 1 1"}) {
+        expect(refused(send(bad)), bad);
+    }
+    expect(ok(send("handsfree uncal speed 0.5")) && has(status(), "\"speed\":0.50"),
+           "a valid pointer speed is accepted and reported");
+    expect(ok(send("handsfree uncal speed 1")) && has(status(), "\"speed\":1.00"), "speed reset");
     expect(ok(send("actions enable off")), "turning the palette off is always accepted");
     expect(has(status(), "\"actions\":{\"enabled\":false,\"mode\":\"LEFT\""),
            "action palette status reported");

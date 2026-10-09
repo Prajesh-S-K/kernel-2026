@@ -317,7 +317,7 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         "\"staged\":[%s,%s],\"stored\":[%s,%s],\"blocked\":\"%s\","
         "\"uncalDemo\":{\"active\":%s,\"needsEnable\":%s,\"present\":%s,\"permitted\":%s,"
         "\"reverseX\":%s,\"reverseY\":%s,\"permission\":\"%s\",\"blocked\":\"%s\","
-        "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f,"
+        "\"profileState\":\"%s\",\"gain\":%.2f,\"deadzone\":%.2f,\"maxStep\":%.2f,\"speed\":%.2f,"
         "\"dwell\":{\"enabled\":%s,\"ms\":%lu,\"tolerance\":%.1f,\"state\":\"%s\",\"progress\":%.3f,"
         "\"clicks\":%lu}}}",
         s.mode, s.config, static_cast<unsigned long>(s.configId),
@@ -337,7 +337,7 @@ size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& s) {
         s.uncalPresent ? "true" : "false", s.uncalPermitted ? "true" : "false",
         s.uncalReverseX ? "true" : "false", s.uncalReverseY ? "true" : "false",
         s.uncalPermission, s.uncalBlocked, s.profileState, s.uncalGain,
-        s.uncalDeadzone, s.uncalMaxStep, s.uncalDwellEnabled ? "true" : "false",
+        s.uncalDeadzone, s.uncalMaxStep, s.uncalSpeed, s.uncalDwellEnabled ? "true" : "false",
         static_cast<unsigned long>(s.uncalDwellMs), s.uncalDwellTolerance, s.uncalDwellState,
         s.uncalDwellProgress, static_cast<unsigned long>(s.uncalClicks));
     return (written > 0 && size_t(written) < capacity) ? size_t(written) : 0;

@@ -5,6 +5,7 @@ import {
   CONTROLS,
   HoverReporter,
   INHIBIT_TEXT,
+  KEEP_NOTE,
   LINK_NOTE,
   LatencyStats,
   PALETTE_NOTE,
@@ -28,6 +29,7 @@ const base = {
   hover: "NONE",
   inPalette: false,
   last: "NONE",
+  keep: false,
   locked: "NONE",
   selections: 0,
   dwellMs: 1200,
@@ -378,6 +380,45 @@ test("wording: experimental, no system-wide overlay claim, scroll exit explained
       /always on top|system-wide overlay\.\s*It is on/i,
     );
   }
+});
+
+test("keep selected action: off by default, shown as one shot or kept, never for Drag or Scroll", () => {
+  assert.equal(actionsOf(frame(base)).keep, false);
+  assert.equal(actionsOf({}).keep, false);
+  assert.equal(
+    selectedText(frame({ ...base, mode: "RIGHT" })),
+    "Selected action: RIGHT-CLICK · one shot",
+  );
+  assert.equal(
+    selectedText(frame({ ...base, mode: "RIGHT", keep: true })),
+    "Selected action: RIGHT-CLICK · KEPT",
+  );
+  assert.match(
+    selectedText(frame({ ...base, mode: "DOUBLE", keep: true })),
+    /DOUBLE-CLICK · KEPT/,
+  );
+  assert.match(
+    bannerOf(frame({ ...base, mode: "DOUBLE", keep: true })).text,
+    /\(kept\)/,
+  );
+  assert.match(
+    bannerOf(frame({ ...base, mode: "RIGHT" })).text,
+    /\(one shot\)/,
+  );
+  // Left, Drag and Scroll are never labelled kept or one shot
+  for (const mode of ["LEFT", "DRAG", "SCROLL"]) {
+    const text = selectedText(frame({ ...base, mode, keep: true }));
+    assert.doesNotMatch(text, /KEPT|one shot/, mode);
+  }
+  assert.match(KEEP_NOTE, /off by default/);
+  assert.match(KEEP_NOTE, /never applies to Drag or Scroll/);
+  assert.match(KEEP_NOTE, /off again at every session start/);
+});
+
+test("the palette is described as an ordinary browser window with no always-on-top guarantee", () => {
+  assert.match(PALETTE_NOTE, /ordinary browser window/);
+  assert.match(PALETTE_NOTE, /cannot guarantee always-on-top/);
+  assert.match(PALETTE_NOTE, /not a system-wide overlay/);
 });
 
 test("hover reporter: reports on enter and leave, repeats while hovering AND while outside, ignores stale leaves", () => {

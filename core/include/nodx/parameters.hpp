@@ -51,6 +51,12 @@ constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 // Dwell clicking in the uncalibrated demo (explicitly enabled, RAM only, adjustable). The distance unit
 // is accumulated OUTGOING HID movement; host pointer acceleration means it is not verified screen
 // pixels. The dwell duration is the progress phase; the selection manager's 250 ms arming precedes it.
+// Uncalibrated fallback pointer speed multiplier (RAM only, never saved). Applied to the pointer step before the
+// existing output bounds; wheel speed, gesture thresholds and button behaviour do not use it. Because the dwell
+// tolerance counts accumulated outgoing movement, it scales with it.
+constexpr float uncalSpeedMin = .25f;
+constexpr float uncalSpeedMax = 2.f;
+constexpr float uncalSpeedDefault = 1.f;
 // Dwell action palette demo (EXPERIMENTAL START values; RAM only, never saved).
 constexpr float actionScrollGain = .35f;        // wheel units per second per deg/s beyond the neutral zone
 constexpr float actionScrollNeutral = 3.f;      // deg/s of vertical movement that is still "neutral"

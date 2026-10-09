@@ -363,6 +363,38 @@ class CommandValidation(HandsFreeCase):
                 SERVER.command_for({"action": "actions", "op": "hover", "target": target}),
                 f"actions hover {target}",
             )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "keep", "enabled": True}),
+            "actions keep on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "keep", "enabled": False}),
+            "actions keep off",
+        )
+        for factor, text in (
+            (0.25, "0.25"),
+            (1, "1.00"),
+            (0.5, "0.50"),
+            (2, "2.00"),
+            (1.25, "1.25"),
+        ):
+            self.assertEqual(
+                SERVER.command_for({"action": "handsfree", "op": "uncalspeed", "factor": factor}),
+                f"handsfree uncal speed {text}",
+            )
+        for bad in (
+            {"action": "handsfree", "op": "uncalspeed"},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 0.24},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 2.01},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 0},
+            {"action": "handsfree", "op": "uncalspeed", "factor": "1"},
+            {"action": "handsfree", "op": "uncalspeed", "factor": True},
+            {"action": "handsfree", "op": "uncalspeed", "factor": None},
+            {"action": "actions", "op": "keep"},
+            {"action": "actions", "op": "keep", "enabled": 1},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
         for bad in (
             {"action": "actions"},
             {"action": "actions", "op": "enable"},
@@ -1071,6 +1103,35 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.assertEqual(response["actions"]["counts"]["cancel"], 1)
         self.assertEqual([r for r in seen if r[3] or secondary(r)], [], "Cancel clicked")
         self.assertEqual(response["actions"]["locked"], "CANCEL")
+
+    def test_pointer_speed_scales_the_simulated_pointer_and_keep_needs_the_palette(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+
+        def moved(factor):
+            self.assertTrue(self.send(f"handsfree uncal speed {factor}")["ok"])
+            self.assertEqual(self.send("status")["handsFree"]["uncalDemo"]["speed"], factor)
+            total = 0
+            for _ in range(3):
+                reply = self.send("step 50 8 0 0 0 1 0 0")
+                total += sum(r[0] for r in self.reports(reply))
+            self.quiet(50)
+            return total
+
+        slow, normal, fast = moved(0.25), moved(1.0), moved(2.0)
+        self.assertGreater(normal, 20)
+        self.assertAlmostEqual(slow / normal, 0.25, delta=0.08)
+        self.assertAlmostEqual(fast / normal, 2.0, delta=0.3)
+        for bad in ("0.2", "2.5", "abc", "nan", ""):
+            self.assertFalse(self.send(f"handsfree uncal speed {bad}")["ok"], bad)
+        # keep needs the palette
+        self.assertFalse(self.send("actions keep on")["ok"])
+        self.assertTrue(self.send("actions enable on")["ok"])
+        kept = self.send("actions keep on")
+        self.assertTrue(kept["ok"] and kept["actions"]["keep"])
+        self.assertFalse(self.send("actions keep off")["actions"]["keep"])
+        self.assertFalse(self.send("actions keep maybe")["ok"])
 
     def test_without_palette_reports_nothing_clicks(self):
         self.quiet(50)

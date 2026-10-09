@@ -149,6 +149,7 @@
                 <button id="actionsStop" class="uncal-stop">Stop control</button>
               </div>
               <label><input type="checkbox" id="actionsEnable" disabled /> Enable dwell action palette (EXPERIMENTAL)</label>
+              <label><input type="checkbox" id="actionsKeep" disabled /> Keep selected action (Right-click and Double-click only; off by default)</label>
               <div class="uncal-actions">
                 <label>Dwell duration (500–5000 ms) <input type="number" id="actionsMs" min="500" max="5000" step="100" value="1200" /></label>
                 <label>Movement tolerance (2–50) <input type="number" id="actionsTol" min="2" max="50" step="1" value="8" /></label>
@@ -262,6 +263,15 @@
                 <span class="eyebrow">POINTER DIRECTION (TEMPORARY)</span>
                 <label><input type="checkbox" id="uncalRevX" /> Reverse horizontal</label>
                 <label><input type="checkbox" id="uncalRevY" /> Reverse vertical</label>
+              </div>
+              <div class="uncal-dwell">
+                <span class="eyebrow">POINTER SPEED (TEMPORARY, FALLBACK ONLY)</span>
+                <div class="uncal-actions">
+                  <input type="range" id="uncalSpeed" min="0.25" max="2" step="0.05" value="1" aria-label="Pointer speed" />
+                  <output id="uncalSpeedValue">1.00×</output>
+                  <button id="uncalSpeedReset" class="quiet">Reset to 1×</button>
+                </div>
+                <small id="uncalSpeedNote"></small>
               </div>
               <div class="uncal-dwell">
                 <label

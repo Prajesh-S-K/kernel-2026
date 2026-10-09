@@ -101,6 +101,7 @@ function render() {
       : control.hint;
     element.children[2].style.setProperty('--p', String(control.progress));
     element.setAttribute('aria-label', `${control.label}. ${control.hint}`);
+    element.title = control.hint;
   }
   $('selected').textContent = stale ? 'Selected action: unknown (no data)' : selectedText(device);
   $('link').textContent = stats.line();

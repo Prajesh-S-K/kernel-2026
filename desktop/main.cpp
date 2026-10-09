@@ -539,6 +539,9 @@ int main(int argc, char** argv) {
                 if (verb == "enable") {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setActionPalette(value == "on", now);
+                } else if (verb == "keep") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setActionKeep(value == "on");
                 } else if (verb == "hover") {
                     PaletteTarget target;
                     ok = parsePaletteTarget(value.c_str(), target) && (cmd >> std::ws).eof() &&
@@ -606,6 +609,11 @@ int main(int argc, char** argv) {
                         if (ok) {
                             sys.setUncalibratedReversal(horizontal == 1, vertical == 1);
                         }
+                    } else if (value == "speed") {
+                        // speed <factor 0.25-2>   (RAM only; works whether or not a session is running)
+                        float factor = 0;
+                        ok = bool(cmd >> factor) && (cmd >> std::ws).eof() &&
+                             sys.setUncalibratedSpeed(factor, now);
                     } else if (value == "dwell") {
                         std::string action;
                         cmd >> action;

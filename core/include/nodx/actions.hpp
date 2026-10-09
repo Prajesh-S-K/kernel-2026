@@ -6,8 +6,8 @@
 // still goes through SafetyManager -> HIDManager.
 //
 //   Left (default)  dwell on a target = one primary click
-//   Right           one right click, then back to Left
-//   Double          one double-click, then back to Left
+//   Right           one right click, then back to Left (unless "keep" is on)
+//   Double          one double-click, then back to Left (unless "keep" is on)
 //   Drag            dwell = press and hold the primary button, move, dwell again = release
 //   Scroll          dwell on a target starts scrolling there: pointer output is frozen and vertical head
 //                   movement drives the wheel. Leaving scroll: hold still for the dwell duration (the
@@ -80,6 +80,7 @@ struct ActionsStatus {
     uint32_t dwellMs = 0, selections = 0;
     uint32_t left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0, scrollStarts = 0,
              scrollExits = 0, wheelUnits = 0;
+    bool keep = false;           // "keep selected action": Right and Double stay selected after executing
     const char* locked = "NONE"; // the control that was just chosen and must be left before it can be chosen again
     uint32_t drops = 0, cancels = 0, confirmedReleases = 0;
     bool reporting = false;      // a fresh palette report exists (otherwise nothing acts on a target)
@@ -119,6 +120,14 @@ public:
     PaletteTarget lockedTarget() const {
         return lockedTarget_;
     }
+    // Option, off at every reset and every session: Right-click and Double-click stay selected after they
+    // execute. It never applies to Drag or Scroll, which always need their own dwell to start.
+    void setKeep(bool on) {
+        keep_ = on;
+    }
+    bool keep() const {
+        return keep_;
+    }
     ActionOutput update(const ActionInput& in, uint32_t now);
 
     ActionMode mode() const {
@@ -145,7 +154,7 @@ private:
     bool dragging_ = false;
     PaletteTarget hover_ = PaletteTarget::None;
     uint32_t hoverAt_ = 0, neutralSince_ = 0, pendingSince_ = 0;
-    bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false;
+    bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false, keep_ = false;
     PaletteTarget lockedTarget_ = PaletteTarget::None;
     float pendingX_ = 0, pendingY_ = 0;
     void select(PaletteTarget target);

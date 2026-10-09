@@ -494,6 +494,24 @@ Behaviour (each covered by a test).
   double-click or a drag release fails the emit and takes the existing inhibiting transport-fault path (the
   session ends, an explicit restart is needed).
 
+### Compact window, keep option and pointer speed
+- The palette window is compact (about 300 x 560 px, two columns; the hint text is the tile's tooltip). It is an
+  ordinary browser window opened beside the working application: **it cannot guarantee always-on-top behaviour**
+  (another window can cover it), it is not a native overlay, and the device stops acting if it stops reporting.
+- **Keep selected action** (a checkbox in the main page's palette panel, off by default, off again at every
+  session start): Right-click and Double-click stay selected after they run, until another action or Cancel.
+  The current action is written out ("Selected action: ... one shot / KEPT"). It never applies to Drag or Scroll,
+  which always need their own dwell to start.
+- **Pointer speed** (a slider in the fallback panel, 0.25x-2x, default 1x, Reset; RAM only, kept until a reboot):
+  it multiplies the pointer step BEFORE the existing output bounds. It does not change the wheel speed, the
+  gesture thresholds or the buttons, and the per-report step limit (4 units) is not scaled, so a fast head
+  movement is clipped even at 1x. Because the dwell tolerance (8 units) and the re-arming distance (12 units)
+  count accumulated outgoing movement, **changing the speed also changes how much head movement leaves the
+  tolerance**: synthetic measurement, a 12 deg/s movement needs 77 / 22 / 13 ticks of 10 ms to accumulate 24
+  units at 0.25x / 1x / 2x, and the same short movement that re-arms the dwell at 1x does not at 0.25x. A speed
+  change restarts a dwell in progress. At 0.25x a slow drift needs much more movement to cancel a dwell; at 2x
+  a smaller movement cancels it.
+
 ### Click-through: what is and is not guaranteed
 The device cannot see the screen. It learns that the pointer is on the palette only from reports sent by the
 companion page (browser -> localhost -> companion -> serial -> firmware), which can be late, lost or stale. "The

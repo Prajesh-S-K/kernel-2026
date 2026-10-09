@@ -16,6 +16,7 @@ export function uncalOf(device) {
     permitted: raw?.permitted === true,
     reverseX: raw?.reverseX === true,
     reverseY: raw?.reverseY === true,
+    speed: Math.min(2, Math.max(0.25, Number(raw?.speed) || 1)),
     permission: typeof raw?.permission === 'string' ? raw.permission : 'NONE',
     blocked: typeof raw?.blocked === 'string' ? raw.blocked : '',
     profileState: typeof raw?.profileState === 'string' ? raw.profileState : 'MISSING',
@@ -136,3 +137,15 @@ export function pauseOnBlur(device) {
 export function labBlocked(device) {
   return uncalView(device).active;
 }
+
+// Pointer speed (fallback only, RAM only). The multiplier scales the pointer step before the existing output
+// bounds; it does not change the wheel speed, gesture thresholds or button behaviour.
+export const SPEED_MIN = 0.25;
+export const SPEED_MAX = 2;
+export const SPEED_NOTE =
+  'Pointer speed multiplies the pointer step (0.25x-2x, temporary, not saved). The dwell tolerance and ' +
+  'the re-arming distance count accumulated outgoing pointer movement, so they change with it: at 0.25x ' +
+  'about four times as much head movement is needed to leave the tolerance, at 2x about half as much ' +
+  '(fast head movement is still clipped by the unchanged per-report step limit). Changing the speed ' +
+  'restarts a dwell in progress.';
+export const speedText = (factor) => `${Number(factor).toFixed(2)}×`;

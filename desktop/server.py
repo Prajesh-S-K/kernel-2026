@@ -99,6 +99,15 @@ def command_for(data):
             )
         if operation == "uncaldwell":
             return "handsfree uncal dwell " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "uncalspeed":
+            factor = data.get("factor")
+            if (
+                type(factor) not in (int, float)
+                or isinstance(factor, bool)
+                or not 0.25 <= factor <= 2.0
+            ):
+                raise ValueError("Pointer speed must be 0.25 to 2")
+            return f"handsfree uncal speed {float(factor):.2f}"
         if operation == "uncaldwellset":
             ms, tolerance = data.get("ms"), data.get("tolerance")
             if type(ms) is not int or not 500 <= ms <= 5000:
@@ -162,6 +171,8 @@ def command_for(data):
         operation = data.get("op")
         if operation == "enable":
             return "actions enable " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "keep":
+            return "actions keep " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "hover" and data.get("target") in (
             "none",
             "left",

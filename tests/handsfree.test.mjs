@@ -701,7 +701,7 @@ test("the movement-only demo is shown in guidance and defaults to off for older 
   assert.doesNotMatch(off.lines.join(" "), /MOVEMENT-ONLY/);
 });
 
-import { BANNER, BANNER_DWELL, DWELL_NOTE, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUIDE } from "../ui/uncal.js";
+import { BANNER, BANNER_DWELL, DWELL_NOTE, SPEED_MAX, SPEED_MIN, SPEED_NOTE, speedText, mappingLines, pauseOnBlur, labBlocked, uncalView, ROTATION_GUIDE } from "../ui/uncal.js";
 const hw = (uncal, extra = {}) => ({
   source: "HARDWARE",
   connected: true,
@@ -977,4 +977,22 @@ test("quick gesture: the pointing step is shown and explained", () => {
   assert.equal(view.canAccept, false);
   const retry = quickView(quickDev({ phase: "POINTING", reason: "move the pointer in more different directions (not only one way)", practice: { pointingMs: 1000 } }));
   assert.match(retry.instruction, /more different directions/);
+});
+
+test("pointer speed: default 1x, clamped to 0.25x-2x, formatted, and its effect on dwell is explained", () => {
+  assert.equal(uncalView(hw({})).u.speed, 1);
+  assert.equal(uncalView(hw({ speed: 0.25 })).u.speed, 0.25);
+  assert.equal(uncalView(hw({ speed: 2 })).u.speed, 2);
+  assert.equal(uncalView(hw({ speed: 9 })).u.speed, 2);
+  assert.equal(uncalView(hw({ speed: 0.01 })).u.speed, 0.25);
+  assert.equal(uncalView(hw({ speed: "x" })).u.speed, 1);
+  assert.equal(SPEED_MIN, 0.25);
+  assert.equal(SPEED_MAX, 2);
+  assert.equal(speedText(1), "1.00×");
+  assert.equal(speedText(0.25), "0.25×");
+  assert.match(SPEED_NOTE, /dwell tolerance/);
+  assert.match(SPEED_NOTE, /accumulated outgoing pointer movement/);
+  assert.match(SPEED_NOTE, /0\.25x about four times/);
+  assert.match(SPEED_NOTE, /temporary, not saved/);
+  assert.match(SPEED_NOTE, /step limit/);
 });

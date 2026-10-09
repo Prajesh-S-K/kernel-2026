@@ -3,8 +3,13 @@
 // a system-wide overlay: it only exists while that window is open and visible.
 export const ACTIONS_LABEL = 'EXPERIMENTAL DWELL ACTION PALETTE';
 export const PALETTE_NOTE =
-  'Prototype: this palette is a normal companion window. Keep it visible beside the application you ' +
-  'are using; it is not a system-wide overlay and it is not on top of other windows.';
+  'Prototype: this palette is an ordinary browser window. Keep it visible beside the application you ' +
+  'are using. It is not a system-wide overlay, and a browser window cannot guarantee always-on-top ' +
+  'behaviour: another window can cover it.';
+export const KEEP_NOTE =
+  'Keep selected action (off by default): Right-click and Double-click stay selected after they run, ' +
+  'until you choose another action or Cancel. It never applies to Drag or Scroll, which always need ' +
+  'their own dwell to start. It is off again at every session start.';
 export const SCROLL_EXIT_TEXT = 'HOLD STILL TO EXIT SCROLLING';
 export const SCROLL_NOTE =
   'Scroll: dwell on the content to begin; the pointer then freezes and vertical head movement scrolls. ' +
@@ -42,6 +47,7 @@ export function actionsOf(device) {
     hover: typeof a?.hover === 'string' ? a.hover : 'NONE',
     inPalette: a?.inPalette === true,
     last: typeof a?.last === 'string' ? a.last : 'NONE',
+    keep: a?.keep === true,
     selections: num(a?.selections),
     locked: typeof a?.locked === 'string' ? a.locked : 'NONE',
     dwellMs: num(a?.dwellMs),
@@ -80,8 +86,8 @@ export function actionsOf(device) {
 
 const MODE_TEXT = {
   LEFT: 'LEFT-CLICK',
-  RIGHT: 'RIGHT-CLICK (one shot)',
-  DOUBLE: 'DOUBLE-CLICK (one shot)',
+  RIGHT: 'RIGHT-CLICK',
+  DOUBLE: 'DOUBLE-CLICK',
   DRAG: 'DRAG (dwell to press)',
   SCROLL: 'SCROLL (dwell on content)',
 };
@@ -120,7 +126,9 @@ export function bannerOf(device) {
     };
   return {
     kind: 'ready',
-    text: MODE_TEXT[a.mode] ?? a.mode,
+    text:
+      (MODE_TEXT[a.mode] ?? a.mode) +
+      (a.mode === 'RIGHT' || a.mode === 'DOUBLE' ? (a.keep ? ' (kept)' : ' (one shot)') : ''),
     detail: a.inPalette ? INHIBIT_TEXT : '',
   };
 }
@@ -131,7 +139,10 @@ export function selectedText(device) {
   if (!a.enabled) return 'Selected action: none (palette off)';
   if (a.dragging) return 'Selected action: DRAG, button HELD';
   if (a.scroll === 'ACTIVE') return 'Selected action: SCROLL, running';
-  return `Selected action: ${MODE_TEXT[a.mode] ?? a.mode}`;
+  const oneShot = a.mode === 'RIGHT' || a.mode === 'DOUBLE';
+  return `Selected action: ${MODE_TEXT[a.mode] ?? a.mode}${
+    oneShot ? (a.keep ? ' · KEPT' : ' · one shot') : ''
+  }`;
 }
 export const INHIBIT_TEXT = 'Target actions are inhibited while the pointer is on the palette.';
 
