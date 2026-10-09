@@ -453,7 +453,10 @@ the working tree, not flashed). Everything below is a prototype for an attended 
 
 What it is. One dwell (START 1200 ms + 250 ms arming, adjustable 500-5000 ms, tolerance 2-50) does everything.
 The companion's palette window (`palette.html`, opened from the "Dwell action palette" panel) shows six large
-controls: Left-click (default), Right-click, Double-click, Drag, Scroll, Stop. Hold the pointer still on a
+controls: Left-click (default), Right-click, Double-click, Drag, Drop, Cancel, Scroll, Stop. Each is a large
+labelled tile with a circular dwell-progress ring that fills while the pointer rests on it; a local hover
+highlight appears at once (the ring follows the device's own dwell). The selected action is written out
+("Selected action: ...") and a held drag shows a very large DRAGGING banner. Hold the pointer still on a
 control to choose it; hold still on a target to act on it. No physical click is needed anywhere. It is a normal
 companion window you place BESIDE the target application; it is not a system-wide overlay and is not kept on top.
 
@@ -466,6 +469,17 @@ Behaviour (each covered by a test).
   always be ended without moving. Moving restarts that dwell, so a real drag is not cut short. After a release,
   deliberate movement is needed before the next press can arm. Entering the palette while dragging releases the
   button FIRST (the release is sent before any selection can begin), and so does choosing another action.
+  The release is then CONFIRMED (the report was delivered with the button up) before any selection is
+  possible: a dwell that completes before that is counted as inhibited, and a failed release takes the existing
+  inhibiting fault path instead of being "confirmed". Release on entry means the button comes up where the
+  pointer enters the palette, not on the drop target: to drop on the target, dwell there (or stand still).
+- Drop and Cancel (dwell-selected palette controls, no movement needed): Drop releases a held drag and returns
+  to Left-click; Cancel does the same and also clears everything waiting (a chosen one-shot, an armed Scroll,
+  a click waiting out the commit time). Because entering the palette already releases a held button, they mostly
+  confirm and tidy up, but they work with no movement, and they are highlighted in red while a drag is held.
+- One selection per hover: after a control is chosen the pointer must leave it (to another control, the palette
+  background or the target) before it can be chosen again; staying on it, even through more dwells and
+  movement, selects nothing more.
 - Scroll: choosing it neither clicks nor freezes; dwell on the content starts it (no click); the pointer then
   freezes and vertical head movement drives bounded wheel reports (neutral zone 3 deg/s beyond the 2.5 deg/s
   pointer deadzone; head down scrolls down, following the pointer's reversal setting). The palette and the main

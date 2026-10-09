@@ -169,6 +169,8 @@ def command_for(data):
             "double",
             "drag",
             "scroll",
+            "drop",
+            "cancel",
             "stop",
             "frame",
         ):

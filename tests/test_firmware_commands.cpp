@@ -506,6 +506,9 @@ void hardwareChecks() {
     expect(refused(send("actions hover middle")) && refused(send("actions hover")) &&
                refused(send("actions hover left extra")),
            "bad hover targets refused");
+    expect(refused(send("actions hover drop")) && refused(send("actions hover cancel")) &&
+               refused(send("actions hover frame")),
+           "new hover targets are parsed but refused while the palette is off");
     expect(ok(send("actions enable off")), "turning the palette off is always accepted");
     expect(has(status(), "\"actions\":{\"enabled\":false,\"mode\":\"LEFT\""),
            "action palette status reported");

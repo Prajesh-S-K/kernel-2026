@@ -979,6 +979,197 @@ int main() {
         require(actionsJson(actions, sizeof actions, h.s().actionsStatus(h.now)) > 0, "actions json");
     });
 
+    test("one selection per hover: a chosen control must be left before it can be chosen again", [] {
+        HF h = paletteRig();
+        report(h, PaletteTarget::Right);
+        hold(h, PaletteTarget::Right, kDwellTicks);
+        require(h.s().actionsStatus(h.now).selections == 1, "first selection");
+        require(std::strcmp(h.s().actionsStatus(h.now).locked, "RIGHT") == 0, "no selection lock shown");
+        // still on the same control, even after deliberate movement and another full dwell: nothing
+        for (int i = 0; i < 40; ++i) {
+            tk(h, {40.f, 0, 0});
+        }
+        qt(h, 300);
+        hold(h, PaletteTarget::Right, 400);
+        require(h.s().actionsStatus(h.now).selections == 1, "chosen again without leaving the control");
+        // leave it (onto the palette background), come back, dwell: chosen again
+        report(h, PaletteTarget::Frame);
+        qt(h, 100);
+        require(std::strcmp(h.s().actionsStatus(h.now).locked, "NONE") == 0, "lock kept after leaving");
+        for (int i = 0; i < 40; ++i) {
+            tk(h, {40.f, 0, 0});
+        }
+        qt(h, 300);
+        hold(h, PaletteTarget::Right, kDwellTicks);
+        require(h.s().actionsStatus(h.now).selections == 2, "not chosen again after leaving and re-entering");
+        // leaving to the target works too
+        report(h, PaletteTarget::None);
+        qt(h, 100);
+        require(std::strcmp(h.s().actionsStatus(h.now).locked, "NONE") == 0, "lock kept after leaving to the target");
+    });
+
+    test("Drop releases a drag without any movement; the mode returns to Left-click", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        const size_t m = mark(h);
+        report(h, PaletteTarget::Drop); // the pointer reaches Drop; nothing else moves
+        hold(h, PaletteTarget::Drop, kDwellTicks);
+        require(!seen(h, m).primaryHeld, "the button is still held after Drop");
+        const auto st = h.s().actionsStatus(h.now);
+        require(!st.dragging && st.drops == 1, "Drop not recorded");
+        require(std::strcmp(st.mode, "LEFT") == 0, "mode did not return to Left-click");
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "Drop clicked");
+        require(h.s().state == SystemState::Active, "Drop ended control");
+    });
+
+    test("Cancel clears a chosen one-shot and an armed Scroll, and releases a drag, without movement", [] {
+        // a chosen one-shot that was never executed
+        HF a = paletteRig();
+        selectControl(a, PaletteTarget::Right);
+        require(std::strcmp(mode(a), "RIGHT") == 0, "precondition");
+        selectControl(a, PaletteTarget::Cancel);
+        require(std::strcmp(mode(a), "LEFT") == 0 && a.s().actionsStatus(a.now).cancels == 1, "Cancel");
+        moveAway(a);
+        const size_t ma = mark(a);
+        dwellOnTarget(a);
+        require(seen(a, ma).primary == 1 && seen(a, ma).secondary == 0, "the cancelled right click ran");
+        // an armed Scroll
+        HF b = paletteRig();
+        selectControl(b, PaletteTarget::Scroll);
+        require(std::strcmp(b.s().actionsStatus(b.now).scroll, "ARMED") == 0, "precondition");
+        selectControl(b, PaletteTarget::Cancel);
+        require(std::strcmp(b.s().actionsStatus(b.now).scroll, "OFF") == 0, "armed scroll survived Cancel");
+        moveAway(b);
+        dwellOnTarget(b);
+        require(!b.s().actionsStatus(b.now).frozen, "a cancelled scroll started");
+        // a held drag
+        HF c = paletteRig();
+        selectControl(c, PaletteTarget::Drag);
+        moveAway(c);
+        dwellOnTarget(c);
+        require(c.s().actionsStatus(c.now).dragging, "precondition");
+        const size_t mc = mark(c);
+        hold(c, PaletteTarget::Cancel, kDwellTicks);
+        require(!seen(c, mc).primaryHeld && !c.s().actionsStatus(c.now).dragging, "drag survived Cancel");
+        require(std::strcmp(mode(c), "LEFT") == 0 && c.s().actionsStatus(c.now).cancels == 1, "Cancel state");
+    });
+
+    test("Cancel is the palette-level cancel of a pending commit (unit level)", [] {
+        ActionPalette p;
+        uint32_t now = 1000;
+        p.setHover(PaletteTarget::None, now);
+        ActionInput in;
+        in.dwellPulse = true;
+        p.update(in, now); // a target dwell completed: the click waits out the commit time
+        require(p.pending(), "no pending click");
+        p.setHover(PaletteTarget::Cancel, now + 20);
+        in.dwellPulse = false;
+        p.update(in, now + 30);
+        require(!p.pending() && p.cancelled == 1, "palette entry did not cancel the pending click");
+        in.dwellPulse = true;
+        const ActionOutput out = p.update(in, now + 40); // the dwell on Cancel itself
+        require(!out.pulse && p.cancels == 1 && p.mode() == ActionMode::Left, "Cancel");
+    });
+
+    test("release on palette entry is confirmed before any selection is possible (unit level)", [] {
+        ActionPalette p;
+        uint32_t now = 1000;
+        p.setHover(PaletteTarget::Drag, now);
+        ActionInput in;
+        in.dwellPulse = true;
+        p.update(in, now); // choose Drag
+        p.setHover(PaletteTarget::None, now + 10);
+        in.dwellPulse = true;
+        p.update(in, now + 20); // starts the commit wait
+        ActionOutput out = p.update(in = ActionInput{}, now + 20 + start::actionCommitMs + 10);
+        require(p.dragging() && out.down, "drag did not start");
+        p.setHover(PaletteTarget::Left, now + 400); // pointer enters the palette while dragging
+        out = p.update(in, now + 410);
+        require(!out.down && !p.dragging() && p.paletteReleases == 1, "no release on entry");
+        require(p.releaseUnconfirmed(), "release not awaiting confirmation");
+        in.dwellPulse = true;
+        out = p.update(in, now + 420); // a dwell completes before the release is confirmed
+        require(p.selections == 1 && p.mode() == ActionMode::Drag, "selected before the release was confirmed");
+        require(p.inhibited == 1, "the early dwell was not counted as inhibited");
+        p.confirmRelease();
+        out = p.update(in, now + 430);
+        require(p.selections == 2 && p.mode() == ActionMode::Left, "no selection once confirmed");
+        require(p.confirmedReleases == 1, "confirmation not counted");
+    });
+
+    test("the System confirms the entry release only after it was delivered", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        const uint32_t selections = h.s().actionsStatus(h.now).selections;
+        report(h, PaletteTarget::Left);
+        tk(h);
+        tk(h);
+        require(!h.transport.reports.back().down, "release not sent");
+        require(h.s().actionsStatus(h.now).paletteReleases == 1, "release on entry not counted");
+        require(h.s().actionsStatus(h.now).selections == selections, "selection at entry");
+        // a failed release inhibits everything instead of being "confirmed"
+        HF f = paletteRig();
+        selectControl(f, PaletteTarget::Drag);
+        moveAway(f);
+        dwellOnTarget(f);
+        f.transport.failRelease = true;
+        const uint32_t faults = f.s().diagnostics.faults;
+        report(f, PaletteTarget::Left);
+        for (int i = 0; i < 5; ++i) {
+            tk(f);
+        }
+        require(f.s().diagnostics.faults == faults + 1 && f.s().state == SystemState::SafeState,
+                "a failed entry release did not inhibit output");
+        f.transport.failRelease = false;
+        qt(f, 4000);
+        require(f.s().state != SystemState::Active, "restarted after a failed release");
+        require(f.s().actionsStatus(f.now).selections == selections, "a selection after the failed release");
+    });
+
+    test("immediate stopping: Stop while a click waits out the commit time never clicks", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        const size_t m = mark(h);
+        for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+            tk(h);
+        }
+        require(h.s().actionsStatus(h.now).pending, "no pending action");
+        h.s().stopUncalibratedDemo("website stop");
+        qt(h, 600);
+        require(seen(h, m).primary == 0 && h.released(), "a click after the stop");
+        require(h.s().state != SystemState::Active, "restarted");
+    });
+
+    test("communication failures: a disconnect during a pending click or a scroll never acts or resumes", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+            tk(h);
+        }
+        h.transport.online = false;
+        qt(h, 400);
+        h.transport.online = true;
+        const size_t m = mark(h);
+        qt(h, 5000);
+        require(seen(h, m).primary == 0 && h.s().state != SystemState::Active, "acted after a disconnect");
+        HF g = paletteRig();
+        selectControl(g, PaletteTarget::Scroll);
+        moveAway(g);
+        dwellOnTarget(g);
+        require(g.s().actionsStatus(g.now).frozen, "precondition");
+        g.transport.online = false;
+        qt(g, 400);
+        g.transport.online = true;
+        qt(g, 3000);
+        require(!g.s().actionsStatus(g.now).frozen && g.s().state != SystemState::Active, "scroll survived");
+    });
+
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

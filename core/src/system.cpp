@@ -494,6 +494,11 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     }
     if (actionsActive) {
         actionsWheel_ += hid_.last.wheel < 0 ? -hid_.last.wheel : hid_.last.wheel; // notches sent, either way
+        // A drag released by a palette entry is only "released" once that report was really delivered with
+        // the button up; until then no palette selection is possible.
+        if (palette_.releaseUnconfirmed() && delivered && !hid_.last.down && !hid_.last.right) {
+            palette_.confirmRelease();
+        }
     }
     if (safety_.calculationFault) {
         enterSafe(FaultCode::Calculation, now);
@@ -1478,6 +1483,9 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
     st.cancelled = palette_.cancelled;
     st.paletteReleases = palette_.paletteReleases;
     st.commitMs = start::actionCommitMs;
+    st.drops = palette_.drops;
+    st.cancels = palette_.cancels;
+    st.confirmedReleases = palette_.confirmedReleases;
     st.last = name(palette_.last);
     st.wheelUnits = uint32_t(actionsWheel_);
     if (st.enabled) {
@@ -1491,6 +1499,7 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
         st.dwellState = name(selection_.dwell);
         st.dwellProgress = selection_.progress(lastTick_, uncalProfile_);
         st.exitProgress = palette_.exitProgress(lastTick_, uncalDwellMs_);
+        st.locked = name(palette_.lockedTarget());
         st.reporting = palette_.reporting(lastTick_);
         st.reportAgeMs = palette_.reportAge(lastTick_);
         st.pending = palette_.pending();

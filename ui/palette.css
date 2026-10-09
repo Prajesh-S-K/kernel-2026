@@ -93,13 +93,58 @@ main {
   color: var(--muted);
   font-size: 14px;
 }
-.control .fill {
+.control .ring {
+  --p: 0;
   position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 10px;
-  width: 0;
-  background: var(--accent);
+  top: 12px;
+  right: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring, var(--accent)) calc(var(--p) * 360deg), #2b3d45 0);
+  opacity: 0;
+}
+.control .ring::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--panel);
+}
+.control:hover,
+.control.hovered {
+  border-color: #fff;
+  background: #1d2f37;
+}
+.control:hover .ring,
+.control.hovered .ring,
+.control.exit .ring {
+  opacity: 1;
+}
+.control.locked {
+  opacity: 0.8;
+}
+.control.locked .ring {
+  opacity: 0;
+}
+.control.urgent {
+  border-color: var(--stop);
+  background: #3a1517;
+}
+.control.urgent strong {
+  color: var(--stop);
+}
+.control.scroll,
+.control.stop {
+  grid-column: 1 / -1;
+}
+.selected {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  font-size: 20px;
+  font-weight: 700;
 }
 .control.selected {
   border-color: var(--accent);
@@ -119,8 +164,8 @@ main {
   border-color: var(--warn);
   background: #3a2b0c;
 }
-.control.exit .fill {
-  background: var(--warn);
+.control.exit {
+  --ring: var(--warn);
 }
 .control.stop {
   grid-column: 1 / -1;
@@ -128,8 +173,8 @@ main {
   background: #2b1517;
   min-height: 104px;
 }
-.control.stop .fill {
-  background: var(--stop);
+.control.stop {
+  --ring: var(--stop);
 }
 .note {
   color: var(--muted);

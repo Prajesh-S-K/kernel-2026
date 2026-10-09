@@ -13,7 +13,14 @@
 //                   movement drives the wheel. Leaving scroll: hold still for the dwell duration (the
 //                   pointer cannot travel to a control while it is frozen, so the exit is dwell on
 //                   stillness on BOTH axes, shown as a progress bar on the Exit control)
+//   Drop            ends a drag by releasing the held button (no movement needed first); back to Left-click
+//   Cancel          like Drop, and also clears everything pending (a waiting click, an armed one-shot or Scroll)
 //   Stop            ends the session (also reachable by the website Stop and the physical button)
+//
+// One selection per hover: after a control is chosen the pointer must leave it (to another control, the
+// palette background or the target) before that control can be chosen again. Entering the palette while
+// a drag holds the button releases it first, and no selection is possible until that release is confirmed
+// as delivered.
 //
 // While the pointer is over the palette (reported by the companion page) a completed dwell SELECTS a
 // palette control and never becomes an OS click.
@@ -36,7 +43,7 @@ namespace nodx {
 enum class ActionMode { Left, Right, Double, Drag, Scroll };
 // Frame = the pointer is on the palette window but not on a control (background, margins): it inhibits every
 // target action like a control does, and a completed dwell there selects nothing.
-enum class PaletteTarget { None, Left, Right, Double, Drag, Scroll, Stop, Frame };
+enum class PaletteTarget { None, Left, Right, Double, Drag, Scroll, Drop, Cancel, Stop, Frame };
 enum class ScrollPhase { Off, Armed, Active };
 const char* name(ActionMode mode);
 const char* name(PaletteTarget target);
@@ -73,6 +80,8 @@ struct ActionsStatus {
     uint32_t dwellMs = 0, selections = 0;
     uint32_t left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0, scrollStarts = 0,
              scrollExits = 0, wheelUnits = 0;
+    const char* locked = "NONE"; // the control that was just chosen and must be left before it can be chosen again
+    uint32_t drops = 0, cancels = 0, confirmedReleases = 0;
     bool reporting = false;      // a fresh palette report exists (otherwise nothing acts on a target)
     bool pending = false;        // a completed target dwell is waiting out the commit time
     uint32_t reportAgeMs = 0, commitMs = 0, inhibited = 0, cancelled = 0, paletteReleases = 0;
@@ -96,6 +105,20 @@ public:
     bool pending() const {
         return pending_;
     }
+    // A drag was released because the pointer entered the palette; selection stays blocked until the
+    // System confirms that the release report was delivered.
+    bool releaseUnconfirmed() const {
+        return releaseUnconfirmed_;
+    }
+    void confirmRelease() {
+        if (releaseUnconfirmed_) {
+            releaseUnconfirmed_ = false;
+            ++confirmedReleases;
+        }
+    }
+    PaletteTarget lockedTarget() const {
+        return lockedTarget_;
+    }
     ActionOutput update(const ActionInput& in, uint32_t now);
 
     ActionMode mode() const {
@@ -113,7 +136,8 @@ public:
     float exitProgress(uint32_t now, uint32_t dwellMs) const;
     PaletteTarget last = PaletteTarget::None;
     uint32_t selections = 0, left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0,
-             scrollStarts = 0, scrollExits = 0, inhibited = 0, cancelled = 0, paletteReleases = 0;
+             scrollStarts = 0, scrollExits = 0, inhibited = 0, cancelled = 0, paletteReleases = 0,
+             drops = 0, cancels = 0, confirmedReleases = 0;
 
 private:
     ActionMode mode_ = ActionMode::Left;
@@ -121,7 +145,8 @@ private:
     bool dragging_ = false;
     PaletteTarget hover_ = PaletteTarget::None;
     uint32_t hoverAt_ = 0, neutralSince_ = 0, pendingSince_ = 0;
-    bool everReported_ = false, pending_ = false;
+    bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false;
+    PaletteTarget lockedTarget_ = PaletteTarget::None;
     float pendingX_ = 0, pendingY_ = 0;
     void select(PaletteTarget target);
     void execute(ActionOutput& out, uint32_t now);

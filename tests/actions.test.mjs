@@ -4,6 +4,7 @@ import {
   ACTIONS_LABEL,
   CONTROLS,
   HoverReporter,
+  INHIBIT_TEXT,
   LINK_NOTE,
   LatencyStats,
   PALETTE_NOTE,
@@ -13,6 +14,7 @@ import {
   bannerOf,
   controlsOf,
   panelView,
+  selectedText,
   statsLine,
 } from "../ui/actions.js";
 
@@ -26,6 +28,7 @@ const base = {
   hover: "NONE",
   inPalette: false,
   last: "NONE",
+  locked: "NONE",
   selections: 0,
   dwellMs: 1200,
   tolerance: 8,
@@ -41,6 +44,8 @@ const base = {
     scrollStart: 0,
     scrollExit: 0,
     wheel: 0,
+    drop: 0,
+    cancel: 0,
   },
   link: {
     reporting: true,
@@ -50,6 +55,7 @@ const base = {
     inhibited: 0,
     cancelled: 0,
     paletteReleases: 0,
+    confirmedReleases: 0,
   },
   blocked: "",
 };
@@ -81,15 +87,100 @@ test("missing or malformed palette data never throws and reads as off", () => {
   );
 });
 
-test("the six controls are exactly Left, Right, Double, Drag, Scroll and Stop", () => {
+test("the controls are Left, Right, Double, Drag, Drop, Cancel, Scroll and Stop", () => {
   assert.deepEqual(
     CONTROLS.map((c) => c.id),
-    ["left", "right", "double", "drag", "scroll", "stop"],
+    ["left", "right", "double", "drag", "drop", "cancel", "scroll", "stop"],
   );
   assert.deepEqual(
     CONTROLS.map((c) => c.label),
-    ["Left-click", "Right-click", "Double-click", "Drag", "Scroll", "Stop"],
+    [
+      "Left-click",
+      "Right-click",
+      "Double-click",
+      "Drag",
+      "Drop",
+      "Cancel",
+      "Scroll",
+      "Stop",
+    ],
   );
+});
+
+test("Drop and Cancel are never 'selected' modes and are highlighted only while a drag is held", () => {
+  const idle = controlsOf(frame({ ...base, mode: "LEFT" }));
+  for (const id of ["drop", "cancel"]) {
+    const control = idle.find((c) => c.id === id);
+    assert.equal(control.selected, false);
+    assert.equal(control.urgent, false);
+  }
+  const held = controlsOf(frame({ ...base, mode: "DRAG", dragging: true }));
+  for (const id of ["drop", "cancel"])
+    assert.equal(held.find((c) => c.id === id).urgent, true);
+  assert.equal(held.find((c) => c.id === "left").urgent, false);
+  assert.match(
+    CONTROLS.find((c) => c.id === "drop").hint,
+    /No movement needed/,
+  );
+  assert.match(
+    CONTROLS.find((c) => c.id === "cancel").hint,
+    /clear anything waiting/,
+  );
+});
+
+test("one selection per hover: a just-chosen control shows as locked with no ring", () => {
+  const controls = controlsOf(
+    frame({
+      ...base,
+      mode: "RIGHT",
+      hover: "RIGHT",
+      inPalette: true,
+      locked: "RIGHT",
+      dwell: { state: "LOCKOUT", progress: 0.7 },
+    }),
+  );
+  const right = controls.find((c) => c.id === "right");
+  assert.equal(right.locked, true);
+  assert.equal(right.progress, 0);
+  assert.equal(controls.filter((c) => c.locked).length, 1);
+  const free = controlsOf(
+    frame({
+      ...base,
+      hover: "RIGHT",
+      locked: "NONE",
+      dwell: { state: "PROGRESS", progress: 0.4 },
+    }),
+  );
+  assert.equal(free.find((c) => c.id === "right").locked, false);
+  assert.equal(free.find((c) => c.id === "right").progress, 0.4);
+});
+
+test("the selected action is stated in words and DRAGGING is unmistakable", () => {
+  assert.equal(
+    selectedText(frame({ ...base, mode: "LEFT" })),
+    "Selected action: LEFT-CLICK",
+  );
+  assert.match(selectedText(frame({ ...base, mode: "RIGHT" })), /RIGHT-CLICK/);
+  assert.match(
+    selectedText(frame({ ...base, mode: "DRAG", dragging: true })),
+    /DRAG, button HELD/,
+  );
+  assert.match(
+    selectedText(frame({ ...base, mode: "SCROLL", scroll: "ACTIVE" })),
+    /SCROLL, running/,
+  );
+  assert.match(selectedText(frame({ ...base, enabled: false })), /palette off/);
+  assert.equal(
+    bannerOf(frame({ ...base, mode: "DRAG", dragging: true })).text,
+    "DRAGGING",
+  );
+});
+
+test("target actions are visibly inhibited while the pointer is on the palette", () => {
+  const on = bannerOf(frame({ ...base, inPalette: true, hover: "LEFT" }));
+  assert.equal(on.detail, INHIBIT_TEXT);
+  assert.match(INHIBIT_TEXT, /inhibited while the pointer is on the palette/);
+  assert.equal(bannerOf(frame({ ...base, inPalette: false })).detail, "");
 });
 
 test("Left-click is the visible default and the selected control follows the mode", () => {
@@ -254,6 +345,8 @@ test("stats report every counter and the one dwell duration", () => {
         scrollStart: 2,
         scrollExit: 1,
         wheel: 17,
+        drop: 2,
+        cancel: 1,
       },
     }),
   );
@@ -263,6 +356,8 @@ test("stats report every counter and the one dwell duration", () => {
     "right 2",
     "double 1",
     "drag 4/3",
+    "drop 2",
+    "cancel 1",
     "scroll 2 started",
     "1 exited",
     "17 wheel",

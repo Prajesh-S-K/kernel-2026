@@ -347,7 +347,18 @@ class CommandValidation(HandsFreeCase):
             SERVER.command_for({"action": "actions", "op": "enable", "enabled": False}),
             "actions enable off",
         )
-        for target in ("none", "left", "right", "double", "drag", "scroll", "stop", "frame"):
+        for target in (
+            "none",
+            "left",
+            "right",
+            "double",
+            "drag",
+            "scroll",
+            "drop",
+            "cancel",
+            "stop",
+            "frame",
+        ):
             self.assertEqual(
                 SERVER.command_for({"action": "actions", "op": "hover", "target": target}),
                 f"actions hover {target}",
@@ -1044,6 +1055,22 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.assertEqual([r for r in seen if r[3] or secondary(r)], [])
         self.assertNotEqual(response["state"], "ACTIVE")
         self.assertFalse(response["actions"]["enabled"])
+
+    def test_cancel_and_drop_are_selected_by_dwell_and_one_selection_per_hover(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        response, seen = self.steps(170, hover="right")
+        self.assertEqual(response["actions"]["mode"], "RIGHT")
+        response, seen = self.steps(170, hover="right")  # still on it: not chosen again
+        self.assertEqual(response["actions"]["selections"], 1)
+        self.assertEqual(response["actions"]["locked"], "RIGHT")
+        response, seen = self.steps(170, hover="cancel")
+        self.assertEqual(response["actions"]["mode"], "LEFT")
+        self.assertEqual(response["actions"]["counts"]["cancel"], 1)
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [], "Cancel clicked")
+        self.assertEqual(response["actions"]["locked"], "CANCEL")
 
     def test_without_palette_reports_nothing_clicks(self):
         self.quiet(50)

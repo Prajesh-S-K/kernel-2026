@@ -33,6 +33,10 @@ const char* name(PaletteTarget target) {
         return "DRAG";
     case PaletteTarget::Scroll:
         return "SCROLL";
+    case PaletteTarget::Drop:
+        return "DROP";
+    case PaletteTarget::Cancel:
+        return "CANCEL";
     case PaletteTarget::Stop:
         return "STOP";
     case PaletteTarget::Frame:
@@ -55,6 +59,7 @@ bool parsePaletteTarget(const char* text, PaletteTarget& out) {
     static const PaletteTarget all[] = {PaletteTarget::None,   PaletteTarget::Left,
                                         PaletteTarget::Right,  PaletteTarget::Double,
                                         PaletteTarget::Drag,   PaletteTarget::Scroll,
+                                        PaletteTarget::Drop,   PaletteTarget::Cancel,
                                         PaletteTarget::Stop,   PaletteTarget::Frame};
     for (const PaletteTarget target : all) {
         const char* label = name(target);
@@ -77,11 +82,14 @@ void ActionPalette::reset() {
     hover_ = PaletteTarget::None;
     everReported_ = false; // a new session has no palette report yet: nothing acts until one arrives
     pending_ = false;
+    releaseUnconfirmed_ = false;
+    lockedTarget_ = PaletteTarget::None;
 }
 void ActionPalette::clearCounters() {
     last = PaletteTarget::None;
     selections = left = right = doubles = dragStarts = dragReleases = scrollStarts = scrollExits = 0;
     inhibited = cancelled = paletteReleases = 0;
+    drops = cancels = confirmedReleases = 0;
 }
 bool ActionPalette::reporting(uint32_t now) const {
     return everReported_ && uint32_t(now - hoverAt_) <= start::actionReportFreshMs;
@@ -125,6 +133,18 @@ void ActionPalette::select(PaletteTarget target) {
     case PaletteTarget::Scroll:
         mode_ = ActionMode::Scroll;
         scroll_ = ScrollPhase::Armed; // the pointer is still free: dwell on the content to begin
+        break;
+    case PaletteTarget::Drop:
+        mode_ = ActionMode::Left; // the drag is over (the button is already up)
+        ++drops;
+        break;
+    case PaletteTarget::Cancel:
+        mode_ = ActionMode::Left; // and nothing chosen but not yet executed survives
+        if (pending_) {
+            pending_ = false;
+            ++cancelled;
+        }
+        ++cancels;
         break;
     default:
         break;
@@ -194,6 +214,9 @@ ActionOutput ActionPalette::update(const ActionInput& in, uint32_t now) {
     }
     const bool fresh = reporting(now);
     const PaletteTarget over = hover(now);
+    if (over != lockedTarget_) {
+        lockedTarget_ = PaletteTarget::None; // the control was left: it may be chosen again
+    }
     if (over != PaletteTarget::None) {
         // Entering the palette inhibits every target action before any selection can begin.
         if (pending_) {
@@ -205,16 +228,26 @@ ActionOutput ActionPalette::update(const ActionInput& in, uint32_t now) {
             dragging_ = false;
             ++dragReleases;
             ++paletteReleases;
+            releaseUnconfirmed_ = true;
             out.resetDwell = true;
             out.down = false;
             return out;
         }
+        if (releaseUnconfirmed_) {
+            // Not before the release is confirmed as delivered (the System confirms it the same tick).
+            if (in.dwellPulse) {
+                ++inhibited;
+            }
+            return out;
+        }
         if (in.dwellPulse) {
             // Selecting a control is NOT a click: the dwell pulse is consumed here. On the bare palette
-            // window (Frame) it is consumed and selects nothing.
-            if (over != PaletteTarget::Frame) {
+            // window (Frame) it is consumed and selects nothing; on a control that was just chosen it
+            // is consumed too (one selection per hover: leave it first).
+            if (over != PaletteTarget::Frame && over != lockedTarget_) {
                 last = over;
                 ++selections;
+                lockedTarget_ = over;
                 if (over == PaletteTarget::Stop) {
                     out.stop = true;
                 } else {
@@ -272,23 +305,27 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         "\"hover\":\"%s\",\"inPalette\":%s,\"last\":\"%s\",\"selections\":%lu,"
         "\"dwellMs\":%lu,\"tolerance\":%.1f,\"neutral\":%.1f,"
         "\"dwell\":{\"state\":\"%s\",\"progress\":%.3f},\"exit\":{\"progress\":%.3f},"
+        "\"locked\":\"%s\","
         "\"counts\":{\"left\":%lu,\"right\":%lu,\"double\":%lu,\"dragStart\":%lu,"
-        "\"dragRelease\":%lu,\"scrollStart\":%lu,\"scrollExit\":%lu,\"wheel\":%lu},"
+        "\"dragRelease\":%lu,\"scrollStart\":%lu,\"scrollExit\":%lu,\"wheel\":%lu,"
+        "\"drop\":%lu,\"cancel\":%lu},"
         "\"link\":{\"reporting\":%s,\"ageMs\":%lu,\"pending\":%s,\"commitMs\":%lu,"
-        "\"inhibited\":%lu,\"cancelled\":%lu,\"paletteReleases\":%lu},"
+        "\"inhibited\":%lu,\"cancelled\":%lu,\"paletteReleases\":%lu,\"confirmedReleases\":%lu},"
         "\"blocked\":\"%s\"}",
         s.enabled ? "true" : "false", s.mode, s.dragging ? "true" : "false", s.scroll,
         s.frozen ? "true" : "false", s.hover, s.inPalette ? "true" : "false", s.last,
         static_cast<unsigned long>(s.selections), static_cast<unsigned long>(s.dwellMs),
-        s.tolerance, s.neutral, s.dwellState, s.dwellProgress, s.exitProgress,
+        s.tolerance, s.neutral, s.dwellState, s.dwellProgress, s.exitProgress, s.locked,
         static_cast<unsigned long>(s.left), static_cast<unsigned long>(s.right),
         static_cast<unsigned long>(s.doubles), static_cast<unsigned long>(s.dragStarts),
         static_cast<unsigned long>(s.dragReleases), static_cast<unsigned long>(s.scrollStarts),
         static_cast<unsigned long>(s.scrollExits), static_cast<unsigned long>(s.wheelUnits),
+        static_cast<unsigned long>(s.drops), static_cast<unsigned long>(s.cancels),
         s.reporting ? "true" : "false", static_cast<unsigned long>(s.reportAgeMs),
         s.pending ? "true" : "false", static_cast<unsigned long>(s.commitMs),
         static_cast<unsigned long>(s.inhibited), static_cast<unsigned long>(s.cancelled),
-        static_cast<unsigned long>(s.paletteReleases), s.blocked);
+        static_cast<unsigned long>(s.paletteReleases),
+        static_cast<unsigned long>(s.confirmedReleases), s.blocked);
     return written > 0 && size_t(written) < capacity ? size_t(written) : 0;
 }
 } // namespace nodx

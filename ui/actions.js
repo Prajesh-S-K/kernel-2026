@@ -24,6 +24,8 @@ export const CONTROLS = [
   { id: 'right', label: 'Right-click', hint: 'One right click, then back to Left-click.' },
   { id: 'double', label: 'Double-click', hint: 'One double-click, then back to Left-click.' },
   { id: 'drag', label: 'Drag', hint: 'Dwell to press and hold, move, dwell again to release.' },
+  { id: 'drop', label: 'Drop', hint: 'Release a held drag. No movement needed.' },
+  { id: 'cancel', label: 'Cancel', hint: 'Release a drag and clear anything waiting.' },
   { id: 'scroll', label: 'Scroll', hint: 'Dwell on content, then move your head up or down.' },
   { id: 'stop', label: 'Stop', hint: 'Ends control. Also: website Stop, physical button.' },
 ];
@@ -41,6 +43,7 @@ export function actionsOf(device) {
     inPalette: a?.inPalette === true,
     last: typeof a?.last === 'string' ? a.last : 'NONE',
     selections: num(a?.selections),
+    locked: typeof a?.locked === 'string' ? a.locked : 'NONE',
     dwellMs: num(a?.dwellMs),
     tolerance: num(a?.tolerance),
     neutral: num(a?.neutral),
@@ -58,6 +61,8 @@ export function actionsOf(device) {
       scrollStart: num(a?.counts?.scrollStart),
       scrollExit: num(a?.counts?.scrollExit),
       wheel: num(a?.counts?.wheel),
+      drop: num(a?.counts?.drop),
+      cancel: num(a?.counts?.cancel),
     },
     link: {
       reporting: a?.link?.reporting === true,
@@ -67,6 +72,7 @@ export function actionsOf(device) {
       inhibited: num(a?.link?.inhibited),
       cancelled: num(a?.link?.cancelled),
       paletteReleases: num(a?.link?.paletteReleases),
+      confirmedReleases: num(a?.link?.confirmedReleases),
     },
     blocked: typeof a?.blocked === 'string' ? a.blocked : '',
   };
@@ -112,17 +118,34 @@ export function bannerOf(device) {
       text: 'SCROLL ARMED',
       detail: 'Move over the content and hold still to start scrolling.',
     };
-  return { kind: 'ready', text: MODE_TEXT[a.mode] ?? a.mode, detail: '' };
+  return {
+    kind: 'ready',
+    text: MODE_TEXT[a.mode] ?? a.mode,
+    detail: a.inPalette ? INHIBIT_TEXT : '',
+  };
 }
 
-// The six palette controls with their live state. While scrolling, the Scroll control becomes the Exit
+// The one-line "what is selected" shown above the controls.
+export function selectedText(device) {
+  const a = actionsOf(device);
+  if (!a.enabled) return 'Selected action: none (palette off)';
+  if (a.dragging) return 'Selected action: DRAG, button HELD';
+  if (a.scroll === 'ACTIVE') return 'Selected action: SCROLL, running';
+  return `Selected action: ${MODE_TEXT[a.mode] ?? a.mode}`;
+}
+export const INHIBIT_TEXT = 'Target actions are inhibited while the pointer is on the palette.';
+
+// The palette controls with their live state. While scrolling, the Scroll control becomes the Exit
 // control and shows the exit progress instead of the selection dwell.
 export function controlsOf(device) {
   const a = actionsOf(device);
   const hovered = a.enabled ? a.hover.toLowerCase() : 'none';
   return CONTROLS.map((control) => {
     const isScrollExit = a.enabled && a.scroll === 'ACTIVE' && control.id === 'scroll';
-    const selected = a.enabled && control.id !== 'stop' && a.mode.toLowerCase() === control.id;
+    const selected =
+      a.enabled &&
+      !['stop', 'drop', 'cancel'].includes(control.id) &&
+      a.mode.toLowerCase() === control.id;
     const isHovered = hovered === control.id;
     return {
       ...control,
@@ -131,8 +154,19 @@ export function controlsOf(device) {
       selected,
       hovered: isHovered,
       exit: isScrollExit,
-      progress: isScrollExit ? a.exitProgress : isHovered ? a.dwell.progress : 0,
+      // chosen a moment ago: leave it before it can be chosen again (no ring, nothing to wait for)
+      locked: a.enabled && a.locked.toLowerCase() === control.id,
+      progress:
+        a.enabled && a.locked.toLowerCase() === control.id
+          ? 0
+          : isScrollExit
+            ? a.exitProgress
+            : isHovered
+              ? a.dwell.progress
+              : 0,
       active: control.id === 'drag' ? a.dragging : isScrollExit,
+      // while a drag is held the way out is highlighted
+      urgent: a.enabled && a.dragging && (control.id === 'drop' || control.id === 'cancel'),
     };
   });
 }
@@ -142,7 +176,8 @@ export function statsLine(device) {
   const c = a.counts;
   return (
     `Dwell ${a.dwellMs} ms, tolerance ${a.tolerance} · left ${c.left}, right ${c.right}, ` +
-    `double ${c.double}, drag ${c.dragStart}/${c.dragRelease} (press/release), scroll ${c.scrollStart} started, ` +
+    `double ${c.double}, drag ${c.dragStart}/${c.dragRelease} (press/release), drop ${c.drop}, cancel ${c.cancel}, ` +
+    `scroll ${c.scrollStart} started, ` +
     `${c.scrollExit} exited, ${c.wheel} wheel notches · palette selections ${a.selections}`
   );
 }

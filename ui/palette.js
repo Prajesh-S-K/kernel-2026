@@ -9,6 +9,7 @@ import {
   PALETTE_NOTE,
   bannerOf,
   controlsOf,
+  selectedText,
 } from './actions.js';
 
 const $ = (id) => document.getElementById(id);
@@ -39,7 +40,8 @@ for (const control of controlsOf(null)) {
   element.className = `control ${control.id}`;
   element.dataset.id = control.id;
   element.setAttribute('role', 'img');
-  element.innerHTML = '<strong></strong><small></small><span class="fill"></span>';
+  element.innerHTML =
+    '<strong></strong><small></small><span class="ring" aria-hidden="true"></span>';
   element.addEventListener('mouseenter', () => reporter.enter(control.id, performance.now()));
   // leaving a control onto the window background is still "on the palette"
   element.addEventListener('mouseleave', () => reporter.enter('frame', performance.now()));
@@ -81,14 +83,26 @@ function render() {
   }
   for (const control of controlsOf(stale ? null : device)) {
     const element = buttons.get(control.id);
-    element.className = `control ${control.id}${control.selected ? ' selected' : ''}${
-      control.hovered ? ' hovered' : ''
-    }${control.active ? ' active' : ''}${control.exit ? ' exit' : ''}`;
+    element.className = [
+      'control',
+      control.id,
+      control.selected && 'selected',
+      control.hovered && 'hovered',
+      control.active && 'active',
+      control.exit && 'exit',
+      control.locked && 'locked',
+      control.urgent && 'urgent',
+    ]
+      .filter(Boolean)
+      .join(' ');
     element.children[0].textContent = control.label;
-    element.children[1].textContent = control.hint;
-    element.children[2].style.width = `${Math.round(control.progress * 100)}%`;
+    element.children[1].textContent = control.locked
+      ? 'Chosen. Move off this control to choose it again.'
+      : control.hint;
+    element.children[2].style.setProperty('--p', String(control.progress));
     element.setAttribute('aria-label', `${control.label}. ${control.hint}`);
   }
+  $('selected').textContent = stale ? 'Selected action: unknown (no data)' : selectedText(device);
   $('link').textContent = stats.line();
   $('note').textContent = PALETTE_NOTE;
   $('limits').textContent = LINK_NOTE;
