@@ -45,6 +45,11 @@ enum class ActionMode { Left, Right, Double, Drag, Scroll };
 // target action like a control does, and a completed dwell there selects nothing.
 enum class PaletteTarget { None, Left, Right, Double, Drag, Scroll, Drop, Cancel, Stop, Frame };
 enum class ScrollPhase { Off, Armed, Active };
+// Who drives the palette. Exactly one at a time: the browser palette window reports hover and the device
+// times the menu dwell; the desktop overlay reports "the pointer is on me", times the menu dwell itself and
+// sends validated selections. A command from the other controller is refused.
+enum class Controller { None, Browser, Overlay };
+const char* name(Controller controller);
 const char* name(ActionMode mode);
 const char* name(PaletteTarget target);
 const char* name(ScrollPhase phase);
@@ -81,6 +86,11 @@ struct ActionsStatus {
     uint32_t left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0, scrollStarts = 0,
              scrollExits = 0, wheelUnits = 0;
     bool keep = false;           // "keep selected action": Right and Double stay selected after executing
+    const char* controller = "NONE";
+    bool menu = false;           // overlay: the pointer is on the overlay (target actions inhibited)
+    bool ready = false;          // overlay: menu active, report fresh, any held drag released AND confirmed
+    bool keyboard = false;       // overlay: keyboard mode (target dwell clicks suppressed)
+    uint32_t keyboardSuppressed = 0, lostMs = 0;
     const char* locked = "NONE"; // the control that was just chosen and must be left before it can be chosen again
     uint32_t drops = 0, cancels = 0, confirmedReleases = 0;
     bool reporting = false;      // a fresh palette report exists (otherwise nothing acts on a target)
@@ -120,6 +130,34 @@ public:
     PaletteTarget lockedTarget() const {
         return lockedTarget_;
     }
+    // ---- desktop overlay controller -------------------------------------------------------------
+    Controller controller() const {
+        return controller_;
+    }
+    // Claim the palette for a controller (None releases it). Claiming resets everything else.
+    void claim(Controller controller, uint32_t now);
+    // Overlay report: the pointer is on the overlay (tile or menu) or not. The overlay repeats it; a
+    // report older than actionReportFreshMs counts as missing. While on the overlay target actions are
+    // inhibited, a held drag is released first, and nothing can be selected until that release is confirmed.
+    bool setMenu(bool on, uint32_t now);
+    bool menuActive(uint32_t now) const; // on the overlay according to a FRESH report
+    // A validated menu selection from the overlay (the overlay timed its own dwell). Refused unless the menu
+    // is active, the report is fresh, no drag is held and no release is waiting for confirmation.
+    bool selectFromMenu(PaletteTarget target, uint32_t now);
+    bool menuReady(uint32_t now) const;
+    // Keyboard mode: the overlay opened the system keyboard, which supplies its own dwell; NodX's target
+    // dwell clicks are suppressed (pointing continues) until any action is selected or the session ends.
+    void setKeyboard(bool on) {
+        keyboard_ = on;
+        if (on && pending_) {
+            pending_ = false;
+            ++cancelled;
+        }
+    }
+    bool keyboard() const {
+        return keyboard_;
+    }
+    uint32_t lostFor(uint32_t now) const; // ms since the last overlay report (since the claim if none)
     // Option, off at every reset and every session: Right-click and Double-click stay selected after they
     // execute. It never applies to Drag or Scroll, which always need their own dwell to start.
     void setKeep(bool on) {
@@ -146,7 +184,7 @@ public:
     PaletteTarget last = PaletteTarget::None;
     uint32_t selections = 0, left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0,
              scrollStarts = 0, scrollExits = 0, inhibited = 0, cancelled = 0, paletteReleases = 0,
-             drops = 0, cancels = 0, confirmedReleases = 0;
+             drops = 0, cancels = 0, confirmedReleases = 0, keyboardSuppressed = 0;
 
 private:
     ActionMode mode_ = ActionMode::Left;
@@ -154,7 +192,10 @@ private:
     bool dragging_ = false;
     PaletteTarget hover_ = PaletteTarget::None;
     uint32_t hoverAt_ = 0, neutralSince_ = 0, pendingSince_ = 0;
-    bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false, keep_ = false;
+    bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false, keep_ = false,
+         keyboard_ = false;
+    Controller controller_ = Controller::None;
+    uint32_t claimedAt_ = 0;
     PaletteTarget lockedTarget_ = PaletteTarget::None;
     float pendingX_ = 0, pendingY_ = 0;
     void select(PaletteTarget target);

@@ -400,6 +400,16 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
     const bool outputAllowed = active && state_ == SystemState::Active;
     Selection selected;
     const bool dwellClicking = uncal_ && uncalDwell_ && !demoMovementOnly_;
+    if (uncal_ && actionsEnabled_ && palette_.controller() == Controller::Overlay &&
+        palette_.lostFor(now) > start::actionOverlayLostMs) {
+        // The overlay stopped reporting: its controls are switched OFF (a held button is released through
+        // the normal path) and are NOT resumed by a late report; the overlay must claim them again.
+        actionsEnabled_ = false;
+        uncalProfile_ = uncalibratedDemoProfile();
+        selection_.reset(false, now);
+        releaseHeldButtons(now);
+        diagnostics_.reason = "desktop overlay stopped reporting; its controls are off until it claims them again";
+    }
     const bool actionsActive = uncal_ && actionsEnabled_ && !demoMovementOnly_;
     ActionOutput actionOut;
     if (actionsActive && outputAllowed) {
@@ -1434,6 +1444,10 @@ const char* System::actionBlocker() const {
     return nullptr;
 }
 bool System::setActionPalette(bool on, uint32_t now) {
+    if (actionsEnabled_ && palette_.controller() == Controller::Overlay) {
+        diagnostics_.reason = "the palette is controlled by the desktop overlay";
+        return false; // one active controller at a time
+    }
     if (!on) {
         if (actionsEnabled_) {
             actionsEnabled_ = false;
@@ -1453,10 +1467,72 @@ bool System::setActionPalette(bool on, uint32_t now) {
     quickEnabled_ = false;
     actionsEnabled_ = true;
     uncalProfile_ = uncalibratedDemoProfile();
-    palette_.reset();
+    palette_.claim(Controller::Browser, now);
     hoverSeen_ = PaletteTarget::None;
     selection_.reset(false, now);
     diagnostics_.reason = "EXPERIMENTAL dwell action palette on; Left-click is selected";
+    return true;
+}
+bool System::setActionOverlay(bool on, uint32_t now) {
+    if (!on) {
+        if (actionsEnabled_ && palette_.controller() == Controller::Overlay) {
+            actionsEnabled_ = false;
+            uncalProfile_ = uncalibratedDemoProfile();
+            selection_.reset(false, now);
+            releaseHeldButtons(now);
+            diagnostics_.reason = "desktop overlay controls off";
+            return true;
+        }
+        return !actionsEnabled_; // the browser palette is not the overlay's to turn off
+    }
+    if (actionsEnabled_) {
+        if (palette_.controller() == Controller::Overlay) {
+            return true;
+        }
+        diagnostics_.reason = "the palette is already controlled by the browser";
+        return false;
+    }
+    if (const char* blocker = actionBlocker()) {
+        diagnostics_.reason = blocker;
+        return false;
+    }
+    uncalDwell_ = false;
+    clickEnabled_ = false;
+    quickEnabled_ = false;
+    actionsEnabled_ = true;
+    uncalProfile_ = uncalibratedDemoProfile();
+    palette_.claim(Controller::Overlay, now);
+    hoverSeen_ = PaletteTarget::None;
+    selection_.reset(false, now);
+    diagnostics_.reason = "EXPERIMENTAL desktop overlay controls on; Left-click is selected";
+    return true;
+}
+bool System::setOverlayMenu(bool on, uint32_t now) {
+    if (!uncal_ || !actionsEnabled_) {
+        return false;
+    }
+    return palette_.setMenu(on, now);
+}
+bool System::overlaySelect(PaletteTarget target, uint32_t now) {
+    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay) {
+        return false;
+    }
+    if (target == PaletteTarget::Stop) {
+        if (!palette_.menuActive(now)) {
+            return false;
+        }
+        palette_.last = PaletteTarget::Stop;
+        ++palette_.selections;
+        stopUncalibratedDemo("stopped from the desktop overlay; explicit restart required");
+        return true;
+    }
+    return palette_.selectFromMenu(target, now);
+}
+bool System::setOverlayKeyboard(bool on) {
+    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay) {
+        return false;
+    }
+    palette_.setKeyboard(on);
     return true;
 }
 bool System::setActionKeep(bool on) {
@@ -1480,8 +1556,8 @@ bool System::setUncalibratedSpeed(float factor, uint32_t now) {
     return true;
 }
 bool System::setActionHover(PaletteTarget target, uint32_t now) {
-    if (!uncal_ || !actionsEnabled_) {
-        return false;
+    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Browser) {
+        return false; // hover reports belong to the browser palette only
     }
     palette_.setHover(target, now);
     return true;
@@ -1507,6 +1583,8 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
     st.paletteReleases = palette_.paletteReleases;
     st.commitMs = start::actionCommitMs;
     st.keep = palette_.keep();
+    st.controller = name(palette_.controller());
+    st.keyboardSuppressed = palette_.keyboardSuppressed;
     st.drops = palette_.drops;
     st.cancels = palette_.cancels;
     st.confirmedReleases = palette_.confirmedReleases;
@@ -1524,6 +1602,10 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
         st.dwellProgress = selection_.progress(lastTick_, uncalProfile_);
         st.exitProgress = palette_.exitProgress(lastTick_, uncalDwellMs_);
         st.locked = name(palette_.lockedTarget());
+        st.menu = palette_.menuActive(lastTick_);
+        st.ready = palette_.menuReady(lastTick_);
+        st.keyboard = palette_.keyboard();
+        st.lostMs = palette_.controller() == Controller::Overlay ? palette_.lostFor(lastTick_) : 0;
         st.reporting = palette_.reporting(lastTick_);
         st.reportAgeMs = palette_.reportAge(lastTick_);
         st.pending = palette_.pending();

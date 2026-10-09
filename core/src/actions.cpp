@@ -55,6 +55,17 @@ const char* name(ScrollPhase phase) {
     }
     return "OFF";
 }
+const char* name(Controller controller) {
+    switch (controller) {
+    case Controller::None:
+        return "NONE";
+    case Controller::Browser:
+        return "BROWSER";
+    case Controller::Overlay:
+        return "OVERLAY";
+    }
+    return "NONE";
+}
 bool parsePaletteTarget(const char* text, PaletteTarget& out) {
     static const PaletteTarget all[] = {PaletteTarget::None,   PaletteTarget::Left,
                                         PaletteTarget::Right,  PaletteTarget::Double,
@@ -85,6 +96,50 @@ void ActionPalette::reset() {
     releaseUnconfirmed_ = false;
     lockedTarget_ = PaletteTarget::None;
     keep_ = false; // the option is off at every session and every reset
+    keyboard_ = false;
+    controller_ = Controller::None;
+}
+void ActionPalette::claim(Controller controller, uint32_t now) {
+    reset();
+    controller_ = controller;
+    claimedAt_ = now;
+}
+bool ActionPalette::setMenu(bool on, uint32_t now) {
+    if (controller_ != Controller::Overlay) {
+        return false;
+    }
+    setHover(on ? PaletteTarget::Frame : PaletteTarget::None, now);
+    return true;
+}
+bool ActionPalette::menuActive(uint32_t now) const {
+    return controller_ == Controller::Overlay && hover(now) == PaletteTarget::Frame;
+}
+bool ActionPalette::menuReady(uint32_t now) const {
+    return menuActive(now) && !releaseUnconfirmed_ && !dragging_;
+}
+bool ActionPalette::selectFromMenu(PaletteTarget target, uint32_t now) {
+    if (!menuReady(now)) {
+        return false;
+    }
+    switch (target) {
+    case PaletteTarget::Left:
+    case PaletteTarget::Right:
+    case PaletteTarget::Double:
+    case PaletteTarget::Drag:
+    case PaletteTarget::Drop:
+    case PaletteTarget::Cancel:
+    case PaletteTarget::Scroll:
+        last = target;
+        ++selections;
+        select(target);
+        keyboard_ = false; // choosing an action returns to ordinary NodX control
+        return true;
+    default:
+        return false; // Stop is the System's job; None and Frame are not selections
+    }
+}
+uint32_t ActionPalette::lostFor(uint32_t now) const {
+    return uint32_t(now - (everReported_ ? hoverAt_ : claimedAt_));
 }
 void ActionPalette::clearCounters() {
     last = PaletteTarget::None;
@@ -219,6 +274,19 @@ ActionOutput ActionPalette::update(const ActionInput& in, uint32_t now) {
     }
     const bool fresh = reporting(now);
     const PaletteTarget over = hover(now);
+    if (keyboard_ && over == PaletteTarget::None) {
+        // The system keyboard supplies its own dwell: NodX's target dwell clicks are suppressed so a key is
+        // never activated twice. Pointing continues. Leave it by choosing any action in the overlay menu.
+        if (in.dwellPulse) {
+            ++keyboardSuppressed;
+        }
+        if (pending_) {
+            pending_ = false;
+            ++cancelled;
+        }
+        out.down = dragging_;
+        return out;
+    }
     if (over != lockedTarget_) {
         lockedTarget_ = PaletteTarget::None; // the control was left: it may be chosen again
     }
@@ -310,7 +378,8 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         "\"hover\":\"%s\",\"inPalette\":%s,\"last\":\"%s\",\"keep\":%s,\"selections\":%lu,"
         "\"dwellMs\":%lu,\"tolerance\":%.1f,\"neutral\":%.1f,"
         "\"dwell\":{\"state\":\"%s\",\"progress\":%.3f},\"exit\":{\"progress\":%.3f},"
-        "\"locked\":\"%s\","
+        "\"locked\":\"%s\",\"controller\":\"%s\",\"menu\":%s,\"ready\":%s,\"keyboard\":%s,"
+        "\"keyboardSuppressed\":%lu,\"lostMs\":%lu,"
         "\"counts\":{\"left\":%lu,\"right\":%lu,\"double\":%lu,\"dragStart\":%lu,"
         "\"dragRelease\":%lu,\"scrollStart\":%lu,\"scrollExit\":%lu,\"wheel\":%lu,"
         "\"drop\":%lu,\"cancel\":%lu},"
@@ -321,6 +390,9 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         s.frozen ? "true" : "false", s.hover, s.inPalette ? "true" : "false", s.last,
         s.keep ? "true" : "false", static_cast<unsigned long>(s.selections), static_cast<unsigned long>(s.dwellMs),
         s.tolerance, s.neutral, s.dwellState, s.dwellProgress, s.exitProgress, s.locked,
+        s.controller, s.menu ? "true" : "false", s.ready ? "true" : "false",
+        s.keyboard ? "true" : "false", static_cast<unsigned long>(s.keyboardSuppressed),
+        static_cast<unsigned long>(s.lostMs),
         static_cast<unsigned long>(s.left), static_cast<unsigned long>(s.right),
         static_cast<unsigned long>(s.doubles), static_cast<unsigned long>(s.dragStarts),
         static_cast<unsigned long>(s.dragReleases), static_cast<unsigned long>(s.scrollStarts),

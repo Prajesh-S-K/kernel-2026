@@ -69,7 +69,9 @@ function render() {
   const banner = stale
     ? { kind: 'off', text: 'NO DATA', detail: 'Keep the main companion window open and connected.' }
     : bannerOf(device);
-  const nowEnabled = !stale && device?.actions?.enabled === true;
+  // only the browser palette's own claim: with the desktop overlay in control this window reports nothing
+  const nowEnabled =
+    !stale && device?.actions?.enabled === true && device?.actions?.controller === 'BROWSER';
   if (nowEnabled && !enabled) reporter.kick(); // just enabled: report at once
   enabled = nowEnabled;
   $('banner').className = `banner ${banner.kind}`;

@@ -61,6 +61,7 @@ constexpr float uncalSpeedDefault = 1.f;
 constexpr float actionScrollGain = .35f;        // wheel units per second per deg/s beyond the neutral zone
 constexpr float actionScrollNeutral = 3.f;      // deg/s of vertical movement that is still "neutral"
 constexpr uint32_t actionReportFreshMs = 2500;  // no palette report (hover OR "outside") this long: nothing acts
+constexpr uint32_t actionOverlayLostMs = 5000;  // an overlay that stops reporting this long loses the palette (off, released)
 constexpr uint32_t actionCommitMs = 150;        // a completed target dwell waits this long for a late palette entry
 constexpr uint32_t uncalDwellMs = 1200;
 constexpr float uncalDwellTolerance = 8.f;

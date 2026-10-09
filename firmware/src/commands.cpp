@@ -180,6 +180,19 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         if (verb == "enable") {
             ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
                  system.setActionPalette(value == "on", now);
+        } else if (verb == "overlay") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setActionOverlay(value == "on", now);
+        } else if (verb == "menu") {
+            ok = (value == "open" || value == "close") && (input >> std::ws).eof() &&
+                 system.setOverlayMenu(value == "open", now);
+        } else if (verb == "select") {
+            nodx::PaletteTarget target;
+            ok = nodx::parsePaletteTarget(value.c_str(), target) && (input >> std::ws).eof() &&
+                 system.overlaySelect(target, now);
+        } else if (verb == "keyboard") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setOverlayKeyboard(value == "on");
         } else if (verb == "keep") {
             ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
                  system.setActionKeep(value == "on");

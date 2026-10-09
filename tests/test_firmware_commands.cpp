@@ -519,6 +519,23 @@ void hardwareChecks() {
     expect(ok(send("handsfree uncal speed 0.5")) && has(status(), "\"speed\":0.50"),
            "a valid pointer speed is accepted and reported");
     expect(ok(send("handsfree uncal speed 1")) && has(status(), "\"speed\":1.00"), "speed reset");
+    // Desktop overlay controller: validated, refused without a session or the claim.
+    expect(refused(send("actions overlay on")), "the overlay needs a running session");
+    for (const char* bad : {"actions overlay", "actions overlay maybe", "actions overlay on now",
+                            "actions menu", "actions menu maybe", "actions menu open now",
+                            "actions select", "actions select middle", "actions select left now",
+                            "actions select frame", "actions select none", "actions keyboard",
+                            "actions keyboard maybe"}) {
+        expect(refused(send(bad)), bad);
+    }
+    expect(refused(send("actions menu open")) && refused(send("actions menu close")) &&
+               refused(send("actions select left")) && refused(send("actions select stop")) &&
+               refused(send("actions keyboard on")),
+           "overlay commands refused without the overlay claim");
+    expect(ok(send("actions overlay off")), "releasing an unclaimed overlay is accepted");
+    expect(has(status(), "\"controller\":\"NONE\"") && has(status(), "\"menu\":false") &&
+               has(status(), "\"keyboard\":false"),
+           "controller fields reported");
     expect(ok(send("actions enable off")), "turning the palette off is always accepted");
     expect(has(status(), "\"actions\":{\"enabled\":false,\"mode\":\"LEFT\""),
            "action palette status reported");

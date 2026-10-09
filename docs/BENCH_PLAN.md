@@ -582,3 +582,10 @@ then either power the board off or walk out of Bluetooth range; observe whether 
 then whether it stops by itself, and how long it takes; recover by clicking with the trackpad. Record the host
 behaviour, the time, and whether anything was selected or moved. Nothing in the software claims or assumes the
 result.
+
+## Desktop action overlay (software complete; needs the firmware with the overlay commands flashed)
+See `docs/OVERLAY.md` for the walkthrough, setup, permissions and limits. Firmware change: `actions overlay`,
+`actions menu`, `actions select`, `actions keyboard` and the `controller/menu/ready/keyboard` status fields;
+nothing is flashed yet, so the board still runs the previous build and the overlay cannot claim the controls on
+it. After an authorised upload run the attended checklist at the end of `docs/OVERLAY.md`, record the report delay
+and accidental actions as for the browser palette, and keep the Bluetooth held-button link-loss test separate.

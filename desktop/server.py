@@ -171,6 +171,23 @@ def command_for(data):
         operation = data.get("op")
         if operation == "enable":
             return "actions enable " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "overlay":
+            return "actions overlay " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "menu":
+            return "actions menu " + ("open" if required_boolean(data, "open") else "close")
+        if operation == "keyboard":
+            return "actions keyboard " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation == "select" and data.get("target") in (
+            "left",
+            "right",
+            "double",
+            "drag",
+            "drop",
+            "cancel",
+            "scroll",
+            "stop",
+        ):
+            return f"actions select {data['target']}"
         if operation == "keep":
             return "actions keep " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "hover" and data.get("target") in (

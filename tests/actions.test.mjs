@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   ACTIONS_LABEL,
@@ -380,6 +381,29 @@ test("wording: experimental, no system-wide overlay claim, scroll exit explained
       /always on top|system-wide overlay\.\s*It is on/i,
     );
   }
+});
+
+test("with the desktop overlay in control the browser palette defers and cannot be enabled", () => {
+  const overlay = frame({ ...base, enabled: true, controller: "OVERLAY" });
+  assert.equal(actionsOf(overlay).controller, "OVERLAY");
+  assert.equal(bannerOf(overlay).kind, "overlay");
+  assert.match(bannerOf(overlay).text, /DESKTOP OVERLAY IN CONTROL/);
+  const view = panelView(overlay);
+  assert.equal(view.overlay, true);
+  assert.equal(view.canEnable, false);
+  assert.match(view.enableBlocked, /one controller at a time/);
+  assert.equal(
+    panelView(frame({ ...base, controller: "BROWSER" })).overlay,
+    false,
+  );
+  assert.equal(actionsOf({}).controller, "NONE");
+  assert.equal(actionsOf({ actions: { controller: 7 } }).controller, "NONE");
+  // the palette window only reports for its OWN claim
+  const source = readFileSync(
+    new URL("../ui/palette.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /controller === 'BROWSER'/);
 });
 
 test("keep selected action: off by default, shown as one shot or kept, never for Drag or Scroll", () => {

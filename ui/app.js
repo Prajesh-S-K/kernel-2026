@@ -431,7 +431,7 @@ function renderActions(data) {
   $('actionsBanner').textContent = view.banner.text;
   $('actionsDetail').textContent =
     `${view.banner.exitHint ? `${view.banner.exitHint}. ` : ''}${view.banner.detail}`;
-  $('actionsEnable').disabled = !view.canEnable && !view.enabled;
+  $('actionsEnable').disabled = view.overlay || (!view.canEnable && !view.enabled);
   $('actionsEnable').checked = view.enabled;
   $('actionsKeep').disabled = !view.enabled;
   $('actionsKeep').checked = view.enabled && a.keep;

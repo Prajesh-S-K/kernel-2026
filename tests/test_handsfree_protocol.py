@@ -395,6 +395,45 @@ class CommandValidation(HandsFreeCase):
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 SERVER.command_for(bad)
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "overlay", "enabled": True}),
+            "actions overlay on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "overlay", "enabled": False}),
+            "actions overlay off",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "menu", "open": True}),
+            "actions menu open",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "menu", "open": False}),
+            "actions menu close",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "keyboard", "enabled": True}),
+            "actions keyboard on",
+        )
+        for target in ("left", "right", "double", "drag", "drop", "cancel", "scroll", "stop"):
+            self.assertEqual(
+                SERVER.command_for({"action": "actions", "op": "select", "target": target}),
+                f"actions select {target}",
+            )
+        for bad in (
+            {"action": "actions", "op": "overlay"},
+            {"action": "actions", "op": "overlay", "enabled": 1},
+            {"action": "actions", "op": "menu"},
+            {"action": "actions", "op": "menu", "open": "yes"},
+            {"action": "actions", "op": "keyboard"},
+            {"action": "actions", "op": "select"},
+            {"action": "actions", "op": "select", "target": "frame"},
+            {"action": "actions", "op": "select", "target": "none"},
+            {"action": "actions", "op": "select", "target": "left; stop"},
+            {"action": "actions", "op": "select", "target": 1},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
         for bad in (
             {"action": "actions"},
             {"action": "actions", "op": "enable"},
@@ -403,7 +442,6 @@ class CommandValidation(HandsFreeCase):
             {"action": "actions", "op": "hover", "target": "middle"},
             {"action": "actions", "op": "hover", "target": "LEFT; stop"},
             {"action": "actions", "op": "hover", "target": 3},
-            {"action": "actions", "op": "select", "target": "left"},
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 SERVER.command_for(bad)
@@ -1132,6 +1170,33 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.assertTrue(kept["ok"] and kept["actions"]["keep"])
         self.assertFalse(self.send("actions keep off")["actions"]["keep"])
         self.assertFalse(self.send("actions keep maybe")["ok"])
+
+    def test_overlay_controller_end_to_end_in_the_simulator(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        claim = self.send("actions overlay on")
+        self.assertTrue(claim["ok"] and claim["actions"]["controller"] == "OVERLAY")
+        # one controller at a time
+        self.assertFalse(self.send("actions enable on")["ok"])
+        self.assertFalse(self.send("actions hover left")["ok"])
+        # the menu state is acknowledged in the reply; selection needs it
+        self.assertFalse(self.send("actions select right")["ok"], "selected with the menu closed")
+        opened = self.send("actions menu open")
+        self.assertTrue(opened["ok"] and opened["actions"]["menu"] and opened["actions"]["ready"])
+        chosen = self.send("actions select right")
+        self.assertTrue(chosen["ok"] and chosen["actions"]["mode"] == "RIGHT")
+        self.assertTrue(self.send("actions keyboard on")["actions"]["keyboard"])
+        self.assertFalse(self.send("actions keyboard maybe")["ok"])
+        chosen = self.send("actions select left")  # any action returns to ordinary control
+        self.assertTrue(chosen["ok"] and not chosen["actions"]["keyboard"])
+        self.assertTrue(self.send("actions menu close")["ok"])
+        stop = self.send("actions menu open")
+        self.assertTrue(stop["ok"])
+        stopped = self.send("actions select stop")
+        self.assertTrue(stopped["ok"])
+        self.assertNotEqual(stopped["state"], "ACTIVE")
+        self.assertEqual(stopped["actions"]["controller"], "NONE")
 
     def test_without_palette_reports_nothing_clicks(self):
         self.quiet(50)

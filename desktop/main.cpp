@@ -539,6 +539,19 @@ int main(int argc, char** argv) {
                 if (verb == "enable") {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setActionPalette(value == "on", now);
+                } else if (verb == "overlay") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setActionOverlay(value == "on", now);
+                } else if (verb == "menu") {
+                    ok = (value == "open" || value == "close") && (cmd >> std::ws).eof() &&
+                         sys.setOverlayMenu(value == "open", now);
+                } else if (verb == "select") {
+                    PaletteTarget target;
+                    ok = parsePaletteTarget(value.c_str(), target) && (cmd >> std::ws).eof() &&
+                         sys.overlaySelect(target, now);
+                } else if (verb == "keyboard") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setOverlayKeyboard(value == "on");
                 } else if (verb == "keep") {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setActionKeep(value == "on");

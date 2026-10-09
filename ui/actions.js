@@ -48,6 +48,8 @@ export function actionsOf(device) {
     inPalette: a?.inPalette === true,
     last: typeof a?.last === 'string' ? a.last : 'NONE',
     keep: a?.keep === true,
+    controller: typeof a?.controller === 'string' ? a.controller : 'NONE',
+    keyboard: a?.keyboard === true,
     selections: num(a?.selections),
     locked: typeof a?.locked === 'string' ? a.locked : 'NONE',
     dwellMs: num(a?.dwellMs),
@@ -96,6 +98,12 @@ const MODE_TEXT = {
 // pointer must never be a surprise.
 export function bannerOf(device) {
   const a = actionsOf(device);
+  if (a.enabled && a.controller === 'OVERLAY')
+    return {
+      kind: 'overlay',
+      text: 'DESKTOP OVERLAY IN CONTROL',
+      detail: 'This browser palette is paused. Use the NodX tile on your screen.',
+    };
   if (!a.enabled)
     return { kind: 'off', text: 'ACTION PALETTE OFF', detail: a.blocked || 'Enable it first.' };
   if (a.dragging)
@@ -196,7 +204,8 @@ export function statsLine(device) {
 export function panelView(device) {
   const a = actionsOf(device);
   const hardware = !!device && device.source !== 'SIMULATED';
-  const canEnable = hardware && a.reported && a.blocked === '';
+  const overlay = a.enabled && a.controller === 'OVERLAY';
+  const canEnable = hardware && a.reported && a.blocked === '' && !overlay;
   const link = a.enabled
     ? a.link.reporting
       ? `Palette report age ${a.link.ageMs} ms · target actions inhibited ${a.link.inhibited}× · cancelled by a late palette entry ${a.link.cancelled}× · drags released on palette entry ${a.link.paletteReleases}×`
@@ -207,7 +216,12 @@ export function panelView(device) {
     reported: a.reported,
     enabled: a.enabled,
     canEnable,
-    enableBlocked: a.enabled ? '' : a.blocked,
+    overlay,
+    enableBlocked: overlay
+      ? 'the desktop overlay controls the palette (one controller at a time)'
+      : a.enabled
+        ? ''
+        : a.blocked,
     banner: bannerOf(device),
     link,
     stats:

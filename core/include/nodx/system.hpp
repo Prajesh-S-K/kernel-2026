@@ -172,6 +172,13 @@ public:
     // and never clicks. Leaving the palette clears and re-arms the dwell.
     bool setActionPalette(bool on, uint32_t now);
     bool setActionHover(PaletteTarget target, uint32_t now);
+    // Desktop overlay controller (the browser palette and the overlay are mutually exclusive: one active
+    // controller at a time, and a command from the other one is refused). The overlay times its own menu
+    // dwell and the device keeps timing the target dwell, so no action can be executed by both.
+    bool setActionOverlay(bool on, uint32_t now);
+    bool setOverlayMenu(bool on, uint32_t now);            // the pointer is on the overlay (acknowledged in status)
+    bool overlaySelect(PaletteTarget target, uint32_t now); // a validated menu selection
+    bool setOverlayKeyboard(bool on);                      // system keyboard open: target dwell clicks suppressed
     // "Keep selected action" (needs the palette on; off at every start): Right and Double stay selected.
     bool setActionKeep(bool on);
     bool actionPaletteEnabled() const {

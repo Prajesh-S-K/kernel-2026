@@ -56,6 +56,7 @@ size_t mark(const HF& h) {
 // below send that heartbeat like the real page does, so a test can stop it to model a missing report.
 PaletteTarget gCurrent = PaletteTarget::None;
 bool gReporting = true;
+bool gOverlay = false, gMenu = false; // overlay mode: the heartbeat repeats "pointer on the overlay or not"
 unsigned gTicks = 0;
 void report(HF& h, PaletteTarget target) {
     gCurrent = target;
@@ -63,7 +64,11 @@ void report(HF& h, PaletteTarget target) {
 }
 void tk(HF& h, const Rates& rate = {}) {
     if (gReporting && gTicks++ % 50 == 0) {
-        h.s().setActionHover(gCurrent, h.now);
+        if (gOverlay) {
+            h.s().setOverlayMenu(gMenu, h.now);
+        } else {
+            h.s().setActionHover(gCurrent, h.now);
+        }
     }
     h.tick(rate);
 }
@@ -76,6 +81,7 @@ void qt(HF& h, unsigned ms) {
 HF rig(bool saveProfile = false) {
     gCurrent = PaletteTarget::None;
     gReporting = true;
+    gOverlay = gMenu = false;
     gTicks = 0;
     HF h(saveProfile, EnableKind::Momentary);
     h.sw = false;
@@ -90,6 +96,28 @@ HF paletteRig(bool saveProfile = false) {
     report(h, PaletteTarget::None); // the palette window's first report
     qt(h, 100);
     return h;
+}
+// The desktop overlay: claims the palette, then repeats "pointer on the overlay" like the real overlay does.
+void menu(HF& h, bool on) {
+    gMenu = on;
+    h.s().setOverlayMenu(on, h.now);
+}
+HF overlayRig(bool saveProfile = false) {
+    HF h = rig(saveProfile);
+    require(h.s().setActionOverlay(true, h.now), "overlay claim refused");
+    gOverlay = true;
+    menu(h, false); // the overlay's first heartbeat
+    qt(h, 100);
+    return h;
+}
+// Open the menu, select through the validated command, collapse (pointer leaves the overlay).
+bool ovSelect(HF& h, PaletteTarget target) {
+    menu(h, true);
+    qt(h, 50);
+    const bool ok = h.s().overlaySelect(target, h.now);
+    menu(h, false);
+    qt(h, 50);
+    return ok;
 }
 constexpr unsigned kDwellTicks = 160; // 1.6 s: the 250 ms arming plus the 1200 ms START dwell
 void hold(HF& h, PaletteTarget target, unsigned ticks) {
@@ -1469,6 +1497,291 @@ int main() {
                 require(h.s().state != SystemState::Active && h.released(), "output after the stop");
             }
         }
+    });
+
+    // ================= desktop overlay controller =================
+    test("overlay: exactly one controller owns the palette at a time", [] {
+        HF b = rig();
+        require(b.s().setActionPalette(true, b.now), "browser claim");
+        require(std::strcmp(b.s().actionsStatus(b.now).controller, "BROWSER") == 0, "controller");
+        require(!b.s().setActionOverlay(true, b.now), "overlay claimed over the browser palette");
+        require(!b.s().setOverlayMenu(true, b.now) && !b.s().overlaySelect(PaletteTarget::Left, b.now) &&
+                    !b.s().setOverlayKeyboard(true),
+                "overlay commands accepted while the browser controls");
+        require(b.s().setActionHover(PaletteTarget::None, b.now), "browser hover refused");
+        HF o = rig();
+        require(o.s().setActionOverlay(true, o.now), "overlay claim");
+        gOverlay = true;
+        require(std::strcmp(o.s().actionsStatus(o.now).controller, "OVERLAY") == 0, "controller");
+        require(!o.s().setActionPalette(true, o.now) && !o.s().setActionPalette(false, o.now),
+                "the browser took the palette from the overlay");
+        require(!o.s().setActionHover(PaletteTarget::Left, o.now), "browser hover accepted during overlay");
+        require(o.s().setOverlayMenu(false, o.now), "overlay menu refused");
+        require(o.s().actionPaletteEnabled(), "overlay controls not on");
+        require(o.s().setActionOverlay(false, o.now) && !o.s().actionPaletteEnabled(), "overlay release");
+        require(std::strcmp(o.s().actionsStatus(o.now).controller, "NONE") == 0, "controller after release");
+        require(!o.s().setOverlayMenu(true, o.now), "menu accepted with nothing claimed");
+        // never without a running session
+        HF n(false, EnableKind::Momentary);
+        n.sw = false;
+        n.quiet(400);
+        require(!n.s().setActionOverlay(true, n.now), "claimed without a session");
+    });
+
+    test("overlay: the device keeps timing the TARGET dwell and clicks once, as Left-click by default", [] {
+        HF h = overlayRig();
+        const size_t m = mark(h);
+        qt(h, 1900);
+        require(seen(h, m).primary == 1 && seen(h, m).secondary == 0, "no single Left click");
+        require(std::strcmp(mode(h), "LEFT") == 0, "mode");
+    });
+
+    test("overlay: menu selection happens only by the validated command; the device never times the menu", [] {
+        HF h = overlayRig();
+        moveAway(h);
+        menu(h, true);
+        const uint32_t before = h.s().actionsStatus(h.now).selections;
+        qt(h, 8000); // a long rest on the overlay: the device must not select anything by itself
+        require(h.s().actionsStatus(h.now).selections == before, "the device selected from a resting pointer");
+        require(std::strcmp(mode(h), "LEFT") == 0, "mode changed by itself");
+        require(h.s().overlaySelect(PaletteTarget::Right, h.now), "validated select refused");
+        require(std::strcmp(mode(h), "RIGHT") == 0, "select not applied");
+        menu(h, false);
+        require(!h.s().overlaySelect(PaletteTarget::Left, h.now), "select accepted with the menu closed");
+        for (PaletteTarget bad : {PaletteTarget::None, PaletteTarget::Frame}) {
+            menu(h, true);
+            require(!h.s().overlaySelect(bad, h.now), "a non-action was selectable");
+        }
+    });
+
+    test("overlay: the menu-active state is acknowledged, inhibits target clicks, and rearming needs movement", [] {
+        HF h = overlayRig();
+        moveAway(h);
+        menu(h, true);
+        tk(h);
+        const auto st = h.s().actionsStatus(h.now);
+        require(st.menu && st.ready && st.inPalette, "menu state not acknowledged in the status");
+        const size_t m = mark(h);
+        qt(h, 6000); // a target dwell completes while the pointer is on the overlay
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a target click while the menu was active");
+        menu(h, false); // the menu closes: pending cleared, deliberate movement needed
+        qt(h, 5000);
+        require(seen(h, m).primary == 0, "target actions re-armed without movement after the menu closed");
+        require(!h.s().actionsStatus(h.now).menu, "menu state not cleared");
+        moveAway(h);
+        qt(h, 1900);
+        require(seen(h, m).primary == 1, "no click after deliberate movement");
+    });
+
+    test("overlay: a held drag is released and the release confirmed BEFORE any selection can execute", [] {
+        HF h = overlayRig();
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging && h.transport.reports.back().down, "no drag held");
+        const size_t m = mark(h);
+        menu(h, true); // the pointer reaches the overlay
+        // at this instant the button is still down: a selection must be refused
+        require(!h.s().overlaySelect(PaletteTarget::Left, h.now), "a selection executed over a held button");
+        tk(h);
+        tk(h);
+        require(!seen(h, m).primaryHeld && !h.s().actionsStatus(h.now).dragging, "the drag was not released");
+        const auto st = h.s().actionsStatus(h.now);
+        require(st.paletteReleases == 1 && st.ready, "release not confirmed in the status");
+        require(h.s().overlaySelect(PaletteTarget::Left, h.now), "selection refused after the release");
+    });
+
+    test("overlay: Drop releases a drag without movement; Cancel releases and clears pending actions", [] {
+        HF h = overlayRig();
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        menu(h, true);
+        qt(h, 100);
+        require(h.s().overlaySelect(PaletteTarget::Drop, h.now), "Drop refused");
+        require(std::strcmp(mode(h), "LEFT") == 0 && h.s().actionsStatus(h.now).drops == 1, "Drop");
+        require(h.released(), "button still held after Drop");
+        // Cancel clears a chosen one-shot and an armed scroll
+        require(h.s().overlaySelect(PaletteTarget::Right, h.now), "Right");
+        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now), "Cancel refused");
+        require(std::strcmp(mode(h), "LEFT") == 0, "Cancel kept the action");
+        require(h.s().overlaySelect(PaletteTarget::Scroll, h.now), "Scroll");
+        require(std::strcmp(h.s().actionsStatus(h.now).scroll, "ARMED") == 0, "scroll not armed");
+        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now), "Cancel refused");
+        require(std::strcmp(h.s().actionsStatus(h.now).scroll, "OFF") == 0, "Cancel kept the armed scroll");
+    });
+
+    test("overlay: one-shot Right and Double return to Left; keep mode holds them; Cancel clears", [] {
+        HF h = overlayRig();
+        require(ovSelect(h, PaletteTarget::Right), "Right");
+        moveAway(h);
+        qt(h, 1900);
+        require(std::strcmp(mode(h), "LEFT") == 0, "Right was not one-shot");
+        require(h.s().setActionKeep(true), "keep refused");
+        require(ovSelect(h, PaletteTarget::Double), "Double");
+        const size_t m = mark(h);
+        for (int i = 0; i < 2; ++i) {
+            moveAway(h);
+            qt(h, 1900);
+            require(std::strcmp(mode(h), "DOUBLE") == 0, "Double did not stay selected in keep mode");
+        }
+        require(seen(h, m).primary == 4, "not two double-clicks");
+        require(ovSelect(h, PaletteTarget::Cancel) && std::strcmp(mode(h), "LEFT") == 0, "Cancel with keep on");
+    });
+
+    test("overlay: a menu entry reported shortly after a target dwell completes cancels the click; late does not", [] {
+        for (bool lateEntry : {false, true}) {
+            HF h = overlayRig();
+            moveAway(h);
+            const size_t m = mark(h);
+            for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+                tk(h);
+            }
+            require(h.s().actionsStatus(h.now).pending, "no pending click");
+            if (lateEntry) {
+                qt(h, 400); // later than the 150 ms commit wait: the click is already out
+            }
+            menu(h, true);
+            qt(h, 400);
+            const bool clicked = seen(h, m).primary == 1;
+            std::printf("   INFO overlay entry %s the commit wait: %s\n", lateEntry ? "AFTER" : "within",
+                        clicked ? "click executed (residual race)" : "click cancelled");
+            require(clicked == lateEntry, lateEntry ? "late entry did not behave as documented"
+                                                      : "an in-time entry did not cancel the click");
+        }
+    });
+
+    test("overlay: lost heartbeat inhibits actions, then switches the controls off and releases; no auto resume", [] {
+        HF h = overlayRig();
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        gReporting = false; // the overlay process died or the bridge went away
+        for (int i = 0; i < 300; ++i) { // 3 s: reports stale, target actions inhibited
+            tk(h, {i % 40 < 20 ? 30.f : -30.f, 0, 0});
+        }
+        require(!h.s().actionsStatus(h.now).reporting, "still reporting");
+        qt(h, 3500); // beyond the 5 s loss limit
+        require(!h.s().actionPaletteEnabled(), "the overlay controls stayed on after the loss");
+        require(h.released() && !h.s().actionsStatus(h.now).dragging, "the held button was not released");
+        require(h.s().state == SystemState::Active, "the session was stopped (pointing must continue)");
+        // a late heartbeat does NOT bring it back
+        gReporting = true;
+        require(!h.s().setOverlayMenu(false, h.now), "a late report revived the overlay controls");
+        qt(h, 3000);
+        const size_t m = mark(h);
+        qt(h, 4000);
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a click without the overlay controls");
+        // only an explicit new claim resumes
+        require(h.s().setActionOverlay(true, h.now), "re-claim refused");
+        require(std::strcmp(mode(h), "LEFT") == 0 && !h.s().actionsStatus(h.now).keep, "stale state after a re-claim");
+    });
+
+    test("overlay: Stop from the menu ends control at once (also with a drag held); refused off the menu", [] {
+        HF h = overlayRig();
+        require(!h.s().overlaySelect(PaletteTarget::Stop, h.now), "Stop accepted with the menu closed");
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        menu(h, true);
+        require(h.s().overlaySelect(PaletteTarget::Stop, h.now), "Stop refused");
+        require(h.s().state != SystemState::Active && h.released(), "not stopped and released");
+        qt(h, 3000);
+        require(h.s().state != SystemState::Active && h.released(), "restarted by itself");
+    });
+
+    test("overlay: website Stop and the physical button stop immediately with the overlay in control", [] {
+        for (bool physical : {false, true}) {
+            HF h = overlayRig();
+            require(ovSelect(h, PaletteTarget::Drag), "drag select");
+            moveAway(h);
+            qt(h, 1900);
+            require(h.s().actionsStatus(h.now).dragging, "precondition");
+            if (physical) {
+                h.click();
+            } else {
+                h.s().stopUncalibratedDemo("website stop");
+            }
+            require(h.s().state != SystemState::Active && h.released(), "not stopped at once");
+            require(!h.s().actionPaletteEnabled(), "overlay controls survived the stop");
+            qt(h, 2000);
+            require(h.s().state != SystemState::Active && h.released(), "output after the stop");
+        }
+    });
+
+    test("overlay: keyboard mode suppresses target dwell clicks, keeps pointing, and any action returns", [] {
+        HF h = overlayRig();
+        require(h.s().setOverlayKeyboard(true), "keyboard refused");
+        require(h.s().actionsStatus(h.now).keyboard, "keyboard flag");
+        moveAway(h);
+        const size_t m = mark(h);
+        qt(h, 6000); // a full target dwell: NodX must NOT click (the system keyboard has its own dwell)
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "NodX clicked during keyboard mode");
+        require(h.s().actionsStatus(h.now).keyboard, "keyboard mode ended by itself");
+        const size_t mv = mark(h);
+        moveUnits(h, 20.f, 12.f);
+        require(seen(h, mv).dx != 0, "pointing stopped during keyboard mode");
+        // the menu still works and selecting an action returns to ordinary control
+        menu(h, true);
+        qt(h, 50);
+        require(h.s().overlaySelect(PaletteTarget::Left, h.now), "menu selection refused in keyboard mode");
+        menu(h, false);
+        require(!h.s().actionsStatus(h.now).keyboard, "keyboard mode survived selecting an action");
+        moveAway(h);
+        const size_t after = mark(h);
+        qt(h, 1900);
+        require(seen(h, after).primary == 1, "no click after returning to ordinary control");
+        // keyboard needs the overlay controller and ends with the session
+        require(h.s().setOverlayKeyboard(true), "keyboard again");
+        h.s().stopUncalibratedDemo("test");
+        require(!h.s().setOverlayKeyboard(true), "keyboard accepted without a session");
+    });
+
+    test("overlay: a failed entry release inhibits output; reconnect never resumes", [] {
+        HF h = overlayRig();
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        h.transport.failRelease = true;
+        const uint32_t faults = h.s().diagnostics.faults;
+        menu(h, true);
+        for (int i = 0; i < 5; ++i) {
+            tk(h);
+        }
+        require(h.s().diagnostics.faults == faults + 1 && h.s().state == SystemState::SafeState,
+                "a failed release did not inhibit output");
+        h.transport.failRelease = false;
+        qt(h, 4000);
+        require(h.s().state != SystemState::Active && !h.s().actionPaletteEnabled(), "resumed by itself");
+        // a disconnect while the overlay controls: nothing acts or resumes afterwards
+        HF d = overlayRig();
+        d.transport.online = false;
+        qt(d, 400);
+        d.transport.online = true;
+        const size_t m = mark(d);
+        qt(d, 5000);
+        require(d.s().state != SystemState::Active && seen(d, m).primary == 0, "acted after a disconnect");
+    });
+
+    test("overlay: status fields and JSON fit; overlay controls do not touch profiles", [] {
+        HF h = overlayRig(true);
+        UserProfile before, after;
+        require(h.repo.load(before), "profile");
+        menu(h, true);
+        tk(h);
+        char buffer[actionsJsonCapacity];
+        const size_t length = actionsJson(buffer, sizeof buffer, h.s().actionsStatus(h.now));
+        require(length > 200 && length < actionsJsonCapacity - 64, "JSON too large");
+        require(std::strstr(buffer, "\"controller\":\"OVERLAY\"") && std::strstr(buffer, "\"menu\":true") &&
+                    std::strstr(buffer, "\"ready\":true") && std::strstr(buffer, "\"keyboard\":false"),
+                "overlay fields missing");
+        h.s().stopUncalibratedDemo("done");
+        require(h.repo.load(after) && before.dwellMs == after.dwellMs && before.gain[0] == after.gain[0],
+                "the profile changed");
     });
 
     std::printf("%d passed, %d failed\n", passed, failed);
