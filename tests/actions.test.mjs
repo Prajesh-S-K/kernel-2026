@@ -4,7 +4,10 @@ import {
   ACTIONS_LABEL,
   CONTROLS,
   HoverReporter,
+  LINK_NOTE,
+  LatencyStats,
   PALETTE_NOTE,
+  SCROLL_EXIT_TEXT,
   SCROLL_NOTE,
   actionsOf,
   bannerOf,
@@ -38,6 +41,15 @@ const base = {
     scrollStart: 0,
     scrollExit: 0,
     wheel: 0,
+  },
+  link: {
+    reporting: true,
+    ageMs: 0,
+    pending: false,
+    commitMs: 150,
+    inhibited: 0,
+    cancelled: 0,
+    paletteReleases: 0,
   },
   blocked: "",
 };
@@ -273,24 +285,96 @@ test("wording: experimental, no system-wide overlay claim, scroll exit explained
   }
 });
 
-test("hover reporter: reports on enter and leave, refreshes while hovering, ignores stale leaves", () => {
+test("hover reporter: reports on enter and leave, repeats while hovering AND while outside, ignores stale leaves", () => {
   const sent = [];
-  const r = new HoverReporter((target) => sent.push(target), 500);
+  const r = new HoverReporter((target) => sent.push(target), 500, 1000);
   r.enter("left", 0);
   r.enter("left", 10); // already there: nothing new
   assert.deepEqual(sent, ["left"]);
   r.tick(300);
   assert.deepEqual(sent, ["left"]); // not yet time to refresh
   r.tick(520);
-  assert.deepEqual(sent, ["left", "left"]); // refreshed so the device does not expire it
+  assert.deepEqual(sent, ["left", "left"]); // refreshed so the device keeps a fresh report
   r.enter("right", 600); // moved straight to the neighbour
   r.leave("left", 601); // the old control's leave arrives late: must not clear the new hover
   assert.deepEqual(sent, ["left", "left", "right"]);
   r.leave("right", 700);
   assert.deepEqual(sent, ["left", "left", "right", "none"]);
-  r.tick(5000);
-  r.leave("right", 5001);
-  assert.deepEqual(sent, ["left", "left", "right", "none"]); // nothing while not hovering
+  r.tick(1000); // outside: the heartbeat continues, more slowly, so "outside" is a FRESH report
+  assert.deepEqual(sent, ["left", "left", "right", "none"]);
+  r.tick(1750);
+  assert.deepEqual(sent, ["left", "left", "right", "none", "none"]);
+  r.leave("right", 1800); // not on it any more: nothing new
+  assert.equal(sent.length, 5);
+});
+
+test("hover reporter: a just-enabled palette reports at once (kick)", () => {
+  const sent = [];
+  const r = new HoverReporter((target) => sent.push(target));
+  r.tick(0);
+  r.tick(10);
+  assert.deepEqual(sent, ["none"]);
+  r.kick();
+  r.tick(20);
+  assert.deepEqual(sent, ["none", "none"]);
+});
+
+test("latency statistics: median, 95th percentile, worst, lost reports and the risk warning", () => {
+  const stats = new LatencyStats();
+  assert.match(stats.line(), /no reports yet/);
+  for (let i = 1; i <= 100; i += 1) stats.add(i * 10); // 10 .. 1000 ms
+  const s = stats.summary();
+  assert.equal(s.count, 100);
+  assert.equal(s.worst, 1000);
+  assert.ok(s.median >= 500 && s.median <= 520);
+  assert.ok(s.p95 >= 950);
+  assert.doesNotMatch(stats.line(), /could reach the target/);
+  stats.add(1800);
+  assert.match(stats.line(), /could reach the target/);
+  const lost = new LatencyStats();
+  lost.add(30);
+  lost.fail();
+  assert.equal(lost.summary().failed, 1);
+  assert.match(lost.line(), /lost 1 of 2/);
+  assert.match(lost.line(), /could reach the target/);
+  const ring = new LatencyStats(3);
+  for (const ms of [1, 2, 3, 4, 5]) ring.add(ms);
+  assert.equal(ring.summary().worst, 5);
+  assert.equal(ring.samples.length, 3);
+});
+
+test("scroll shows HOLD STILL TO EXIT SCROLLING prominently and says that reading pauses exit", () => {
+  const banner = bannerOf(
+    frame({ ...base, mode: "SCROLL", scroll: "ACTIVE", frozen: true }),
+  );
+  assert.equal(banner.kind, "scrolling");
+  assert.equal(banner.exitHint, "HOLD STILL TO EXIT SCROLLING");
+  assert.equal(SCROLL_EXIT_TEXT, "HOLD STILL TO EXIT SCROLLING");
+  assert.match(banner.detail, /pausing to read also exits/i);
+  assert.match(SCROLL_NOTE, /Pausing to read ALSO exits Scroll/);
+  assert.equal(bannerOf(frame(base)).exitHint, undefined);
+});
+
+test("the link warning: no fresh report is shown loudly and the limits are stated", () => {
+  const quiet = frame({ ...base, link: { reporting: false, ageMs: 0 } });
+  assert.equal(bannerOf(quiet).kind, "noreport");
+  assert.match(bannerOf(quiet).text, /NOT REPORTING/);
+  assert.match(panelView(quiet).link, /NO fresh palette report/);
+  const live = frame({
+    ...base,
+    link: {
+      reporting: true,
+      ageMs: 120,
+      inhibited: 2,
+      cancelled: 1,
+      paletteReleases: 3,
+    },
+  });
+  assert.equal(bannerOf(live).kind, "ready");
+  assert.match(panelView(live).link, /report age 120 ms/);
+  assert.match(panelView(live).link, /drags released on palette entry 3/);
+  assert.match(LINK_NOTE, /NOT a guarantee against click-through/);
+  assert.match(LINK_NOTE, /1\.6 s/);
 });
 
 test("hover reporter reset (window left, hidden or closed) always reports leaving", () => {
@@ -318,4 +402,7 @@ test("the palette window has no click handler on its controls", async () => {
   assert.doesNotMatch(source, /\.onclick|\.onmousedown/);
   assert.match(source, /mouseenter/);
   assert.match(source, /mouseleave/);
+  assert.match(source, /'frame'/);
+  // a blur must never report "outside" while the pointer can still be over the window
+  assert.doesNotMatch(source, /addEventListener\('blur'/);
 });

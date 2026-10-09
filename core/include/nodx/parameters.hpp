@@ -54,7 +54,8 @@ constexpr float uncalDemoMaxStep = 4.f;     // pixels per report, both axes
 // Dwell action palette demo (EXPERIMENTAL START values; RAM only, never saved).
 constexpr float actionScrollGain = .35f;        // wheel units per second per deg/s beyond the neutral zone
 constexpr float actionScrollNeutral = 3.f;      // deg/s of vertical movement that is still "neutral"
-constexpr uint32_t actionHoverTimeoutMs = 3000; // a palette hover report not refreshed this long expires
+constexpr uint32_t actionReportFreshMs = 2500;  // no palette report (hover OR "outside") this long: nothing acts
+constexpr uint32_t actionCommitMs = 150;        // a completed target dwell waits this long for a late palette entry
 constexpr uint32_t uncalDwellMs = 1200;
 constexpr float uncalDwellTolerance = 8.f;
 // One Euro smoothing for configured control. EXPERIMENTAL START values: chosen on synthetic recordings

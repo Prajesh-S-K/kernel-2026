@@ -424,6 +424,9 @@ void System::tick(MotionSample raw, uint32_t now, bool pressed) {
                                                                     : diagnostics_.motion.x;
         in.dt = dtSeconds;
         in.dwellMs = control.dwellMs;
+        in.x = float(x_);
+        in.y = float(y_);
+        in.tolerance = control.dwellTolerance;
         actionOut = palette_.update(in, now);
         if (actionOut.resetDwell) {
             selection_.reset(false, now);
@@ -1471,6 +1474,10 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
     st.scrollStarts = palette_.scrollStarts;
     st.scrollExits = palette_.scrollExits;
     st.selections = palette_.selections;
+    st.inhibited = palette_.inhibited;
+    st.cancelled = palette_.cancelled;
+    st.paletteReleases = palette_.paletteReleases;
+    st.commitMs = start::actionCommitMs;
     st.last = name(palette_.last);
     st.wheelUnits = uint32_t(actionsWheel_);
     if (st.enabled) {
@@ -1484,6 +1491,9 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
         st.dwellState = name(selection_.dwell);
         st.dwellProgress = selection_.progress(lastTick_, uncalProfile_);
         st.exitProgress = palette_.exitProgress(lastTick_, uncalDwellMs_);
+        st.reporting = palette_.reporting(lastTick_);
+        st.reportAgeMs = palette_.reportAge(lastTick_);
+        st.pending = palette_.pending();
     }
     return st;
 }

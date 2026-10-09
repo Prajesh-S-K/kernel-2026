@@ -135,6 +135,45 @@ main {
   color: var(--muted);
   font-size: 13px;
 }
+.exit {
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 4px solid var(--warn);
+  border-radius: 14px;
+  background: #3a2b0c;
+}
+.exit[hidden] {
+  display: none;
+}
+.exit strong {
+  display: block;
+  font-size: 30px;
+  letter-spacing: 0.03em;
+  color: var(--warn);
+}
+.exit .bar {
+  height: 18px;
+  margin: 10px 0;
+  border-radius: 9px;
+  background: #1b1405;
+  overflow: hidden;
+}
+.exit .bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--warn);
+}
+.exit span {
+  font-size: 15px;
+}
+.banner.noreport {
+  border-color: var(--stop);
+}
+.banner.noreport strong {
+  font-size: 22px;
+  color: var(--stop);
+}
 @media (max-width: 380px) {
   .grid {
     grid-template-columns: 1fr;

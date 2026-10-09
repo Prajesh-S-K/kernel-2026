@@ -13,12 +13,19 @@
         <strong id="bannerText">NO DATA</strong>
         <span id="bannerDetail">Keep the main companion window open.</span>
       </section>
+      <section id="exit" class="exit" hidden aria-live="assertive">
+        <strong id="exitText">HOLD STILL TO EXIT SCROLLING</strong>
+        <div class="bar"><i id="exitBar"></i></div>
+        <span>Pausing to read also exits scrolling. Use a longer dwell for reading.</span>
+      </section>
       <section
         id="grid"
         class="grid"
         aria-label="Actions: hold the pointer still on one to select it"
       ></section>
+      <p class="note" id="link"></p>
       <p class="note" id="note"></p>
+      <p class="note" id="limits"></p>
     </main>
     <script type="module" src="palette.js"></script>
   </body>

@@ -105,7 +105,8 @@ qualification; a held switch must release and the user must resume explicitly.
 | Action palette: dwell | the SAME 1200 ms dwell (plus 250 ms arming) and tolerance as the uncalibrated demo dwell; one duration for every action and for leaving Scroll, never a different wait per action | ms / HID units | START, RAM only, adjustable 500-5000 ms / 2-50 |
 | Action palette: scroll gain | 0.35 wheel units per second per deg/s of vertical head movement beyond the neutral zone; the gate and HIDManager bound each report to 5 notches | wheel units / (s deg/s) | EXPERIMENTAL START; sign follows the pointer's vertical reversal setting; comfortable speed is unmeasured |
 | Action palette: scroll neutral zone | 3 deg/s of mapped movement (after the 2.5 deg/s pointer deadzone) is neutral: no wheel, and holding both axes inside it for the dwell time leaves Scroll | deg/s | EXPERIMENTAL START |
-| Action palette: hover expiry | a palette hover report not refreshed within 3000 ms expires (the page refreshes every 500 ms) | ms | START |
+| Action palette: report freshness | a palette report (hover or outside) older than 2500 ms counts as missing and nothing acts on a target (the page repeats it every 500 ms over a control, 1000 ms outside) | ms | START |
+| Action palette: commit wait | a completed target dwell waits 150 ms before acting; a palette entry or movement beyond the tolerance in that time cancels it | ms | START; covers a short report delay only (about 1.6 s total from standing still) |
 
 Templates learned in training are also START values: they are stored per user and marked unvalidated
 until measured. The record format bounds are defensive software limits, not human limits.

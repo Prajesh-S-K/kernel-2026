@@ -461,38 +461,92 @@ Behaviour (each covered by a test).
 - Left-click: one click per completed dwell; after any click the pointer must move deliberately (more than 1.5 x
   the tolerance) before another dwell can arm.
 - Right-click and Double-click: one shot, then back to Left-click. Double-click is press, release, press, release.
-- Drag: dwell presses and holds the left button (DRAGGING is shown very large); move normally; after the press the
-  release dwell needs deliberate movement first; dwell again releases.
+- Drag: dwell presses and holds the left button (DRAGGING is shown very large). The release dwell starts at once
+  where the button went down, so standing still for the dwell time releases it: a drag that was never started can
+  always be ended without moving. Moving restarts that dwell, so a real drag is not cut short. After a release,
+  deliberate movement is needed before the next press can arm. Entering the palette while dragging releases the
+  button FIRST (the release is sent before any selection can begin), and so does choosing another action.
 - Scroll: choosing it neither clicks nor freezes; dwell on the content starts it (no click); the pointer then
   freezes and vertical head movement drives bounded wheel reports (neutral zone 3 deg/s beyond the 2.5 deg/s
-  pointer deadzone; head down scrolls down, following the pointer's reversal setting). To leave: hold BOTH axes
-  still for the dwell time; the Exit control fills while you do. Sideways movement is not stillness.
+  pointer deadzone; head down scrolls down, following the pointer's reversal setting). The palette and the main
+  panel then show **HOLD STILL TO EXIT SCROLLING** in large type with a progress bar: hold BOTH axes still for the
+  dwell time. **Pausing to read also exits Scroll**; use a longer dwell for reading, or dwell on the content again.
+  Sideways movement is not stillness.
 - Stop: choosing it ends control. In Left, Right, Double, Drag and armed Scroll it is reachable by pointer dwell.
   While Scroll is ACTIVE the pointer is frozen, so reach Stop by leaving Scroll first (hold still) or use the
   website Stop or the physical button, which always work.
-- Selecting a palette control never sends an OS click. Leaving the palette clears the dwell and re-arms it only
-  after deliberate movement. Choosing the same control again needs deliberate movement too.
 - Stop, the physical button, a fault, a disconnect or turning the palette off clear every pending action, release
   a held drag through the normal stop path and never restart by themselves. A failed release of a click, a
   double-click or a drag release fails the emit and takes the existing inhibiting transport-fault path (the
   session ends, an explicit restart is needed).
-- Not claimed: that the Mac releases a button that was held when the Bluetooth link dropped. That hardware case
-  stays open; the attended demo should test it deliberately (start a drag, then switch the board off).
 
-Honest limits. The dwell tolerance is in accumulated outgoing HID movement units, not verified screen pixels (the
-Mac applies pointer acceleration). The page reports the hover over a localhost link, so there is a short delay
-between the pointer entering a control and the device knowing (not yet measured). A late report restarts the
-dwell when it arrives, and moving onto the palette already breaks a target dwell that was running; a click could
-only leak if a target dwell finished inside that delay without the pointer leaving the tolerance. The palette
-window itself ignores clicks. Measure the delay in the demo. Reading while in Scroll needs a longer dwell or repeated re-entry. Scroll speed and the neutral
-zone are synthetic-input START values, never tried on a person.
+### Click-through: what is and is not guaranteed
+The device cannot see the screen. It learns that the pointer is on the palette only from reports sent by the
+companion page (browser -> localhost -> companion -> serial -> firmware), which can be late, lost or stale. "The
+palette window has no click handlers" does NOT prove that no OS click can leak, so the device does this instead:
+- A target action (click, right-click, double-click, drag press, scroll start) needs a FRESH palette report that
+  the pointer is outside the palette. The page repeats its report (every 0.5 s over a control, every 1 s outside); a
+  report older than 2.5 s counts as missing, and with no fresh report NOTHING acts on a target (the main panel and
+  the palette show "PALETTE WINDOW NOT REPORTING"). Releasing a held drag is the one action that never needs a
+  report (releasing is the safe direction).
+- A completed target dwell is not executed at once. It waits a 150 ms commit time, and a palette entry reported in
+  that time cancels it (movement beyond the tolerance cancels it too).
+- A palette entry (a control OR the bare palette window, reported as `frame`) inhibits target actions before any
+  selection begins; a completed dwell on a control selects it and never clicks, on the bare window it selects
+  nothing. The page reports `frame` for the whole page, so the margins and background count as the palette.
+- Leaving the palette clears the dwell and re-arms it only after deliberate movement. Choosing the same control
+  again needs deliberate movement too.
+- NOT guaranteed: a report that arrives later than about 1.6 s after the pointer stopped inside the palette (250 ms
+  arming + 1200 ms dwell + 150 ms commit) cannot be detected, and a click can then reach the target. The unit
+  tests show the boundary: no click for delays up to 1.55 s, a click for 1.9 s and more. The palette window's own
+  frame (title bar, borders) lies outside the page, so the page cannot report it: do not rest the pointer on the
+  window chrome (a drag press there would move the window). Browser background throttling, an occluded or minimised
+  window, or a stalled serial link make reports stale, which stops actions (fail closed) rather than leaking them.
+  This is NOT a guarantee against click-through.
 
-Attended demonstration (after an authorised firmware upload, with the pointer over a harmless target):
+### Measured report delay (software and earlier hardware recording; hover over the new firmware is unmeasured)
+- Browser/companion/simulator path: median 0.4 ms, worst 0.7 ms over 300 hover commands. The software path is
+  negligible.
+- Real board, serial path, from the earlier 10 Hz status recording (firmware `1895b9f`-family frame of about 3.5 KB,
+  TWO clients polling the same link, so queueing is included; each cycle lasts max(100 ms, round trip)): median
+  105 ms; 32% of cycles over 150 ms; 15% at or over 500 ms (a cluster near 513 ms); 95th percentile 516 ms; 99th
+  536 ms; worst 835 ms; none between 1 s and the outages. Five outages over 1.5 s were recorded (10 s, 10 s, 59 s,
+  309 s, 1468 s). A hover report travels the same path and its acknowledgement is the same status frame (now about
+  4.1 KB), so delays of 0.5 s are to be expected and a stall can last seconds. A stall makes the report stale, so
+  actions stop. A delay between 1.6 s and 2.5 s is the uncovered window. The palette window now times every report
+  to the device's acknowledgement and shows last / median / 95% / worst / lost; read it during the demo.
+
+### Honest limits
+The dwell tolerance is in accumulated outgoing HID movement units, not verified screen pixels (the Mac applies
+pointer acceleration). Reading while in Scroll needs a longer dwell or re-entering Scroll. Scroll speed and the
+neutral zone are synthetic-input START values, never tried on a person. The extra reports raise serial traffic
+(2 Hz hovering, 1 Hz outside, each answered by a status frame); whether that aggravates the known serial stalls is
+unmeasured.
+
+### Attended demonstration (after an authorised firmware upload, pointer over a harmless target)
+Identify the board and its port yourself first (list the serial devices and the USB bus, confirm the companion
+reports the MPU-6500 on that port); never reuse a port name from an earlier session.
 1. Start without calibration; check pointing with every click mode off; open the palette window beside a test page.
-2. Enable the palette. Left-click: five dwells on a harmless button; confirm one click each and no repeats.
+2. Enable the palette. Confirm the palette shows its link line, then Left-click: five dwells on a harmless button;
+   confirm one click each and no repeats.
 3. Right-click then Double-click on a page that shows them; confirm the return to Left-click.
-4. Drag a harmless item; confirm DRAGGING, move, release. Then start a drag and press the physical button; confirm
-   release. Then (optional, deliberate) start a drag and power the board off to observe the host.
-5. Scroll a long page; leave it by holding still; try the website Stop while scrolling.
-6. Dwell on each palette control with a page that would show a click if one leaked; confirm none does.
-Record per step: wrong or missed actions, accidental clicks, time to select, any serial stall.
+4. Drag a harmless item; confirm DRAGGING, move, release. Start a drag and stand still: it releases after the
+   dwell. Start a drag and move onto the palette: it releases before any selection. Press the physical button
+   during a drag: it releases and stops.
+5. Scroll a long page; confirm HOLD STILL TO EXIT SCROLLING; leave it by holding still; try the website Stop while
+   scrolling; note that pausing to read exits it.
+6. Dwell on each palette control, and on the bare palette background, with a page that would show a click if one
+   leaked; confirm none does. Close the palette window while the palette is enabled and confirm nothing clicks.
+Record per step: wrong or missed actions, accidental clicks, time to select, the link line (median/95%/worst/lost),
+any serial stall.
+
+## Bluetooth held-button link-loss test (SEPARATE, attended; not part of the normal demo)
+Open hardware question: does the Mac release a button that was held when the Bluetooth link dropped? The normal
+demo never switches the board off or drops the link during a drag. Run this only when the user asks for it,
+attended, with these preconditions: a harmless text area (not a file manager or a window you could move or
+delete from), the palette in Drag, the pointer over the text area, the website Stop and the physical button within
+reach, and a mouse or trackpad available to click and clear any stuck state. Procedure: start a drag (button held),
+then either power the board off or walk out of Bluetooth range; observe whether the Mac keeps dragging/selecting,
+then whether it stops by itself, and how long it takes; recover by clicking with the trackpad. Record the host
+behaviour, the time, and whether anything was selected or moved. Nothing in the software claims or assumes the
+result.

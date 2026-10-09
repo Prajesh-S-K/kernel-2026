@@ -17,13 +17,26 @@
 //
 // While the pointer is over the palette (reported by the companion page) a completed dwell SELECTS a
 // palette control and never becomes an OS click.
+//
+// What the device can and cannot know. The device never sees the screen: it learns that the pointer is over
+// the palette only from reports sent by the companion page over a localhost link and a serial link, which can
+// be late, lost, or stale. So the rules are fail-closed:
+//   - a target action (click, double-click, right-click, drag press, scroll start) needs a FRESH report that
+//     the pointer is outside the palette (the page repeats it); with no fresh report nothing acts at all;
+//   - a completed target dwell is not executed at once: it waits actionCommitMs, and a palette entry reported
+//     in that time cancels it (so a short report delay cannot leak a click);
+//   - entering the palette while a drag holds the button releases it first, before any selection.
+// Not guaranteed: a report delayed beyond the dwell plus the commit wait cannot be detected by the device,
+// so a click can still reach the target in that case. The delay is measured, not assumed.
 #include "parameters.hpp"
 #include <cstddef>
 #include <cstdint>
 
 namespace nodx {
 enum class ActionMode { Left, Right, Double, Drag, Scroll };
-enum class PaletteTarget { None, Left, Right, Double, Drag, Scroll, Stop };
+// Frame = the pointer is on the palette window but not on a control (background, margins): it inhibits every
+// target action like a control does, and a completed dwell there selects nothing.
+enum class PaletteTarget { None, Left, Right, Double, Drag, Scroll, Stop, Frame };
 enum class ScrollPhase { Off, Armed, Active };
 const char* name(ActionMode mode);
 const char* name(PaletteTarget target);
@@ -35,6 +48,8 @@ struct ActionInput {
     float verticalRate = 0;    // mapped vertical head movement after the pointer deadzone, deg/s (+ = pointer down)
     float lateralRate = 0;     // mapped horizontal movement after the deadzone, deg/s (not still while it moves)
     float dt = 0.01f;          // seconds since the previous tick
+    float x = 0, y = 0;        // accumulated outgoing pointer position (for cancelling a pending action)
+    float tolerance = 8.f;     // the dwell movement tolerance
     uint32_t dwellMs = start::uncalDwellMs; // the one dwell duration (also used for leaving scroll)
 };
 struct ActionOutput {
@@ -44,7 +59,7 @@ struct ActionOutput {
     float wheel = 0;            // wheel units this tick (the HIDManager quantizes, the gate bounds)
     bool stop = false;          // the Stop control was selected
     bool lockAfter = false;     // require deliberate movement before the next dwell
-    bool resetDwell = false;    // start a fresh dwell
+    bool resetDwell = false;    // start a fresh dwell (the release dwell of a drag can start where it is)
 };
 struct ActionsStatus {
     bool enabled = false, dragging = false, inPalette = false, frozen = false;
@@ -58,9 +73,12 @@ struct ActionsStatus {
     uint32_t dwellMs = 0, selections = 0;
     uint32_t left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0, scrollStarts = 0,
              scrollExits = 0, wheelUnits = 0;
+    bool reporting = false;      // a fresh palette report exists (otherwise nothing acts on a target)
+    bool pending = false;        // a completed target dwell is waiting out the commit time
+    uint32_t reportAgeMs = 0, commitMs = 0, inhibited = 0, cancelled = 0, paletteReleases = 0;
 };
 size_t actionsJson(char* out, size_t capacity, const ActionsStatus& status);
-constexpr size_t actionsJsonCapacity = 768;
+constexpr size_t actionsJsonCapacity = 1024;
 
 class ActionPalette {
 public:
@@ -68,10 +86,16 @@ public:
     // clearCounters() so a demo can be read after it ended.
     void reset();
     void clearCounters();
-    // Companion report: the pointer is over this control (None = left the palette). Returns true when
-    // the (non-expired) hover state changed.
+    // Companion report: the pointer is over this control (None = outside the palette). The page repeats it.
+    // Returns true when the usable hover state changed.
     bool setHover(PaletteTarget target, uint32_t now);
+    // Where the pointer is according to a FRESH report; None when outside OR when no report is fresh.
     PaletteTarget hover(uint32_t now) const;
+    bool reporting(uint32_t now) const; // a report (hover or outside) arrived recently enough to trust
+    uint32_t reportAge(uint32_t now) const;
+    bool pending() const {
+        return pending_;
+    }
     ActionOutput update(const ActionInput& in, uint32_t now);
 
     ActionMode mode() const {
@@ -89,14 +113,17 @@ public:
     float exitProgress(uint32_t now, uint32_t dwellMs) const;
     PaletteTarget last = PaletteTarget::None;
     uint32_t selections = 0, left = 0, right = 0, doubles = 0, dragStarts = 0, dragReleases = 0,
-             scrollStarts = 0, scrollExits = 0;
+             scrollStarts = 0, scrollExits = 0, inhibited = 0, cancelled = 0, paletteReleases = 0;
 
 private:
     ActionMode mode_ = ActionMode::Left;
     ScrollPhase scroll_ = ScrollPhase::Off;
     bool dragging_ = false;
     PaletteTarget hover_ = PaletteTarget::None;
-    uint32_t hoverAt_ = 0, neutralSince_ = 0;
+    uint32_t hoverAt_ = 0, neutralSince_ = 0, pendingSince_ = 0;
+    bool everReported_ = false, pending_ = false;
+    float pendingX_ = 0, pendingY_ = 0;
     void select(PaletteTarget target);
+    void execute(ActionOutput& out, uint32_t now);
 };
 } // namespace nodx

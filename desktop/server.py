@@ -170,6 +170,7 @@ def command_for(data):
             "drag",
             "scroll",
             "stop",
+            "frame",
         ):
             return f"actions hover {data['target']}"
         raise ValueError("Invalid action palette request")

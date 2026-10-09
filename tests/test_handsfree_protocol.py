@@ -347,7 +347,7 @@ class CommandValidation(HandsFreeCase):
             SERVER.command_for({"action": "actions", "op": "enable", "enabled": False}),
             "actions enable off",
         )
-        for target in ("none", "left", "right", "double", "drag", "scroll", "stop"):
+        for target in ("none", "left", "right", "double", "drag", "scroll", "stop", "frame"):
             self.assertEqual(
                 SERVER.command_for({"action": "actions", "op": "hover", "target": target}),
                 f"actions hover {target}",
@@ -991,10 +991,13 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
     def reports(self, response):
         return response.get("reports", [])
 
-    def steps(self, count, vector="0 0 0 0 1 0 0"):
+    def steps(self, count, vector="0 0 0 0 1 0 0", hover="none"):
+        """Run `count` samples, repeating the palette's report like the real page does (a report older
+        than 2.5 s counts as missing, and then nothing acts on a target)."""
         seen = []
         remaining = count
         while remaining > 0:
+            self.send(f"actions hover {hover}")
             chunk = min(50, remaining)
             response = self.send(f"step {chunk} {vector}")
             seen.extend(self.reports(response))
@@ -1012,7 +1015,7 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.assertEqual(enabled["actions"]["mode"], "LEFT")
         # select Right by dwelling over its palette control: no OS click of any kind
         self.assertTrue(self.send("actions hover right")["ok"])
-        response, seen = self.steps(170)
+        response, seen = self.steps(170, hover="right")
         self.send("actions hover none")
         self.assertEqual(
             [r for r in seen if r[3] or secondary(r)], [], "a palette selection clicked"
@@ -1021,8 +1024,8 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.assertEqual(response["actions"]["selections"], 1)
         # move on, then dwell on the target: exactly one right click, back to LEFT
         self.steps(40, "40 0 0 0 1 0 0")
-        self.quiet(30)
-        response, seen = self.steps(170)
+        self.steps(30)
+        response, seen = self.steps(190)
         presses = [r for r in seen if secondary(r)]
         self.assertEqual(len(presses), 1, seen)
         self.assertFalse(any(r[3] for r in seen), "a primary press for a right click")
@@ -1037,10 +1040,23 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.quiet(50)
         self.assertTrue(self.send("actions enable on")["ok"])
         self.assertTrue(self.send("actions hover stop")["ok"])
-        response, seen = self.steps(170)
+        response, seen = self.steps(170, hover="stop")
         self.assertEqual([r for r in seen if r[3] or secondary(r)], [])
         self.assertNotEqual(response["state"], "ACTIVE")
         self.assertFalse(response["actions"]["enabled"])
+
+    def test_without_palette_reports_nothing_clicks(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        seen = []
+        for _ in range(16):  # 8 s of stillness and no report from any palette window
+            seen.extend(self.reports(self.send("step 50 0 0 0 0 1 0 0")))
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [], "a click without a report")
+        status = self.send("status")
+        self.assertFalse(status["actions"]["link"]["reporting"])
+        self.assertGreaterEqual(status["actions"]["link"]["inhibited"], 1)
 
 
 if __name__ == "__main__":

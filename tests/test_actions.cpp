@@ -52,8 +52,31 @@ Seen seen(const HF& h, size_t mark) {
 size_t mark(const HF& h) {
     return h.transport.reports.size();
 }
+// The companion page repeats its report ("outside" or the control the pointer is over). The wrappers
+// below send that heartbeat like the real page does, so a test can stop it to model a missing report.
+PaletteTarget gCurrent = PaletteTarget::None;
+bool gReporting = true;
+unsigned gTicks = 0;
+void report(HF& h, PaletteTarget target) {
+    gCurrent = target;
+    h.s().setActionHover(target, h.now);
+}
+void tk(HF& h, const Rates& rate = {}) {
+    if (gReporting && gTicks++ % 50 == 0) {
+        h.s().setActionHover(gCurrent, h.now);
+    }
+    h.tick(rate);
+}
+void qt(HF& h, unsigned ms) {
+    for (unsigned i = 0; i < ms / 10; ++i) {
+        tk(h);
+    }
+}
 // A session on the real sensor path with the palette enabled (Left-click selected).
 HF rig(bool saveProfile = false) {
+    gCurrent = PaletteTarget::None;
+    gReporting = true;
+    gTicks = 0;
     HF h(saveProfile, EnableKind::Momentary);
     h.sw = false;
     h.quiet(400);
@@ -64,32 +87,40 @@ HF rig(bool saveProfile = false) {
 HF paletteRig(bool saveProfile = false) {
     HF h = rig(saveProfile);
     require(h.s().setActionPalette(true, h.now), "palette refused");
-    h.quiet(100);
+    report(h, PaletteTarget::None); // the palette window's first report
+    qt(h, 100);
     return h;
 }
 constexpr unsigned kDwellTicks = 160; // 1.6 s: the 250 ms arming plus the 1200 ms START dwell
 void hold(HF& h, PaletteTarget target, unsigned ticks) {
+    report(h, target);
     for (unsigned i = 0; i < ticks; ++i) {
-        if (i % 40 == 0) {
-            h.s().setActionHover(target, h.now); // the page refreshes its report while hovering
-        }
-        h.tick();
+        tk(h);
     }
 }
 // Dwell on a palette control (the pointer is still, the page reports the hover), then leave it.
 void selectControl(HF& h, PaletteTarget target) {
-    h.s().setActionHover(target, h.now);
     hold(h, target, kDwellTicks);
-    h.s().setActionHover(PaletteTarget::None, h.now);
+    report(h, PaletteTarget::None);
 }
 void moveAway(HF& h, float rate = 40.f, unsigned ticks = 40) {
     for (unsigned i = 0; i < ticks; ++i) {
-        h.tick({rate, 0, 0});
+        tk(h, {rate, 0, 0});
     }
-    h.quiet(300);
+    qt(h, 300);
 }
+// Run until `done()` holds; returns the milliseconds it took (maxMs when it never did).
+unsigned waitFor(HF& h, const std::function<bool()>& done, unsigned maxMs) {
+    unsigned elapsed = 0;
+    while (!done() && elapsed < maxMs) {
+        tk(h);
+        elapsed += 10;
+    }
+    return elapsed;
+}
+// The dwell plus the 150 ms commit wait, with margin.
 void dwellOnTarget(HF& h) {
-    h.quiet(kDwellTicks * 10);
+    qt(h, 1900);
 }
 const char* mode(HF& h) {
     return h.s().actionsStatus(h.now).mode;
@@ -100,12 +131,12 @@ int main() {
     test("disabled by default; refused outside a running session", [] {
         HF h(false, EnableKind::Momentary);
         h.sw = false;
-        h.quiet(400);
+        qt(h, 400);
         require(!h.s().setActionPalette(true, h.now), "enabled without a session");
         require(!h.s().actionsStatus(h.now).enabled, "enabled flag");
         require(std::strlen(h.s().actionsStatus(h.now).blocked) > 0, "no blocker text");
         require(h.s().startUncalibratedDemo(h.now), "start");
-        h.quiet(300);
+        qt(h, 300);
         require(!h.s().actionPaletteEnabled(), "palette on after a plain start");
         require(!h.s().setActionHover(PaletteTarget::Left, h.now), "hover accepted while off");
         // plain movement-only demo: dwell never clicks
@@ -118,12 +149,12 @@ int main() {
         HF h = paletteRig();
         require(std::strcmp(mode(h), "LEFT") == 0, "default mode");
         size_t m = mark(h);
-        h.quiet(1000);
+        qt(h, 1000);
         require(seen(h, m).primary == 0, "clicked before the dwell completed");
         const auto p = h.s().actionsStatus(h.now);
         require(std::strcmp(p.dwellState, "PROGRESS") == 0 && p.dwellProgress > .4f,
                 "no progress feedback");
-        h.quiet(600);
+        qt(h, 600);
         Seen s = seen(h, m);
         require(s.primary == 1 && s.secondary == 0 && !s.primaryHeld, "not exactly one click");
         require(std::strcmp(mode(h), "LEFT") == 0, "left changed");
@@ -134,14 +165,14 @@ int main() {
         HF h = paletteRig();
         dwellOnTarget(h);
         const size_t m = mark(h);
-        h.quiet(6000);
+        qt(h, 6000);
         require(seen(h, m).primary == 0, "a second click without movement");
         require(std::strcmp(h.s().actionsStatus(h.now).dwellState, "LOCKOUT") == 0, "no lockout");
         // a small tremor is not deliberate movement
         for (int i = 0; i < 30; ++i) {
-            h.tick({i % 2 ? 6.f : -6.f, 0, 0});
+            tk(h, {i % 2 ? 6.f : -6.f, 0, 0});
         }
-        h.quiet(4000);
+        qt(h, 4000);
         require(seen(h, m).primary == 0, "a tremor re-armed the dwell");
         moveAway(h);
         dwellOnTarget(h);
@@ -150,17 +181,17 @@ int main() {
 
     test("dwell cancellation: movement beyond the tolerance restarts the dwell", [] {
         HF h = paletteRig();
-        h.quiet(700);
+        qt(h, 700);
         const size_t m = mark(h);
         for (int i = 0; i < 6; ++i) {
-            h.tick({40.f, 0, 0}); // leaves the tolerance
+            tk(h, {40.f, 0, 0}); // leaves the tolerance
         }
         require(std::strcmp(h.s().actionsStatus(h.now).dwellState, "PROGRESS") != 0 ||
                     h.s().actionsStatus(h.now).dwellProgress < .2f,
                 "progress survived the movement");
-        h.quiet(900);
+        qt(h, 900);
         require(seen(h, m).primary == 0, "clicked on the old dwell");
-        h.quiet(1100);
+        qt(h, 1100);
         require(seen(h, m).primary == 1, "no click after a fresh dwell");
     });
 
@@ -224,13 +255,13 @@ int main() {
         // move while held: every report keeps the button down, the pointer really moves
         m = mark(h);
         for (int i = 0; i < 30; ++i) {
-            h.tick({30.f, 10.f, 0});
+            tk(h, {30.f, 10.f, 0});
         }
         require(seen(h, m).dx != 0, "the pointer did not move while dragging");
         for (size_t i = m; i < h.transport.reports.size(); ++i) {
             require(h.transport.reports[i].down, "button dropped while moving");
         }
-        h.quiet(300);
+        qt(h, 300);
         // still dwell: the release; first it needs the deliberate movement we just made
         const size_t before = mark(h);
         dwellOnTarget(h);
@@ -242,22 +273,248 @@ int main() {
                 "drag counters");
         // the release is not followed by another press from the same stillness
         const size_t after = mark(h);
-        h.quiet(5000);
+        qt(h, 5000);
         require(seen(h, after).primary == 0, "a press right after the release");
     });
 
-    test("Drag: the press needs no immediate release dwell (movement first)", [] {
+    test("Drag cancel path: standing still after the press releases it (no movement needed)", [] {
         HF h = paletteRig();
         selectControl(h, PaletteTarget::Drag);
         moveAway(h);
         dwellOnTarget(h);
-        require(h.s().actionsStatus(h.now).dragging, "not dragging");
-        // standing still straight after the press does NOT release it
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        require(h.transport.reports.back().down, "button not held");
+        // no deliberate movement at all: the release dwell restarts where the press happened
         const size_t m = mark(h);
-        h.quiet(6000);
-        require(h.s().actionsStatus(h.now).dragging, "released without deliberate movement");
-        require(seen(h, m).primaryHeld || h.transport.reports.back().down || true, "state");
-        require(h.s().actionsStatus(h.now).dragReleases == 0, "release counter");
+        const unsigned took = waitFor(h, [&] { return !h.s().actionsStatus(h.now).dragging; }, 4000);
+        require(!h.s().actionsStatus(h.now).dragging, "a drag held without moving cannot be released");
+        require(took < 1700, "the release dwell took longer than the dwell plus the arming time");
+        require(!seen(h, m).primaryHeld, "button still down after the release");
+        require(h.s().actionsStatus(h.now).dragReleases == 1, "release counter");
+        // and it does not press again from the same stillness
+        const size_t after = mark(h);
+        qt(h, 6000);
+        require(seen(h, after).primary == 0, "a press right after the release");
+    });
+
+    test("Drag: movement during the release dwell restarts it (a real drag is not cut short)", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        waitFor(h, [&] { return h.s().actionsStatus(h.now).dragging; }, 4000);
+        require(h.s().actionsStatus(h.now).dragging, "no press");
+        for (int round = 0; round < 4; ++round) {
+            qt(h, 800); // most of a release dwell of stillness...
+            for (int i = 0; i < 12; ++i) {
+                tk(h, {40.f, 0, 0}); // ...then movement restarts it
+            }
+        }
+        require(h.s().actionsStatus(h.now).dragging, "released while the user kept moving");
+    });
+
+    test("Drag release works even when no palette report is fresh", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        gReporting = false; // the palette window went away
+        for (int i = 0; i < 400; ++i) {
+            tk(h, {i % 40 < 20 ? 40.f : -40.f, 0, 0}); // keep moving: a real drag in progress
+        }
+        require(!h.s().actionsStatus(h.now).reporting, "report still fresh");
+        require(h.s().actionsStatus(h.now).dragging, "released by staleness alone");
+        qt(h, 3000); // stop: the release dwell still works without any report
+        require(!h.s().actionsStatus(h.now).dragging && h.released(), "no release without reports");
+    });
+
+    test("entering the palette while dragging releases the button BEFORE any selection", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging && h.transport.reports.back().down, "precondition");
+        for (int i = 0; i < 20; ++i) {
+            tk(h, {40.f, 0, 0}); // dragging toward the palette
+        }
+        const size_t m = mark(h);
+        const uint32_t baseline = h.s().actionsStatus(h.now).selections; // choosing Drag was one
+        report(h, PaletteTarget::Left); // the report that the pointer entered the palette
+        tk(h);
+        tk(h);
+        require(!seen(h, m).primaryHeld, "the button was still down after the palette entry");
+        require(h.s().actionsStatus(h.now).paletteReleases == 1, "palette release not counted");
+        require(h.s().actionsStatus(h.now).selections == baseline, "a selection happened at entry");
+        require(!h.s().actionsStatus(h.now).dragging, "still dragging");
+        // the selection needs a fresh dwell afterwards, and clicks nothing
+        hold(h, PaletteTarget::Left, kDwellTicks);
+        require(h.s().actionsStatus(h.now).selections == baseline + 1, "no selection after the release");
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a click during the palette entry");
+    });
+
+    test("entering the palette while dragging releases even from a drag with no movement", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        const size_t m = mark(h);
+        report(h, PaletteTarget::Stop);
+        qt(h, 50);
+        require(!seen(h, m).primaryHeld, "the held button survived the palette entry");
+        require(h.s().state == SystemState::Active, "the palette entry itself stopped control");
+    });
+
+    test("the palette window background (Frame) inhibits target actions and selects nothing", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        const size_t m = mark(h);
+        const uint32_t selections = h.s().actionsStatus(h.now).selections;
+        report(h, PaletteTarget::Frame); // pointer rests on the bare window, not on a control
+        qt(h, 6000);
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a click on the palette window");
+        require(h.s().actionsStatus(h.now).selections == selections, "the bare window selected something");
+        require(h.s().actionsStatus(h.now).inPalette, "not reported as on the palette");
+        require(std::strcmp(mode(h), "LEFT") == 0, "mode changed");
+        // leaving it re-arms only after movement
+        report(h, PaletteTarget::None);
+        qt(h, 4000);
+        require(seen(h, m).primary == 0, "clicked right after leaving the window");
+        moveAway(h);
+        dwellOnTarget(h);
+        require(seen(h, m).primary == 1, "no click after moving on");
+    });
+
+    test("a drag held when the pointer reaches the bare palette window is released first", [] {
+        HF h = paletteRig();
+        selectControl(h, PaletteTarget::Drag);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        const size_t m = mark(h);
+        report(h, PaletteTarget::Frame);
+        qt(h, 50);
+        require(!seen(h, m).primaryHeld && !h.s().actionsStatus(h.now).dragging, "drag survived");
+    });
+
+    test("missing reports: with no palette window nothing acts on a target", [] {
+        HF h = rig();
+        require(h.s().setActionPalette(true, h.now), "palette refused");
+        gReporting = false; // the palette window is not open
+        const size_t m = mark(h);
+        qt(h, 12000);
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a click without a palette report");
+        const auto st = h.s().actionsStatus(h.now);
+        require(!st.reporting, "reported as reporting");
+        require(st.inhibited >= 1, "the inhibited dwell was not counted");
+        // the window opens: after deliberate movement, targets work again
+        gReporting = true;
+        report(h, PaletteTarget::None);
+        moveAway(h);
+        dwellOnTarget(h);
+        require(seen(h, m).primary == 1, "no click once the window reports");
+    });
+
+    test("stale reports: reports that stop make every action inhibited, and recovery needs fresh reports", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        gReporting = false;
+        qt(h, 3200); // older than the 2.5 s freshness
+        require(!h.s().actionsStatus(h.now).reporting, "still fresh");
+        moveAway(h); // re-arm the dwell (a click may already have landed while the report was fresh)
+        const size_t m = mark(h);
+        dwellOnTarget(h);
+        require(seen(h, m).primary == 0, "a click on a stale report");
+        // a stale hover over a control does not select either
+        report(h, PaletteTarget::Right);
+        gReporting = false;
+        qt(h, 3200); // the last report is now older than the 2.5 s freshness
+        const uint32_t before = h.s().actionsStatus(h.now).selections;
+        qt(h, 6000);
+        require(h.s().actionsStatus(h.now).selections == before, "selected on a stale hover");
+        require(seen(h, m).secondary == 0 && seen(h, m).primary == 0, "a click on a stale hover");
+        gReporting = true;
+        report(h, PaletteTarget::None);
+        moveAway(h);
+        const size_t again = mark(h);
+        dwellOnTarget(h);
+        // (the Right control was chosen while its report was still fresh, so this is a right click)
+        require(seen(h, again).primary + seen(h, again).secondary == 1, "no click after the reports resumed");
+    });
+
+    test("the commit wait: a palette entry reported shortly after the dwell completes cancels the click", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        const size_t m = mark(h);
+        // run until the target dwell has completed and the click is waiting out the commit time
+        for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+            tk(h);
+        }
+        require(h.s().actionsStatus(h.now).pending, "no pending action");
+        require(seen(h, m).primary == 0, "clicked before the commit wait");
+        report(h, PaletteTarget::Left); // the (late) report that the pointer is on the palette
+        qt(h, 400);
+        require(seen(h, m).primary == 0, "the click was not cancelled");
+        require(h.s().actionsStatus(h.now).cancelled == 1, "cancellation not counted");
+        require(!h.s().actionsStatus(h.now).pending, "still pending");
+    });
+
+    test("KNOWN LIMIT: a palette entry reported after the commit wait cannot stop the click", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        const size_t m = mark(h);
+        for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+            tk(h);
+        }
+        qt(h, 400); // the report is later than the 150 ms commit wait
+        report(h, PaletteTarget::Left);
+        qt(h, 100);
+        require(seen(h, m).primary == 1, "expected the documented leak to be visible to the test");
+    });
+
+    test("delayed hover reports: where the leak begins (pointer stops inside the palette)", [] {
+        // The pointer travels to a palette control and stops. The report that it is there arrives
+        // `delay` ms later. Below about 1.6 s (the 250 ms arming + 1200 ms dwell + 150 ms commit) the
+        // entry arrives in time; beyond it a click reaches the target. Both sides are asserted.
+        for (unsigned delay : {50u, 200u, 500u, 1000u, 1400u, 1550u, 1900u, 3000u}) {
+            HF h = paletteRig();
+            for (int i = 0; i < 30; ++i) {
+                tk(h, {40.f, 0, 0}); // travel
+            }
+            const size_t m = mark(h);
+            const uint32_t stopped = h.now;
+            while (h.now - stopped < delay) {
+                tk(h);
+            }
+            report(h, PaletteTarget::Right); // the delayed report
+            qt(h, 2500);
+            const Seen s = seen(h, m);
+            const bool leaked = s.primary + s.secondary > 0;
+            std::printf("   INFO hover report delayed %u ms after the pointer stopped: %s\n", delay,
+                        leaked ? "CLICK REACHED THE TARGET" : "no click");
+            if (delay <= 1400) {
+                require(!leaked, "a click leaked although the report was in time");
+                require(h.s().actionsStatus(h.now).selections == 1, "the palette control was not selected");
+            } else if (delay >= 1900) {
+                require(leaked, "expected the documented late-report leak");
+            }
+        }
+    });
+
+    test("movement while a click waits out the commit time cancels it", [] {
+        HF h = paletteRig();
+        moveAway(h);
+        const size_t m = mark(h);
+        for (unsigned i = 0; i < 400 && !h.s().actionsStatus(h.now).pending; ++i) {
+            tk(h);
+        }
+        require(h.s().actionsStatus(h.now).pending, "no pending action");
+        for (int i = 0; i < 8; ++i) {
+            tk(h, {40.f, 0, 0});
+        }
+        qt(h, 600);
+        require(seen(h, m).primary == 0, "clicked after the pointer left");
+        require(h.s().actionsStatus(h.now).cancelled == 1, "cancellation not counted");
     });
 
     test("Scroll: select without click, pointer free until dwell on the content starts it", [] {
@@ -286,7 +543,7 @@ int main() {
         require(h.s().actionsStatus(h.now).frozen, "precondition");
         size_t m = mark(h);
         for (int i = 0; i < 150; ++i) {
-            h.tick({40.f, 0, 0}); // horizontal movement: pointer stays frozen
+            tk(h, {40.f, 0, 0}); // horizontal movement: pointer stays frozen
         }
         Seen s = seen(h, m);
         require(h.s().actionsStatus(h.now).frozen, "sideways movement ended scrolling");
@@ -295,28 +552,28 @@ int main() {
         // small vertical movement inside the neutral deadzone: nothing
         m = mark(h);
         for (int i = 0; i < 60; ++i) { // under the 1.2 s exit dwell
-            h.tick({0, 4.f, 0}); // 1.5 deg/s after the pointer deadzone: neutral
+            tk(h, {0, 4.f, 0}); // 1.5 deg/s after the pointer deadzone: neutral
         }
         require(seen(h, m).wheelAbs == 0, "the deadzone let small movement scroll");
         // head down: wheel negative (scroll down), bounded by the wheel limit
         m = mark(h);
         for (int i = 0; i < 150; ++i) {
-            h.tick({0, 40.f, 0});
+            tk(h, {0, 40.f, 0});
         }
         s = seen(h, m);
         require(s.wheel < -3, "no scroll down for downward movement");
         require(s.maxWheel <= start::maxWheel, "wheel report above the bound");
         require(s.dx == 0 && s.dy == 0, "pointer moved while scrolling down");
-        h.quiet(300);
+        qt(h, 300);
         m = mark(h);
         for (int i = 0; i < 150; ++i) {
-            h.tick({0, -40.f, 0});
+            tk(h, {0, -40.f, 0});
         }
         require(seen(h, m).wheel > 3, "no scroll up for upward movement");
         // an extreme rate never exceeds the bound
         m = mark(h);
         for (int i = 0; i < 100; ++i) {
-            h.tick({0, 2000.f, 0});
+            tk(h, {0, 2000.f, 0});
         }
         require(seen(h, m).maxWheel <= start::maxWheel, "extreme movement beat the wheel bound");
         require(h.s().actionsStatus(h.now).wheelUnits > 0, "wheel counter");
@@ -330,7 +587,7 @@ int main() {
         dwellOnTarget(h);
         const size_t m = mark(h);
         for (int i = 0; i < 150; ++i) {
-            h.tick({0, 40.f, 0});
+            tk(h, {0, 40.f, 0});
         }
         require(seen(h, m).wheel > 3, "reversed vertical did not reverse the wheel");
     });
@@ -343,27 +600,27 @@ int main() {
         require(h.s().actionsStatus(h.now).frozen, "precondition");
         // continuous scrolling longer than the dwell never exits
         for (int i = 0; i < 300; ++i) {
-            h.tick({0, 30.f, 0});
+            tk(h, {0, 30.f, 0});
         }
         require(h.s().actionsStatus(h.now).frozen, "left scroll while still scrolling");
         // stillness: progress is shown and grows
-        h.quiet(600);
+        qt(h, 600);
         const float half = h.s().actionsStatus(h.now).exitProgress;
         require(half > .2f && half < .9f, "no exit progress while still");
         // a movement restarts it
         for (int i = 0; i < 20; ++i) {
-            h.tick({0, 30.f, 0});
+            tk(h, {0, 30.f, 0});
         }
         require(h.s().actionsStatus(h.now).exitProgress < .2f, "movement did not restart the exit");
         const size_t m = mark(h);
-        h.quiet(1700);
+        qt(h, 1700);
         const auto st = h.s().actionsStatus(h.now);
         require(!st.frozen && std::strcmp(st.scroll, "OFF") == 0, "did not exit scroll");
         require(std::strcmp(st.mode, "LEFT") == 0 && st.scrollExits == 1, "mode after exit");
         require(seen(h, m).primary == 0, "exiting scroll clicked");
         // no click straight after: deliberate movement first, then the pointer is free again
         const size_t quiet = mark(h);
-        h.quiet(5000);
+        qt(h, 5000);
         require(seen(h, quiet).primary == 0, "a click after leaving scroll without movement");
         const size_t moved = mark(h);
         moveAway(h);
@@ -373,15 +630,15 @@ int main() {
     test("Scroll Exit uses the same adjustable dwell duration (no per-action wait)", [] {
         HF h = paletteRig();
         require(h.s().setUncalibratedDwellSettings(2000, 8.f), "settings");
-        h.s().setActionHover(PaletteTarget::Scroll, h.now);
+        report(h, PaletteTarget::Scroll);
         hold(h, PaletteTarget::Scroll, 260); // 250 ms arming + the 2000 ms dwell
-        h.s().setActionHover(PaletteTarget::None, h.now);
+        report(h, PaletteTarget::None);
         moveAway(h);
-        h.quiet(2500);
+        qt(h, 2500);
         require(h.s().actionsStatus(h.now).frozen, "scroll did not start at 2000 ms dwell");
-        h.quiet(1100); // still inside the 2000 ms dwell, which began when scrolling did
+        qt(h, 1100); // still inside the 2000 ms dwell, which began when scrolling did
         require(h.s().actionsStatus(h.now).frozen, "exited before the longer dwell");
-        h.quiet(1100);
+        qt(h, 1100);
         require(!h.s().actionsStatus(h.now).frozen, "did not exit after the longer dwell");
     });
 
@@ -401,17 +658,17 @@ int main() {
 
     test("no chained selection: staying on the palette selects once", [] {
         HF h = paletteRig();
-        h.s().setActionHover(PaletteTarget::Right, h.now);
+        report(h, PaletteTarget::Right);
         hold(h, PaletteTarget::Right, kDwellTicks);
         require(h.s().actionsStatus(h.now).selections == 1, "first selection");
         hold(h, PaletteTarget::Right, 600); // 6 more seconds on the same control
         require(h.s().actionsStatus(h.now).selections == 1, "re-selected without movement");
         // moving to a different control with deliberate movement selects again
         for (int i = 0; i < 40; ++i) {
-            h.tick({40.f, 0, 0});
+            tk(h, {40.f, 0, 0});
         }
-        h.quiet(300);
-        h.s().setActionHover(PaletteTarget::Left, h.now);
+        qt(h, 300);
+        report(h, PaletteTarget::Left);
         hold(h, PaletteTarget::Left, kDwellTicks);
         require(h.s().actionsStatus(h.now).selections == 2, "no second selection");
         require(std::strcmp(mode(h), "LEFT") == 0, "second selection not applied");
@@ -419,31 +676,20 @@ int main() {
 
     test("leaving the palette clears the dwell and re-arms it only after deliberate movement", [] {
         HF h = paletteRig();
-        h.s().setActionHover(PaletteTarget::Drag, h.now);
+        report(h, PaletteTarget::Drag);
         hold(h, PaletteTarget::Drag, 90); // part-way through the dwell
         require(h.s().actionsStatus(h.now).dwellProgress > .1f, "no progress on the palette");
-        h.s().setActionHover(PaletteTarget::None, h.now);
-        h.quiet(50);
+        report(h, PaletteTarget::None);
+        qt(h, 50);
         require(h.s().actionsStatus(h.now).dwellProgress == 0.f, "progress survived leaving");
         const size_t m = mark(h);
-        h.quiet(5000);
+        qt(h, 5000);
         require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "clicked after leaving");
         require(std::strcmp(mode(h), "LEFT") == 0 && h.s().actionsStatus(h.now).selections == 0,
                 "a half-finished selection took effect");
         moveAway(h);
         dwellOnTarget(h);
         require(seen(h, m).primary == 1, "no click after moving on from the palette");
-    });
-
-    test("a stale palette hover expires and cannot keep the target from clicking", [] {
-        HF h = paletteRig();
-        h.s().setActionHover(PaletteTarget::Left, h.now);
-        h.quiet(4000); // never refreshed: the page is gone (selecting Left again changes nothing)
-        require(!h.s().actionsStatus(h.now).inPalette, "stale hover kept the palette occupied");
-        moveAway(h);
-        const size_t m = mark(h);
-        dwellOnTarget(h);
-        require(seen(h, m).primary == 1, "stale hover blocked target clicks forever");
     });
 
     test("Stop is selectable by dwell in Left, Right, Drag and Armed Scroll", [] {
@@ -461,7 +707,7 @@ int main() {
             Seen s = seen(h, m);
             require(s.primary == 0 && s.secondary == 0, "Stop clicked");
             require(h.released(), "no all-zero release after Stop");
-            h.quiet(3000);
+            qt(h, 3000);
             require(h.s().state != SystemState::Active, "restarted by itself");
         }
     });
@@ -475,7 +721,7 @@ int main() {
         h.s().stopUncalibratedDemo("website stop");
         require(h.released(), "the button was not released by the stop");
         require(!h.s().actionsStatus(h.now).dragging && !h.s().actionPaletteEnabled(), "state kept");
-        h.quiet(1000);
+        qt(h, 1000);
         require(h.released() && h.s().state != SystemState::Active, "output after the stop");
     });
 
@@ -486,12 +732,12 @@ int main() {
         dwellOnTarget(h);
         require(h.s().actionsStatus(h.now).frozen, "precondition");
         for (int i = 0; i < 40; ++i) {
-            h.tick({0, 40.f, 0});
+            tk(h, {0, 40.f, 0});
         }
         h.s().stopUncalibratedDemo("website stop");
         require(h.released() && !h.s().actionsStatus(h.now).frozen, "not stopped");
         const size_t m = mark(h);
-        h.quiet(2000);
+        qt(h, 2000);
         require(seen(h, m).wheelAbs == 0, "wheel after the stop");
     });
 
@@ -505,7 +751,7 @@ int main() {
         require(h.s().state != SystemState::Active, "the button did not stop");
         require(h.released(), "button not released");
         require(!h.s().actionsStatus(h.now).dragging, "drag state kept");
-        h.quiet(2000);
+        qt(h, 2000);
         require(h.s().state != SystemState::Active, "restarted by itself");
     });
 
@@ -516,11 +762,11 @@ int main() {
         dwellOnTarget(h);
         require(h.s().actionsStatus(h.now).dragging, "precondition");
         h.s().axes.axes = {0, 0, 1}; // an invalid axis mapping is a sensor-path fault
-        h.tick();
+        tk(h);
         require(h.s().state == SystemState::SafeState, "no safe state");
         require(h.released(), "the button was not released on the fault");
         h.s().axes.axes = {0, 1, 2};
-        h.quiet(3000);
+        qt(h, 3000);
         require(h.s().state != SystemState::Active && !h.s().uncalibratedDemo(), "auto restart");
         require(!h.s().actionPaletteEnabled() && !h.s().actionsStatus(h.now).dragging,
                 "palette survived the fault");
@@ -534,13 +780,13 @@ int main() {
         dwellOnTarget(h);
         require(h.s().actionsStatus(h.now).dragging, "precondition");
         h.transport.online = false;
-        h.quiet(300);
+        qt(h, 300);
         require(h.s().state == SystemState::SafeState, "no safe state on disconnect");
         require(!h.s().actionsStatus(h.now).dragging && !h.s().actionPaletteEnabled(),
                 "pending action kept across a disconnect");
         h.transport.online = true;
         const size_t m = mark(h);
-        h.quiet(4000);
+        qt(h, 4000);
         require(h.s().state != SystemState::Active, "resumed by itself");
         Seen s = seen(h, m);
         require(s.primary == 0 && s.secondary == 0 && !h.transport.reports.back().down,
@@ -556,12 +802,12 @@ int main() {
         // deliberate movement was made by moveAway; now the release dwell with a failing release
         h.transport.failRelease = true;
         for (int i = 0; i < 30; ++i) {
-            h.tick({30.f, 0, 0});
+            tk(h, {30.f, 0, 0});
         }
-        h.quiet(300);
+        qt(h, 300);
         const uint32_t faults = h.s().diagnostics.faults;
         for (unsigned i = 0; i < 160 && h.s().diagnostics.faults == faults; ++i) {
-            h.tick(); // run until the release dwell completes
+            tk(h); // run until the release dwell completes
         }
         require(h.s().diagnostics.faults == faults + 1, "failed release did not raise a fault");
         require(h.s().state == SystemState::SafeState, "failed release did not stop output");
@@ -569,7 +815,7 @@ int main() {
         require(!h.s().uncalibratedDemo() && !h.s().actionPaletteEnabled(), "session kept");
         h.transport.failRelease = false;
         const size_t m = mark(h);
-        h.quiet(4000);
+        qt(h, 4000);
         require(h.s().state != SystemState::Active, "restarted automatically");
         require(seen(h, m).primary == 0 && seen(h, m).dx == 0, "output after the failed release");
     });
@@ -584,13 +830,13 @@ int main() {
             h.transport.failRelease = true;
             const uint32_t faults = h.s().diagnostics.faults;
             for (unsigned i = 0; i < 200 && h.s().diagnostics.faults == faults; ++i) {
-                h.tick();
+                tk(h);
             }
             require(h.s().diagnostics.faults == faults + 1 && h.s().state == SystemState::SafeState,
                     "failed click release kept output on");
             h.transport.failRelease = false;
             const size_t m = mark(h);
-            h.quiet(3000);
+            qt(h, 3000);
             require(h.s().state != SystemState::Active && seen(h, m).primary == 0 &&
                         seen(h, m).secondary == 0,
                     "output after the failed release");
@@ -623,7 +869,7 @@ int main() {
         require(h.released() && !h.s().actionPaletteEnabled(), "not released");
         require(h.s().state == SystemState::Active, "turning the palette off stopped the session");
         const size_t m = mark(h);
-        h.quiet(3000);
+        qt(h, 3000);
         require(seen(h, m).primary == 0, "a click while the palette is off");
     });
 
@@ -633,7 +879,7 @@ int main() {
         require(std::strcmp(mode(h), "RIGHT") == 0, "precondition");
         h.s().stopUncalibratedDemo("test");
         require(h.s().startUncalibratedDemo(h.now), "restart");
-        h.quiet(300);
+        qt(h, 300);
         require(!h.s().actionPaletteEnabled(), "palette on after a restart");
         require(h.s().setActionPalette(true, h.now), "enable again");
         require(std::strcmp(mode(h), "LEFT") == 0, "pending Right survived the stop");
@@ -645,12 +891,12 @@ int main() {
     test("settings are temporary and profiles are preserved", [] {
         HF h(true, EnableKind::Momentary);
         h.sw = false;
-        h.quiet(400);
+        qt(h, 400);
         UserProfile before;
         require(h.repo.load(before), "profile");
         const auto writes = h.profileStorage.read(0);
         require(h.s().startUncalibratedDemo(h.now), "start");
-        h.quiet(300);
+        qt(h, 300);
         require(h.s().setActionPalette(true, h.now), "palette");
         require(h.s().setUncalibratedDwellSettings(1800, 12.f), "dwell settings");
         selectControl(h, PaletteTarget::Drag);
@@ -667,7 +913,7 @@ int main() {
         require(h.s().profile.dwellMs == before.dwellMs, "live profile changed");
         // a fresh System (a reboot): nothing of the palette is remembered
         h.boot();
-        h.quiet(400);
+        qt(h, 400);
         require(!h.s().actionPaletteEnabled(), "palette on after a reboot");
         require(h.s().actionsStatus(h.now).dwellMs == start::uncalDwellMs, "dwell setting persisted");
     });
@@ -678,20 +924,20 @@ int main() {
             HF h = paletteRig();
             require(h.s().setUncalibratedDwellSettings(3000, 8.f), "settings");
             if (action != PaletteTarget::Left) {
-                h.s().setActionHover(action, h.now);
+                report(h, action);
                 hold(h, action, 200); // 2 s: not enough for a 3 s dwell
                 require(h.s().actionsStatus(h.now).selections == 0, "selected before the long dwell");
                 hold(h, action, 200);
                 require(h.s().actionsStatus(h.now).selections == 1, "not selected after it");
-                h.s().setActionHover(PaletteTarget::None, h.now);
+                report(h, PaletteTarget::None);
                 moveAway(h);
             }
             const size_t m = mark(h);
-            h.quiet(2500);
+            qt(h, 2500);
             require(seen(h, m).primary == 0 && seen(h, m).secondary == 0 &&
                         !h.s().actionsStatus(h.now).dragging,
                     "acted before the long dwell");
-            h.quiet(1200);
+            qt(h, 1200);
             const bool acted = seen(h, m).primary + seen(h, m).secondary > 0 ||
                                h.s().actionsStatus(h.now).dragging;
             require(acted, "did not act after the long dwell");

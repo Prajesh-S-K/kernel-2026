@@ -6,7 +6,7 @@ import { createHandsFreeView } from './handsfree-view.js';
 import { mappingView } from './mapping.js';
 import { clickView } from './click.js';
 import { quickView } from './quick.js';
-import { PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
+import { LINK_NOTE, PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
 import {
   BANNER,
   DWELL_NOTE,
@@ -427,7 +427,8 @@ function renderActions(data) {
   const a = view.a;
   $('actionsTag').textContent = view.enabled ? 'ENABLED' : 'OFF';
   $('actionsBanner').textContent = view.banner.text;
-  $('actionsDetail').textContent = view.banner.detail;
+  $('actionsDetail').textContent =
+    `${view.banner.exitHint ? `${view.banner.exitHint}. ` : ''}${view.banner.detail}`;
   $('actionsEnable').disabled = !view.canEnable && !view.enabled;
   $('actionsEnable').checked = view.enabled;
   $('actionsStop').disabled = data.state !== 'ACTIVE';
@@ -437,8 +438,8 @@ function renderActions(data) {
     ['actionsTol', a.tolerance],
   ])
     if (document.activeElement !== $(id) && value) $(id).value = value;
-  $('actionsNote').textContent = `${PALETTE_NOTE} ${SCROLL_NOTE}`;
-  $('actionsStats').textContent = view.stats;
+  $('actionsNote').textContent = `${PALETTE_NOTE} ${SCROLL_NOTE} ${LINK_NOTE}`;
+  $('actionsStats').textContent = [view.stats, view.link].filter(Boolean).join(' · ');
   $('actionsBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
   if (view.enabled) {
     // exclusive with the other click modes: the device turns them off, the page shows it
