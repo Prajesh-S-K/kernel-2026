@@ -4,6 +4,8 @@ Head pointing, accessible switch selection/drag, optional dwell, roll scrolling 
 
 **Hands-free revision (unreleased, on top of v0.2.0):** everyday operation needs no physical button. Dwell selects; two helper-trained head gestures pause/resume and toggle drag; at most one maintained control-enable switch permits or inhibits control. The earlier physical-switch behaviour remains as an explicit *legacy compatibility mode*. Read [HANDS_FREE_SPEC](docs/HANDS_FREE_SPEC.md). Everything about gestures, the enable switch and their parameters is simulation-checked only: **no hardware, comfort or accidental-activation evidence exists.**
 
+**Desktop action overlay (optional, macOS, experimental):** a floating **NodX ▾** tile with a dwell menu (Left/Right/Double-click, Drag/Drop, Scroll, Keyboard, Cancel, Pause / Stop) and a dwell-typed NodX keyboard, so the head-controlled pointer can pick actions in any application. It is a separate program that talks only to the local companion bridge (no second serial connection, no mouse injection) and is launched with `scripts/run_overlay.sh` after you start a session. Setup, permissions, limits and what is and is not verified: [docs/OVERLAY.md](docs/OVERLAY.md).
+
 **Status:** software implemented and checked in simulation; ESP32 firmware cross-compiled. Physical sensor, NVS power-loss behavior, BLE delivery/pairing, mounting, comfort and real-user performance remain hardware-required. Every device-dependent number is a **START value**, not a validated final setting.
 
 ```sh
