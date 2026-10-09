@@ -138,10 +138,25 @@ bool ProfileRepository::load(UserProfile& p) {
     uint32_t ga = 0, gb = 0;
     bool va = decode(storage_.read(0), a, ga), vb = decode(storage_.read(1), b, gb);
     if (!va && !vb) {
+        // Empty slots are a missing profile; anything else that fails to decode is corrupt.
+        state_ = storage_.read(0).empty() && storage_.read(1).empty() ? ProfileState::Missing
+                                                                      : ProfileState::Corrupt;
         return false;
     }
+    state_ = ProfileState::Valid;
     p = (!va || (vb && gb > ga)) ? b : a;
     return true;
+}
+const char* name(ProfileState state) {
+    switch (state) {
+    case ProfileState::Missing:
+        return "MISSING";
+    case ProfileState::Valid:
+        return "VALID";
+    case ProfileState::Corrupt:
+        return "CORRUPT";
+    }
+    return "CORRUPT";
 }
 bool ProfileRepository::save(const UserProfile& p) {
     if (!p.valid()) {
@@ -160,7 +175,11 @@ bool ProfileRepository::save(const UserProfile& p) {
         return false;
     }
     // A failed/torn write cannot replace the last valid slot.
-    return storage_.read(slot) == bytes;
+    if (storage_.read(slot) != bytes) {
+        return false;
+    }
+    state_ = ProfileState::Valid;
+    return true;
 }
 bool MemoryStorage::write(unsigned slot, const std::vector<uint8_t>& bytes) {
     if (failWrite) {

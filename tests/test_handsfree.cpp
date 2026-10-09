@@ -1,6 +1,7 @@
 // Hands-free revision regression tests. Deterministic, synthetic input only: they show that the
 // logic behaves as specified, not accidental-trigger rates, comfort or suitability for any user.
 #include "hf_support.hpp"
+#include <random>
 #include <cstring>
 
 namespace {
@@ -62,8 +63,10 @@ bool quietSince(const HF& h, size_t from) {
 }
 unsigned clicksSince(const HF& h, size_t from) {
     unsigned clicks = 0;
-    for (size_t i = from + 1; i < h.transport.reports.size(); ++i) {
-        if (h.transport.reports[i].down && !h.transport.reports[i - 1].down) {
+    // Compare each report with the one before it; an idle link carries no repeated zero reports.
+    for (size_t i = from; i < h.transport.reports.size(); ++i) {
+        const bool before = i > 0 && h.transport.reports[i - 1].down;
+        if (h.transport.reports[i].down && !before) {
             ++clicks;
         }
     }
@@ -728,7 +731,8 @@ int main() {
         h.tick();
         char buffer[2048];
         const size_t length = handsFreeJson(buffer, sizeof buffer, h.s().handsFreeStatus());
-        require(length > 100 && length < 900, "length");
+        require(length > 100 && length < handsFreeJsonCapacity * 3 / 4,
+                "the hands-free JSON needs headroom in the adapters' buffer");
         for (const char* bad : {"nan", "NaN", "inf", "Inf", "null"}) {
             require(!contains(buffer, bad), "nonfinite or null token");
         }
@@ -1751,7 +1755,7 @@ int main() {
         const size_t mark = h.transport.reports.size();
         h.quiet(3000);
         bool pairFound = false;
-        for (size_t i = mark + 1; i < h.transport.reports.size(); ++i) {
+        for (size_t i = std::max<size_t>(mark, 1); i < h.transport.reports.size(); ++i) {
             if (h.transport.reports[i - 1].down && !h.transport.reports[i].down) {
                 pairFound = true;
             }
@@ -2347,6 +2351,1994 @@ int main() {
              require(!h.s().handsFreeStatus().permitted && !h.s().resume(),
                      "unwired input permitted");
          });
+
+    // ------------------------------------------------ L: temporary movement-only demo mode
+    // No dwell click, no drag, no wheel, bounded steps; every safety check and the enable input
+    // stay. RAM only: never written to the profile or the configuration record, off at every boot.
+    auto demoActive = [](HF& h) {
+        h.active();
+        require(h.s().setDemoMovementOnly(true), "demo on");
+        require(h.s().state == SystemState::Paused,
+                "turning the demo on while active pauses control");
+        h.quiet(300);
+        require(h.s().resume(), "explicit resume");
+        h.quiet(400);
+    };
+    test("demo: a completed dwell produces no click while normal hands-free mode does",
+         [demoActive] {
+             HF normal;
+             normal.active();
+             const size_t markNormal = normal.transport.reports.size();
+             moveAway(normal);
+             normal.quiet(2500);
+             require(clicksSince(normal, markNormal) >= 1,
+                     "precondition: dwell clicks in normal mode");
+             HF h;
+             demoActive(h);
+             const size_t mark = h.transport.reports.size();
+             moveAway(h);
+             h.quiet(2500);
+             require(clicksSince(h, mark) == 0, "a dwell click in the movement-only demo");
+             for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                 require(!h.transport.reports[i].down, "a button was pressed in the demo");
+             }
+         });
+    test("demo: the drag gesture is refused and nothing is pressed", [demoActive] {
+        HF h;
+        demoActive(h);
+        const uint32_t refusedBefore = h.s().handsFreeStatus().refused;
+        const size_t mark = h.transport.reports.size();
+        perform(h, "tilt2");
+        require(!h.s().dragging, "drag started in the demo");
+        require(h.s().state == SystemState::Active, "refusing the drag changed the state");
+        require(h.s().handsFreeStatus().refused == refusedBefore + 1, "refusal not counted");
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "a button was pressed");
+        }
+    });
+    test("demo: no wheel reports even while rolled past the scroll threshold", [demoActive] {
+        auto rolled = [](HF& h) {
+            UserProfile profile = h.s().profile;
+            profile.scrollThreshold = 5;
+            profile.scrollGain = 3;
+            profile.scrollEnabled = true;
+            require(h.s().setProfile(profile, false), "profile");
+            h.quiet(300);
+            require(h.s().resume(), "resume");
+            h.quiet(400);
+            const size_t mark = h.transport.reports.size();
+            h.run(hold(2, -60, 1000));
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                if (h.transport.reports[i].wheel != 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        HF normal;
+        normal.active();
+        require(rolled(normal), "precondition: the same roll scrolls in normal mode");
+        HF h;
+        demoActive(h);
+        require(!rolled(h), "a wheel report in the movement-only demo");
+    });
+    test("demo: the pointer still moves and every step is bounded", [demoActive] {
+        HF h;
+        demoActive(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 90, 1000)); // fast yaw: far above the bound in normal mode
+        float total = 0, biggest = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            total += std::abs(float(h.transport.reports[i].dx));
+            biggest = std::max(biggest, std::abs(float(h.transport.reports[i].dx)));
+        }
+        require(total > 50, "the demo does not move the pointer");
+        require(biggest <= start::demoMaxStep, "a step exceeded the demo bound");
+        HF normal;
+        normal.active();
+        const size_t markNormal = normal.transport.reports.size();
+        normal.run(hold(0, 90, 1000));
+        float biggestNormal = 0;
+        for (size_t i = markNormal; i < normal.transport.reports.size(); ++i) {
+            biggestNormal =
+                std::max(biggestNormal, std::abs(float(normal.transport.reports[i].dx)));
+        }
+        require(biggestNormal > start::demoMaxStep, "precondition: normal mode exceeds the bound");
+    });
+    test("demo: nothing is saved, and the mode is off after a reboot", [] {
+        HF h;
+        h.active();
+        const auto profileBefore = h.profileStorage.read(0);
+        const auto profileBefore1 = h.profileStorage.read(1);
+        const auto configBefore0 = h.configStorage.slots[0],
+                   configBefore1 = h.configStorage.slots[1];
+        require(h.s().setDemoMovementOnly(true), "on");
+        h.quiet(500);
+        require(h.profileStorage.read(0) == profileBefore &&
+                    h.profileStorage.read(1) == profileBefore1,
+                "the saved profile changed");
+        require(h.configStorage.slots[0] == configBefore0 &&
+                    h.configStorage.slots[1] == configBefore1,
+                "the saved configuration changed");
+        require(h.s().profile.dwellEnabled, "the hands-free profile lost dwell");
+        h.boot();
+        require(!h.s().demoMovementOnly(), "the demo survived a reboot");
+        require(!h.s().handsFreeStatus().demoMovementOnly, "status");
+        require(h.s().interaction == InteractionMode::HandsFree, "mode");
+    });
+    test("demo: switching the mode while active pauses control and releases outputs", [] {
+        HF h;
+        h.active();
+        beginDrag(h);
+        require(h.s().setDemoMovementOnly(true), "on");
+        require(h.s().state == SystemState::Paused && !h.s().dragging && h.released(),
+                "a drag survived the mode change");
+        h.quiet(300);
+        require(h.s().resume(), "resume");
+        h.quiet(300);
+        require(h.s().setDemoMovementOnly(false), "off");
+        require(h.s().state == SystemState::Paused && h.released(), "turning it off pauses");
+        require(h.s().setDemoMovementOnly(false), "idempotent");
+    });
+    test("demo: the enable input and every fault still stop output", [demoActive] {
+        HF h(true, EnableKind::Momentary);
+        h.active();
+        require(h.s().setDemoMovementOnly(true), "on");
+        h.quiet(300);
+        h.click(); // the second press disables, so permission is off; enable again for the test
+        h.click();
+        require(h.s().handsFreeStatus().permitted, "permission");
+        require(h.s().resume(), "resume");
+        h.quiet(300);
+        h.run(hold(0, 40, 300));
+        h.s().setControlSwitch(true, h.now + 1); // the disabling press edge
+        require(h.s().state == SystemState::Paused && h.released(),
+                "the button did not stop the demo");
+        HF faulty;
+        demoActive(faulty);
+        faulty.now += 10;
+        faulty.s().tick({faulty.now, {NAN, 0, 0}, {0, 0, 1}, true}, faulty.now, false);
+        require(faulty.s().state == SystemState::SafeState, "a sensor fault did not stop the demo");
+    });
+    test("demo: the flag is reported in the hands-free status", [] {
+        HF h;
+        h.active();
+        char buffer[1024];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"demoMovementOnly\":false"), "off");
+        require(h.s().setDemoMovementOnly(true), "on");
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"demoMovementOnly\":true"), "on");
+    });
+
+    // ------------------------------------------------ M: temporary UNCALIBRATED pointer demo
+    // Real sensor path, validated RAM-only demo profile, physical enable button, movement only.
+    // Missing/failed calibration alone is bypassed; every other fault still stops output.
+    auto uncalRig = [](bool saveProfile = false) {
+        HF h(saveProfile, EnableKind::Momentary);
+        h.sw = false;
+        h.quiet(400); // healthy samples; the button has not been pressed
+        return h;
+    };
+    auto uncalStart = [](HF& h) {
+        require(h.s().startUncalibratedDemo(h.now), "demo start refused");
+        h.quiet(300);
+    };
+    auto movedSince = [](HF& h, size_t mark) {
+        float dx = 0, dy = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            dx += h.transport.reports[i].dx;
+            dy += h.transport.reports[i].dy;
+        }
+        return std::array<float, 2>{dx, dy};
+    };
+    auto onlyMovement = [](HF& h, size_t mark) {
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            require(!r.down && r.wheel == 0, "a button or wheel report in the uncalibrated demo");
+        }
+    };
+    test("uncal demo: missing profile, no gestures, no button: starts only on an explicit start",
+         [=] {
+             HF h = uncalRig();
+             require(h.s().profileState() == ProfileState::Missing, "profile state");
+             h.click(); // a button press never starts it
+             h.quiet(1000);
+             require(h.s().state == SystemState::CalibrationRequired && !h.s().uncalibratedDemo(),
+                     "the demo started by itself");
+             require(!h.s().resume(), "normal resume still needs a calibrated profile");
+             require(h.s().startUncalibratedDemo(h.now), "explicit start refused");
+             require(h.s().uncalibratedDemo() && h.s().state == SystemState::Active, "active");
+             require(!h.s().hasProfile && h.s().calibration.phase == CalPhase::Idle,
+                     "the demo must not report a profile or a calibration");
+             require(h.profileStorage.read(0).empty() && h.profileStorage.read(1).empty() &&
+                         h.configStorage.slots[0].empty() && h.configStorage.slots[1].empty(),
+                     "the demo wrote storage");
+         });
+    test("uncal demo: after a FAILED calibration the failure stays reported", [=] {
+        HF h = uncalRig();
+        h.s().calibrate(h.now);
+        h.run(hold(0, 40, 4000)); // rest phase moved: 'rest too unstable' / insufficient
+        for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+            h.run(hold(0, 40, 100));
+        }
+        require(h.s().calibration.phase == CalPhase::Failed, "precondition: calibration failed");
+        h.quiet(400);
+        require(h.s().startUncalibratedDemo(h.now), "demo after failed calibration");
+        h.quiet(300);
+        require(h.s().calibration.phase == CalPhase::Failed && !h.s().hasProfile,
+                "the demo changed the calibration result");
+    });
+    test("uncal demo: a corrupt saved profile stays corrupt and is never repaired", [=] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        require(h.repo.save(UserProfile{}), "save");
+        h.profileStorage.slots[0][20] ^= 0x55;
+        h.profileStorage.slots[1] = h.profileStorage.slots[0];
+        const auto slot0 = h.profileStorage.slots[0], slot1 = h.profileStorage.slots[1];
+        h.boot();
+        h.quiet(400);
+        require(h.s().profileState() == ProfileState::Corrupt && !h.s().hasProfile, "corrupt");
+        uncalStart(h);
+        h.run(hold(0, 60, 500));
+        require(h.s().uncalibratedDemo(), "demo runs without touching the record");
+        require(h.s().profileState() == ProfileState::Corrupt, "corruption silently accepted");
+        h.s().stopUncalibratedDemo("test");
+        require(h.s().profileState() == ProfileState::Corrupt && !h.s().hasProfile,
+                "corruption repaired");
+        require(h.profileStorage.slots[0] == slot0 && h.profileStorage.slots[1] == slot1,
+                "corrupt record rewritten");
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"profileState\":\"CORRUPT\""), "reported as corrupt");
+    });
+    test("uncal demo: real sensor movement controls the pointer in all four directions",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             struct Case {
+                 unsigned axis;
+                 float rate;
+                 int dx, dy;
+             };
+             for (const Case c : {Case{0, 60, 1, 0}, Case{0, -60, -1, 0}, Case{1, 60, 0, 1},
+                                  Case{1, -60, 0, -1}}) {
+                 h.quiet(600);
+                 const size_t mark = h.transport.reports.size();
+                 h.run(hold(c.axis, c.rate, 400));
+                 const auto moved = movedSince(h, mark);
+                 require(moved[0] * c.dx > 5 || c.dx == 0, "wrong or no horizontal movement");
+                 require(moved[1] * c.dy > 5 || c.dy == 0, "wrong or no vertical movement");
+                 require(std::abs(moved[c.dx ? 1 : 0]) < 2, "crosstalk into the other axis");
+                 onlyMovement(h, mark);
+             }
+         });
+    test("uncal demo: steps stay below the demo bound and below the normal bound", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 200, 1500)); // violent rotation
+        float biggest = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            biggest = std::max({biggest, std::abs(float(h.transport.reports[i].dx)),
+                                std::abs(float(h.transport.reports[i].dy))});
+        }
+        require(biggest > 0, "no movement");
+        require(biggest <= start::uncalDemoMaxStep, "a step exceeded the uncalibrated bound");
+        require(start::uncalDemoMaxStep < start::demoMaxStep, "bound is not the conservative one");
+        require(start::uncalDemoGain < start::gain, "gain is not conservative");
+    });
+    test("uncal demo: no button, no dwell click, no drag, no wheel; idle gyro bias is ignored",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             const size_t mark = h.transport.reports.size();
+             h.run(hold(2, -90, 1500)); // roll far past the scroll threshold
+             h.quiet(3000);             // dwell time would have clicked
+             h.run(hold(0, 40, 300));
+             h.quiet(2500);
+             onlyMovement(h, mark);
+             require(clicksSince(h, mark) == 0, "a click in the uncalibrated demo");
+             // Idle bias of the bench sensor (about -1.3, -0.9 deg/s) sits inside the deadzone.
+             const size_t idle = h.transport.reports.size();
+             for (unsigned i = 0; i < 300; ++i) {
+                 h.tick({-1.3f, -0.9f, 0.1f});
+             }
+             const auto drift = movedSince(h, idle);
+             require(std::abs(drift[0]) < 1 && std::abs(drift[1]) < 1, "idle bias moves the cursor");
+         });
+    test("uncal demo: Stop demo releases at once and needs an explicit restart", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.run(hold(0, 60, 300));
+        h.s().stopUncalibratedDemo("stopped by the user");
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "still active");
+        require(h.released(), "the stop did not release the pointer");
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        require(movedSince(h, mark)[0] == 0, "movement after Stop demo");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+    });
+    test("uncal demo: a button press only stops it at the press edge; restart is explicit",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             h.run(hold(0, 60, 200));
+             h.sw = true;
+             h.tick(); // one pass: the press edge alone disables
+             require(!h.s().uncalibratedDemo() && h.released(), "not stopped at the press edge");
+             h.sw = false;
+             h.quiet(300);
+             require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                     "the button restarted the demo");
+             // Without any further sensor sample: the press itself must already release.
+             HF direct = uncalRig();
+             uncalStart(direct);
+             direct.run(hold(0, 60, 200));
+             direct.s().setControlSwitch(true, direct.now + 1);
+             require(!direct.s().uncalibratedDemo() && direct.released(),
+                     "the press edge waited for a sensor sample");
+             require(h.s().startUncalibratedDemo(h.now), "explicit restart (no press needed)");
+         });
+    test("uncal demo: a start is rejected for an unhealthy sensor, bad mapping, no BLE, no button",
+         [=] {
+             {
+                 HF h(false, EnableKind::Momentary);
+                 h.sw = false;
+                 h.tick();
+                 require(!h.s().startUncalibratedDemo(h.now), "started before healthy samples");
+                 require(std::string(h.s().diagnostics.reason) ==
+                             "waiting for healthy sensor samples",
+                         "unhealthy sensor reason");
+             }
+             {
+                 HF h = uncalRig();
+                 h.s().axes.axes = {0, 0, 0};
+                 require(!h.s().axes.valid(), "precondition: mapping invalid");
+                 require(!h.s().startUncalibratedDemo(h.now), "started with an invalid mapping");
+             }
+             {
+                 HF h = uncalRig();
+                 h.transport.online = false;
+                 require(!h.s().startUncalibratedDemo(h.now), "started without BLE");
+                 require(std::string(h.s().diagnostics.reason) == "BLE link unavailable",
+                         "BLE reason");
+             }
+             {
+                 HF h = uncalRig(); // no enable button wired at all: still allowed
+                 h.s().configureEnableInput(false);
+                 require(h.s().startUncalibratedDemo(h.now), "the demo must not need a button");
+             }
+             {
+                 HF h = uncalRig();
+                 require(h.s().startUncalibratedDemo(h.now), "healthy start");
+                 require(!h.s().startUncalibratedDemo(h.now), "double start");
+             }
+         });
+    test("uncal demo: calibration, training and gestures take over and end the demo", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.s().calibrate(h.now);
+        require(h.s().state == SystemState::Calibrating && !h.s().uncalibratedDemo(),
+                "calibration did not end the demo");
+        require(h.released(), "calibration start did not release output");
+        HF g = uncalRig();
+        uncalStart(g);
+        g.s().pause();
+        require(!g.s().uncalibratedDemo() && g.released(), "pause did not end the demo");
+    });
+    test("uncal demo: sensor faults stop output and the demo; restart is explicit", [=] {
+        for (int kind = 0; kind < 4; ++kind) {
+            HF h = uncalRig();
+            uncalStart(h);
+            h.run(hold(0, 40, 200));
+            h.now += 10;
+            MotionSample bad{h.now, {0, 0, 0}, {0, 0, 1}, true};
+            if (kind == 0) {
+                bad.gyro = {NAN, 0, 0};
+            } else if (kind == 1) {
+                bad.gyro = {1e6f, 0, 0};
+            } else if (kind == 2) {
+                bad.valid = false;
+            } else {
+                bad.timestampMs = h.now - 400; // stale sample
+            }
+            h.s().tick(bad, h.now, false);
+            require(h.s().state == SystemState::SafeState, "fault did not stop control");
+            require(!h.s().uncalibratedDemo() && h.released(), "demo survived a sensor fault");
+            h.quiet(600); // recovery
+            require(h.s().state != SystemState::Active && !h.s().uncalibratedDemo(),
+                    "demo resumed by itself after recovery");
+            require(h.s().startUncalibratedDemo(h.now), "explicit restart after recovery");
+        }
+    });
+    test("uncal demo: BLE disconnect and delivery failure stop it; reconnect never restarts it",
+         [=] {
+             HF h = uncalRig();
+             uncalStart(h);
+             h.transport.online = false;
+             h.quiet(100);
+             require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(),
+                     "disconnect did not stop the demo");
+             h.transport.online = true; // reconnect
+             h.quiet(800);
+             require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                     "reconnect restarted the demo");
+             require(h.s().startUncalibratedDemo(h.now), "explicit restart after reconnect");
+             h.quiet(200);
+             h.transport.fail = true; // delivery failure while connected
+             h.run(hold(0, 60, 100));
+             require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(),
+                     "delivery failure did not stop the demo");
+         });
+    test("uncal demo: a reboot never starts it", [=] {
+        HF h = uncalRig();
+        uncalStart(h);
+        h.boot();
+        require(std::string(h.s().handsFreeStatus().uncalBlocked) ==
+                    "waiting for healthy sensor samples",
+                "a fresh boot must re-qualify the sensor before any start");
+        h.quiet(600);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "boot started it");
+    });
+    test("uncal demo: normal calibrated control keeps its requirements", [=] {
+        HF h = uncalRig();
+        require(!h.s().resume() && std::string(h.s().handsFreeStatus().blocked) ==
+                                       "calibrated profile required",
+                "resume without a profile");
+        HF normal(true, EnableKind::Momentary); // calibrated profile saved: normal path
+        normal.sw = false;
+        normal.setup();
+        normal.quiet(400);
+        normal.click();
+        require(normal.s().resume() && !normal.s().uncalibratedDemo(), "normal resume works");
+        require(!normal.s().startUncalibratedDemo(normal.now), "demo start while active");
+    });
+    test("link: an idle link sends no repeated zero reports; stops and reconnects still send", [=] {
+        HF h = uncalRig();
+        h.quiet(1000);
+        require(h.transport.reports.size() <= 3, "idle zero reports flood the link");
+        uncalStart(h);
+        h.run(hold(0, 60, 300));
+        const size_t moving = h.transport.reports.size();
+        require(moving > 3, "movement must be reported");
+        h.s().stopUncalibratedDemo("test");
+        require(h.released(), "a stop must send the release");
+        const size_t afterStop = h.transport.reports.size();
+        h.quiet(1000);
+        require(h.transport.reports.size() == afterStop, "idle repeats after the release");
+        h.transport.online = false;
+        h.quiet(100);
+        h.transport.online = true;
+        h.quiet(1000);
+        require(h.transport.reports.size() >= afterStop, "reconnect");
+    });
+    test("uncal demo: status exposes the demo, its parameters and the profile state", [=] {
+        HF h = uncalRig();
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"uncalDemo\":{\"active\":false") &&
+                    std::strstr(buffer, "\"profileState\":\"MISSING\"") &&
+                    std::strstr(buffer, "\"blocked\":\"\""),
+                "idle status: ready, nothing blocking");
+        uncalStart(h);
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"uncalDemo\":{\"active\":true") &&
+                    std::strstr(buffer, "\"gain\":12.00") && std::strstr(buffer, "\"maxStep\":4.00"),
+                "active status");
+    });
+
+    // ------------------------------------------------ N: dwell clicking in the uncalibrated demo
+    // Explicitly enabled, RAM only, one primary-button click per completed dwell. The normal
+    // SelectionManager -> SafetyManager -> HIDManager path; no drag, no scroll, no profile needed.
+    auto dwellStart = [=](HF& h) {
+        require(h.s().startUncalibratedDemo(h.now), "demo start refused");
+        h.quiet(300);
+        require(!h.s().uncalibratedDwell(), "dwell must be off after a start");
+    };
+    auto dwellOn = [](HF& h) {
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell enable refused");
+    };
+    test("dwell demo: movement-only is the default and never clicks", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(6000);
+        require(clicksSince(h, mark) == 0, "a click without dwell being enabled");
+        require(!h.s().handsFreeStatus().uncalDwellEnabled, "status");
+    });
+    test("dwell demo: enabling needs a running demo and is cleared by every stop", [=] {
+        HF h = uncalRig();
+        require(!h.s().setUncalibratedDwell(true, h.now), "enabled without a running demo");
+        dwellStart(h);
+        dwellOn(h);
+        h.s().stopUncalibratedDemo("test");
+        require(!h.s().uncalibratedDwell(), "dwell survived the stop");
+        dwellStart(h); // a restart is movement-only again
+        require(!h.s().uncalibratedDwell(), "dwell carried into the restart");
+    });
+    test("dwell demo: exactly one primary click per completed dwell, release always sent", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        float peak = 0;
+        for (unsigned i = 0; i < 300; ++i) { // 3 s: 250 ms arming + 1200 ms dwell fits
+            h.tick();
+            peak = std::max(peak, h.s().handsFreeStatus().uncalDwellProgress);
+        }
+        require(peak > .9f, "progress was never shown");
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not the last report");
+        bool pressed = false;
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            if (r.down) {
+                ++downs;
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click report");
+            }
+            pressed = pressed || r.down;
+        }
+        require(pressed && downs == 1, "one press report expected");
+        require(h.s().handsFreeStatus().uncalClicks == 1, "click counter");
+    });
+    test("dwell demo: staying still never repeats the click", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(15000);
+        require(clicksSince(h, mark) == 1, "repeated clicks while stationary");
+    });
+    test("dwell demo: a small movement does not rearm, a deliberate one does", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.quiet(2200);
+        require(clicksSince(h, mark) == 1, "first click");
+        // A nudge inside the lockout radius (1.5 x tolerance) must not rearm.
+        h.run(hold(0, 8, 100));
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 1, "a tiny movement rearmed the dwell");
+        // A deliberate move well outside the radius, then stillness, clicks once more.
+        h.run(hold(0, 70, 600));
+        h.quiet(3000);
+        require(clicksSince(h, mark) == 2, "deliberate movement did not rearm exactly once");
+    });
+    test("dwell demo: excessive movement cancels a running dwell", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900); // inside progress
+        require(h.s().handsFreeStatus().uncalDwellProgress > 0, "dwell not running");
+        const uint32_t before = h.s().selection.cancellations;
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 90, 300));
+        require(h.s().selection.cancellations > before, "movement did not cancel the dwell");
+        require(clicksSince(h, mark) == 0, "click during movement");
+        h.quiet(600);
+        require(clicksSince(h, mark) == 0, "click without a fresh full dwell");
+    });
+    test("dwell demo: a failed release inhibits output and enters recovery", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.transport.failRelease = true;
+        for (unsigned i = 0; i < 300 && h.s().state == SystemState::Active; ++i) {
+            h.tick();
+        }
+        require(h.s().state == SystemState::SafeState, "release failure did not fault");
+        require(!h.s().uncalibratedDemo() && !h.s().uncalibratedDwell(), "demo survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down && h.transport.reports[i].dx == 0,
+                    "output continued after the release failure");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        dwellStart(h);
+        require(!h.s().uncalibratedDwell(), "explicit restart is movement-only first");
+    });
+    test("dwell demo: button, pause, calibration and demo stop each cancel the dwell", [=] {
+        for (int how = 0; how < 4; ++how) {
+            HF h = uncalRig();
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(900);
+            require(h.s().handsFreeStatus().uncalDwellProgress > 0, "dwell not running");
+            const size_t mark = h.transport.reports.size();
+            if (how == 0) {
+                h.sw = true;
+                h.tick(); // physical button: stop at the press edge
+                h.sw = false;
+            } else if (how == 1) {
+                h.s().pause();
+            } else if (how == 2) {
+                h.s().calibrate(h.now);
+            } else {
+                h.s().stopUncalibratedDemo("test");
+            }
+            require(!h.s().uncalibratedDemo() && !h.s().uncalibratedDwell(), "demo still on");
+            require(h.s().handsFreeStatus().uncalDwellProgress == 0, "progress not reset");
+            h.quiet(3000);
+            require(clicksSince(h, mark) == 0, "click after the dwell was cancelled");
+        }
+    });
+    test("dwell demo: invalid samples cancel the dwell and nothing clicks", [=] {
+        for (int kind = 0; kind < 3; ++kind) {
+            HF h = uncalRig();
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(900);
+            const size_t mark = h.transport.reports.size();
+            h.now += 10;
+            MotionSample bad{h.now, {0, 0, 0}, {0, 0, 1}, true};
+            if (kind == 0) {
+                bad.gyro = {NAN, 0, 0};
+            } else if (kind == 1) {
+                bad.valid = false;
+            } else {
+                bad.timestampMs = h.now - 400;
+            }
+            h.s().tick(bad, h.now, false);
+            require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDwell(),
+                    "fault did not stop the dwell");
+            h.quiet(3000);
+            require(clicksSince(h, mark) == 0, "click after an invalid sample");
+        }
+    });
+    test("dwell demo: disconnect and reconnect reset progress and need an explicit restart", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900);
+        const size_t mark = h.transport.reports.size();
+        h.transport.online = false;
+        h.quiet(100);
+        require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDwell(), "not stopped");
+        require(h.s().handsFreeStatus().uncalDwellProgress == 0, "progress survived");
+        h.transport.online = true;
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 0, "click around a disconnect");
+        require(!h.s().uncalibratedDemo(), "reconnect restarted the demo");
+        dwellStart(h);
+        h.quiet(4000);
+        require(clicksSince(h, mark) == 0, "restart clicked before dwell was re-enabled");
+    });
+    test("dwell demo: works with a missing or failed calibration and a corrupt profile", [=] {
+        {
+            HF h = uncalRig(); // missing profile
+            dwellStart(h);
+            dwellOn(h);
+            const size_t mark = h.transport.reports.size();
+            h.quiet(2500);
+            require(clicksSince(h, mark) == 1 && !h.s().hasProfile, "missing profile");
+        }
+        {
+            HF h = uncalRig();
+            h.s().calibrate(h.now);
+            for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+                h.run(hold(0, 40, 100));
+            }
+            require(h.s().calibration.phase == CalPhase::Failed, "precondition");
+            h.quiet(400);
+            dwellStart(h);
+            dwellOn(h);
+            const size_t mark = h.transport.reports.size();
+            h.quiet(2500);
+            require(clicksSince(h, mark) == 1, "failed calibration");
+            require(h.s().calibration.phase == CalPhase::Failed, "calibration result changed");
+        }
+        {
+            HF h(false, EnableKind::Momentary);
+            h.sw = false;
+            require(h.repo.save(UserProfile{}), "save");
+            h.profileStorage.slots[0][20] ^= 0x55;
+            h.profileStorage.slots[1] = h.profileStorage.slots[0];
+            const auto kept = h.profileStorage.slots[0];
+            h.boot();
+            h.quiet(400);
+            dwellStart(h);
+            dwellOn(h);
+            h.quiet(2500);
+            require(h.s().profileState() == ProfileState::Corrupt, "corruption hidden");
+            require(h.profileStorage.slots[0] == kept, "corrupt record rewritten");
+        }
+    });
+    test("dwell demo: no drag, double click, right click or scrolling can come out", [=] {
+        HF h = uncalRig();
+        dwellStart(h);
+        dwellOn(h);
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(2, -90, 1500)); // roll far past the scroll threshold
+        h.quiet(4000);
+        h.run(hold(0, 60, 400));
+        h.quiet(4000);
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            require(r.wheel == 0, "scroll report");
+            if (r.down) {
+                ++downs;
+                require(i + 1 < h.transport.reports.size() && !h.transport.reports[i + 1].down,
+                        "a held button (drag) or double press");
+            }
+        }
+        require(downs >= 1, "expected at least one dwell click");
+        require(clicksSince(h, mark) == downs, "click accounting");
+    });
+    test("dwell demo: settings are validated, RAM only, and restart a running dwell", [=] {
+        HF h = uncalRig();
+        require(!h.s().setUncalibratedDwellSettings(400, 8) &&
+                    !h.s().setUncalibratedDwellSettings(6000, 8) &&
+                    !h.s().setUncalibratedDwellSettings(1200, 1) &&
+                    !h.s().setUncalibratedDwellSettings(1200, NAN),
+                "an out-of-range setting was accepted");
+        dwellStart(h);
+        dwellOn(h);
+        h.quiet(900);
+        require(h.s().setUncalibratedDwellSettings(2000, 12), "valid setting refused");
+        require(h.s().handsFreeStatus().uncalDwellMs == 2000 &&
+                    h.s().handsFreeStatus().uncalDwellTolerance == 12,
+                "settings not reported");
+        require(h.s().handsFreeStatus().uncalDwellProgress == 0, "dwell not restarted");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                "settings were saved");
+        const size_t mark = h.transport.reports.size();
+        h.quiet(1800);
+        require(clicksSince(h, mark) == 0, "clicked before the longer dwell completed");
+        h.quiet(1200);
+        require(clicksSince(h, mark) == 1, "no click after the longer dwell");
+        HF fresh = uncalRig();
+        require(fresh.s().handsFreeStatus().uncalDwellMs == start::uncalDwellMs &&
+                    fresh.s().handsFreeStatus().uncalDwellTolerance == start::uncalDwellTolerance,
+                "defaults are the named START values");
+    });
+
+    // ------------------------------------------------ O: fallback permission and reversal
+    auto permRig = [] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.uncalNeedsEnable = true; // the default for real use: physical enable permission required
+        h.boot();
+        h.quiet(400);
+        return h;
+    };
+    test("fallback: the website start authorises it without the physical button; checks remain", [=] {
+        HF h = permRig(); // configured control would need the button here; the fallback does not
+        require(std::string(h.s().handsFreeStatus().uncalBlocked).empty(),
+                "nothing but the website start should be missing");
+        h.transport.online = false;
+        require(!h.s().startUncalibratedDemo(h.now) &&
+                    std::string(h.s().diagnostics.reason) == "BLE link unavailable",
+                "started without BLE");
+        h.transport.online = true;
+        HF fresh(false, EnableKind::Momentary);
+        fresh.sw = false;
+        fresh.uncalNeedsEnable = true;
+        fresh.boot();
+        require(!fresh.s().startUncalibratedDemo(fresh.now), "started before healthy samples");
+        fresh.s().axes.axes = {0, 0, 0};
+        fresh.quiet(300);
+        require(!fresh.s().startUncalibratedDemo(fresh.now), "started with an invalid mapping");
+        require(h.s().startUncalibratedDemo(h.now), "website start refused");
+        require(h.s().uncalibratedDemo() && !h.s().configuredControl(), "session");
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof buffer, h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"permission\":\"WEBSITE_START\""),
+                "website-start permission must be shown in the status");
+        h.run(hold(0, 60, 300));
+        const float* none = nullptr;
+        (void)none;
+    });
+    test("fallback: the physical button stops it at once and revokes the permission", [=] {
+        HF h = permRig();
+        require(h.s().startUncalibratedDemo(h.now), "start");
+        h.run(hold(0, 60, 300));
+        // the press edge alone, with no further sensor sample, releases and stops
+        h.s().setControlSwitch(true, h.now + 1);
+        require(!h.s().uncalibratedDemo() && h.released(), "not stopped at the press edge");
+        h.s().setControlSwitch(false, h.now + 100);
+        h.quiet(1000);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "the button or the passing of time restarted it");
+        std::array<float, 2> moved{};
+        const size_t mark = h.transport.reports.size();
+        h.run(hold(0, 60, 500));
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            moved[0] += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(moved[0] == 0, "movement after the stop");
+        require(std::string(h.s().handsFreeStatus().uncalPermission) == "NONE", "permission revoked");
+        require(h.s().startUncalibratedDemo(h.now), "another explicit website start works");
+    });
+    test("fallback: a fault or disconnect revokes it; reconnect and reboot never restart it", [=] {
+        HF h = permRig();
+        require(h.s().startUncalibratedDemo(h.now), "start");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        h.quiet(800);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "a fault left or restarted the session");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+        h.transport.online = false;
+        h.quiet(60);
+        require(h.s().state == SystemState::SafeState && !h.s().uncalibratedDemo(), "disconnect");
+        h.transport.online = true;
+        h.quiet(1500);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active,
+                "reconnect restarted it");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart after reconnect");
+        h.boot();
+        h.quiet(600);
+        require(!h.s().uncalibratedDemo() && h.s().state != SystemState::Active, "boot started it");
+        HF g = permRig();
+        g.s().configureEnableInput(false); // no button wired at all
+        require(g.s().startUncalibratedDemo(g.now), "the website start does not need a wired button");
+    });
+    test("fallback: horizontal and vertical reversal flip the pointer, RAM only", [=] {
+        auto move = [&](bool rx, bool ry, unsigned axis, float rate) {
+            HF h = uncalRig();
+            h.s().setUncalibratedReversal(rx, ry);
+            require(h.s().startUncalibratedDemo(h.now), "start");
+            h.quiet(300);
+            const size_t mark = h.transport.reports.size();
+            h.run(hold(axis, rate, 400));
+            float dx = 0, dy = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                dx += h.transport.reports[i].dx;
+                dy += h.transport.reports[i].dy;
+            }
+            return std::array<float, 2>{dx, dy};
+        };
+        const auto plainX = move(false, false, 0, 60), plainY = move(false, false, 1, 60);
+        const auto revX = move(true, false, 0, 60), revY = move(false, true, 1, 60);
+        require(plainX[0] > 5 && revX[0] < -5, "horizontal reversal");
+        require(plainY[1] > 5 && revY[1] < -5, "vertical reversal");
+        const auto mixed = move(true, false, 1, 60); // reversing X must not touch Y
+        require(mixed[1] > 5, "vertical changed by the horizontal setting");
+        HF h = uncalRig();
+        h.s().setUncalibratedReversal(true, true);
+        char buffer[1536];
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"reverseX\":true") && std::strstr(buffer, "\"reverseY\":true"),
+                "reversal not reported");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                "reversal was saved");
+        h.boot();
+        require(!std::strstr(buffer, "\"reverseX\":false"), "sanity");
+        require(handsFreeJson(buffer, sizeof(buffer), h.s().handsFreeStatus()) > 0, "json");
+        require(std::strstr(buffer, "\"reverseX\":false"), "reversal survived a reboot");
+    });
+
+    // ------------------------------------------------ P: guided mapping and configured control
+    // A modelled sensor with a fixed mounting: sensor = mount x body (gyro and gravity).
+    using M3 = std::array<std::array<float, 3>, 3>;
+    const M3 mountIdentity = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    const M3 mountSideways = {{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}}}; // 90 deg about z
+    const M3 mountUpsideDown = {{{1, 0, 0}, {0, -1, 0}, {0, 0, -1}}}; // 180 deg about x
+    auto rawTick = [](HF& h, const M3& m, std::array<float, 3> body) {
+        h.now += 10;
+        h.sys->setControlSwitch(h.sw, h.now);
+        std::array<float, 3> g{}, a{};
+        for (unsigned i = 0; i < 3; ++i) {
+            g[i] = m[i][0] * body[0] + m[i][1] * body[1] + m[i][2] * body[2] + (i == 0 ? -1.2f : 0.f);
+            a[i] = m[i][2]; // gravity along body z
+        }
+        h.sys->tick({h.now, g, a, true}, h.now, false);
+    };
+    auto teachRig = [](bool momentary = false) {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.quiet(400);
+        (void)momentary;
+        return h;
+    };
+    // Runs the whole guided teaching through the System, one half-sine movement per GO cue.
+    auto teachAll = [=](HF& h, const M3& m, const std::function<std::array<float, 3>(int, bool, unsigned)>& body = nullptr) {
+        static const std::array<float, 3> dirs[4] = {{1, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+        require(h.s().teachStart(h.now), "teaching refused");
+        MapCue last = MapCue::None;
+        uint32_t moveStart = 0, moveMs = 600;
+        std::array<float, 3> dir{};
+        unsigned attempt = 0;
+        bool moving = false;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const MappingStatus st = h.s().mappingStatus(h.now);
+            if (st.phase == MapPhase::Preview) {
+                break;
+            }
+            if (st.cue == MapCue::Go && last != MapCue::Go) {
+                ++attempt;
+                dir = body ? body(st.direction, st.validation, attempt) : dirs[st.direction];
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (moving && h.now >= moveStart) {
+                const float t = float(h.now - moveStart) / float(moveMs);
+                if (t > 1) {
+                    moving = false;
+                } else {
+                    const float level = 40.f * std::sin(3.14159265f * t);
+                    b = {dir[0] * level, dir[1] * level, dir[2] * level};
+                }
+            }
+            rawTick(h, m, b);
+        }
+        return h.s().mappingStatus(h.now).phase == MapPhase::Preview;
+    };
+    auto pointerAfter = [=](HF& h, const M3& m, std::array<float, 3> dir) {
+        h.quiet(400);
+        const size_t mark = h.transport.reports.size();
+        for (unsigned i = 0; i < 80; ++i) {
+            const float level = i < 60 ? 40.f * std::sin(3.14159265f * float(i) / 60.f) : 0.f;
+            rawTick(h, m, {dir[0] * level, dir[1] * level, dir[2] * level});
+        }
+        for (unsigned i = 0; i < 60; ++i) {
+            rawTick(h, m, {0, 0, 0});
+        }
+        float dx = 0, dy = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            dx += h.transport.reports[i].dx;
+            dy += h.transport.reports[i].dy;
+        }
+        return std::array<float, 2>{dx, dy};
+    };
+    test("mapping: teaching is explicit, blocked until healthy, and never moves the pointer", [=] {
+        HF fresh(false, EnableKind::Momentary);
+        fresh.sw = false;
+        require(!fresh.s().teachStart(fresh.now), "teaching before healthy samples");
+        HF h = teachRig();
+        h.s().calibrate(h.now);
+        require(!h.s().teachStart(h.now), "teaching during calibration");
+        h.s().cancelCalibration();
+        h.quiet(300);
+        const size_t mark = h.transport.reports.size();
+        require(teachAll(h, mountSideways), "no preview");
+        require(h.s().state == SystemState::Teaching, "state");
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(h.transport.reports[i].dx == 0 && h.transport.reports[i].dy == 0 &&
+                        !h.transport.reports[i].down,
+                    "pointer output while teaching");
+        }
+        require(!h.s().startConfiguredControl(h.now), "control started while teaching");
+        require(!h.s().learnedValid(), "nothing is learned before accepting");
+    });
+    test("mapping: accepted mapping works in RAM for a sideways mounting, all four directions", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways), "no preview");
+        require(h.s().teachAccept(), "accept");
+        require(h.s().state != SystemState::Teaching && h.s().learnedValid(), "state");
+        const MappingStatus st = h.s().mappingStatus(h.now);
+        require(st.unsaved && std::string(st.stored) == "MISSING", "must be reported as unsaved");
+        h.quiet(300);
+        require(!h.s().configuredControl(), "accepting must not start control");
+        require(h.s().startConfiguredControl(h.now), "configured start refused");
+        h.quiet(200);
+        require(std::string(h.s().mappingStatus(h.now).mode) == "CONFIGURED", "mode");
+        const std::array<float, 3> dirs[4] = {{1, 0, 0}, {-1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+        const int wantX[4] = {1, -1, 0, 0}, wantY[4] = {0, 0, -1, 1};
+        for (unsigned d = 0; d < 4; ++d) {
+            const auto moved = pointerAfter(h, mountSideways, dirs[d]);
+            require(moved[0] * float(wantX[d]) + moved[1] * float(wantY[d]) > 6.f, "wrong or no movement");
+            require(std::abs(moved[0] * float(wantY[d])) + std::abs(moved[1] * float(wantX[d])) <
+                        .2f * (std::abs(moved[0]) + std::abs(moved[1])),
+                    "crosstalk");
+        }
+        for (const auto& r : h.transport.reports) {
+            require(!r.down && r.wheel == 0 && std::abs(r.dx) <= start::uncalDemoMaxStep &&
+                        std::abs(r.dy) <= start::uncalDemoMaxStep,
+                    "movement-only bounds");
+        }
+    });
+    test("mapping: upside down also works, and a changed mounting asks to teach again", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountUpsideDown) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        // still upside down: fine
+        for (unsigned i = 0; i < 40; ++i) {
+            rawTick(h, mountUpsideDown, {0, 0, 0});
+        }
+        require(h.s().startConfiguredControl(h.now), "same mounting refused");
+        h.s().stopUncalibratedDemo("test");
+        // now mounted the other way up: gravity direction differs by far more than 25 degrees
+        for (unsigned i = 0; i < 40; ++i) {
+            rawTick(h, mountIdentity, {0, 0, 0});
+        }
+        require(!h.s().startConfiguredControl(h.now), "start allowed after the mounting changed");
+        require(std::string(h.s().diagnostics.reason) == "mounting changed: teach the movements again",
+                "reason");
+    });
+    test("mapping: saving is explicit and transactional; failure keeps RAM use; reboot loads it inactive",
+         [=] {
+             HF h = teachRig();
+             require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+             require(h.controlStorage.slots[0].empty(), "accept must not write storage");
+             h.controlStorage.failWrite = true;
+             require(!h.s().teachSave(), "failed save reported as success");
+             require(std::string(h.s().mappingStatus(h.now).saveResult) == "SAVE_FAILED_RAM_ONLY" &&
+                         h.s().mappingStatus(h.now).unsaved,
+                     "failure must say RAM only");
+             require(h.s().learnedValid(), "settings lost by a failed save");
+             h.quiet(300);
+             require(h.s().startConfiguredControl(h.now), "RAM-only control must still work");
+             require(!h.s().teachSave(), "saving while control is active");
+             h.s().stopUncalibratedDemo("test");
+             h.controlStorage.failWrite = false;
+             require(h.s().teachSave(), "save");
+             require(!h.s().mappingStatus(h.now).unsaved &&
+                         std::string(h.s().mappingStatus(h.now).stored) == "VALID",
+                     "saved status");
+             require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty(),
+                     "the 84-byte profile and the hands-free record must be untouched");
+             h.boot();
+             h.quiet(300);
+             require(h.s().learnedValid() && !h.s().configuredControl(),
+                     "stored mapping loaded but never activated at boot");
+             require(!h.s().mappingStatus(h.now).unsaved, "loaded settings are saved ones");
+         });
+    test("mapping: a corrupt stored record is reported corrupt and never used or overwritten", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept() && h.s().teachSave(), "setup");
+        h.controlStorage.slots[0][12] ^= 0x5a;
+        h.controlStorage.slots[1] = h.controlStorage.slots[0];
+        const auto kept = h.controlStorage.slots[0];
+        h.boot();
+        h.quiet(400);
+        require(!h.s().learnedValid(), "corrupt settings were used");
+        require(std::string(h.s().mappingStatus(h.now).stored) == "CORRUPT", "not reported corrupt");
+        require(h.controlStorage.slots[0] == kept, "the corrupt record was rewritten");
+        require(!h.s().startConfiguredControl(h.now), "configured start with no valid mapping");
+        // the uncalibrated fallback still works
+        require(h.s().startUncalibratedDemo(h.now), "fallback must remain available");
+    });
+    test("mapping: failure, cancel, faults and pauses keep the previous valid settings", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "first teaching");
+        const LearnedControl before = h.s().learned();
+        h.quiet(300);
+        // a cancelled teaching
+        require(h.s().teachStart(h.now), "start");
+        h.quiet(200);
+        h.s().teachCancel();
+        require(h.s().state != SystemState::Teaching && h.s().learned().horizontal == before.horizontal,
+                "cancel changed the settings");
+        // teaching that fails (the user never holds still)
+        require(h.s().teachStart(h.now), "start");
+        for (unsigned i = 0; i < 1200 && h.s().state == SystemState::Teaching; ++i) {
+            rawTick(h, mountIdentity, {(i / 100) % 2 ? 50.f : -50.f, 0, 0});
+        }
+        require(h.s().state != SystemState::Teaching, "teaching should have failed");
+        require(h.s().learnedValid() && h.s().learned().horizontal == before.horizontal &&
+                    std::string(h.s().diagnostics.reason).find("hold still") != std::string::npos,
+                "failure must keep the previous settings and say why");
+        // a disconnect during teaching
+        h.quiet(400);
+        require(h.s().teachStart(h.now), "start");
+        h.transport.online = false;
+        h.quiet(50);
+        require(h.s().state == SystemState::SafeState && h.s().learnedValid(), "disconnect");
+        h.transport.online = true;
+        h.quiet(600);
+        require(h.s().state != SystemState::Teaching, "reconnect resumed teaching");
+        // an invalid sample during teaching
+        h.quiet(400);
+        require(h.s().teachStart(h.now), "start");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        require(h.s().state == SystemState::SafeState && h.s().learnedValid(), "invalid sample");
+    });
+    test("mapping: configured control needs the enable permission and never auto-starts", [=] {
+        HF h(false, EnableKind::Momentary);
+        h.sw = false;
+        h.uncalNeedsEnable = true;
+        h.boot();
+        h.quiet(400);
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        require(!h.s().startConfiguredControl(h.now) &&
+                    std::string(h.s().diagnostics.reason) == "press the enable button first",
+                "started without permission");
+        h.click();
+        h.quiet(300);
+        require(!h.s().configuredControl(), "the press started it");
+        require(h.s().startConfiguredControl(h.now), "start with permission");
+        h.click(); // next press disables
+        require(!h.s().configuredControl() && h.released(), "physical disable");
+        require(h.s().learnedValid(), "settings must survive");
+        h.click();
+        require(h.s().startConfiguredControl(h.now), "restart");
+        h.now += 10;
+        h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+        h.quiet(800);
+        require(!h.s().configuredControl() && h.s().state != SystemState::Active,
+                "a fault must not leave or restart control");
+    });
+    test("mapping: status JSON is complete, bounded and finite", [=] {
+        HF h = teachRig();
+        char buffer[mappingJsonCapacity];
+        require(mappingJson(buffer, sizeof buffer, h.s().mappingStatus(h.now)) > 0, "idle json");
+        require(teachAll(h, mountSideways), "preview");
+        const size_t n = mappingJson(buffer, sizeof buffer, h.s().mappingStatus(h.now));
+        require(n > 100 && n < mappingJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        for (const char* key : {"\"phase\":\"PREVIEW\"", "\"learnedValid\"", "\"unsaved\"", "\"stored\"",
+                                "\"preview\"", "\"retries\"", "\"interruptions\"", "\"reason\""}) {
+            require(std::strstr(buffer, key), key);
+        }
+    });
+
+    // ------------------------------------------------ Q: optional gesture click
+    // Fallback frame: the default axis mapping is the identity in the rig, so the side tilt is axis 2.
+    struct TiltShape {
+        float peak = 60;
+        unsigned ms = 600;
+        std::array<float, 3> axis{0, 0, 1};
+    };
+    auto tiltAt = [](const TiltShape& g, float t) {
+        std::array<float, 3> out{0, 0, 0};
+        if (t >= 0 && t <= float(g.ms)) {
+            const float level = g.peak * std::sin(2 * 3.14159265f * t / float(g.ms));
+            out = {g.axis[0] * level, g.axis[1] * level, g.axis[2] * level};
+        }
+        return out;
+    };
+    auto pointingAt = [](std::mt19937& rng, uint32_t now, uint32_t& until, uint32_t& from,
+                         std::array<float, 3>& dir, float& peak) {
+        std::uniform_real_distribution<float> u(0.f, 1.f);
+        if (now >= until) {
+            from = now;
+            until = now + 400 + unsigned(1200 * u(rng));
+            const float a = 2 * 3.14159265f * u(rng);
+            dir = {std::cos(a), std::sin(a), .2f * (u(rng) - .5f) * 2.f};
+            peak = 15 + 70 * u(rng);
+        }
+        const float level = peak * std::sin(3.14159265f * float(now - from) / float(until - from));
+        return std::array<float, 3>{dir[0] * level, dir[1] * level, dir[2] * level};
+    };
+    // Trains the gesture through the System (cue driven); returns once it is READY.
+    auto clickTrain = [=](HF& h, const M3& m, bool configuredFrame,
+                          const std::function<TiltShape(unsigned)>& shape = nullptr) {
+        require(h.s().clickTrainStart(h.now, configuredFrame), "click training refused");
+        std::mt19937 rng(99);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        ClickCue last = ClickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        TiltShape current;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const ClickStatus st = h.s().clickStatus(h.now);
+            if (st.train.phase == ClickPhase::Ready) {
+                break;
+            }
+            if (st.train.cue == ClickCue::Go && last != ClickCue::Go) {
+                ++attempt;
+                current = shape ? shape(attempt) : TiltShape{};
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.train.cue;
+            std::array<float, 3> body{};
+            if (st.train.phase == ClickPhase::Confusion) {
+                body = pointingAt(rng, h.now, until, from, dir, peak);
+            } else if (moving && h.now >= moveStart) {
+                if (h.now - moveStart > current.ms) {
+                    moving = false;
+                } else {
+                    body = tiltAt(current, float(h.now - moveStart));
+                }
+            }
+            rawTick(h, m, body);
+        }
+        return h.s().clickStatus(h.now).train.phase == ClickPhase::Ready;
+    };
+    auto sessionRig = [=]() {
+        HF h = uncalRig();
+        require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        h.quiet(300);
+        return h;
+    };
+    auto doTilt = [=](HF& h, const TiltShape& shape, unsigned tailMs, const M3* mount = nullptr) {
+        const M3& m = mount ? *mount : mountIdentity;
+        for (unsigned t = 0; t <= shape.ms; t += 10) {
+            rawTick(h, m, tiltAt(shape, float(t)));
+        }
+        for (unsigned t = 0; t < tailMs; t += 10) {
+            rawTick(h, m, {0, 0, 0});
+        }
+    };
+    test("gesture click: off by default, and the pointer never clicks before it is enabled", [=] {
+        HF h = sessionRig();
+        require(!h.s().clickGestureEnabled(), "must start disabled");
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 1000);
+        h.run(hold(0, 60, 500));
+        require(clicksSince(h, mark) == 0, "a click before the gesture was enabled");
+        HF fresh = uncalRig();
+        require(!fresh.s().setClickGesture(true, fresh.now), "enabled without a session");
+        require(clickTrain(fresh, mountIdentity, false) && fresh.s().clickTrainAccept(), "train");
+        require(!fresh.s().setClickGesture(true, fresh.now), "enabled without a running session");
+        require(fresh.s().startUncalibratedDemo(fresh.now), "session");
+        require(fresh.s().setClickGesture(true, fresh.now), "enable refused after training");
+    });
+    test("gesture click: one press and release per gesture, pointer held still during the candidate", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 500);
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not sent last");
+        unsigned downs = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            if (r.down) {
+                ++downs;
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click");
+            }
+            require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "pointer moved during the gesture");
+        }
+        require(downs == 1 && h.s().handsFreeStatus().uncalClicks == 1, "one press only");
+        require(h.s().clickStatus(h.now).accepted == 1, "accepted counter");
+    });
+    test("gesture click: yaw leaking into the gesture is suppressed and never replayed", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        TiltShape leaky; // the same side tilt, with real pointer-moving motion mixed in
+        leaky.axis = {.2f, 0, 1};
+        leaky.peak = 60;
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, leaky, 160); // through the click, before recovery would matter
+        float during = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            during += std::abs(float(h.transport.reports[i].dx));
+        }
+        h.quiet(1500);
+        float after = 0;
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            after += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(h.s().clickStatus(h.now).candidates >= 1, "the gesture should have opened a candidate");
+        require(clicksSince(h, mark) <= 1, "at most one click");
+        require(during <= 4.f, "the pointer moved while a candidate was open");
+        require(after - during <= 1.f, "suppressed movement was replayed afterwards");
+        // control: the same yaw WITHOUT the gesture does move the pointer
+        HF g = sessionRig();
+        const size_t markG = g.transport.reports.size();
+        g.run(hold(0, 27, 600));
+        float moved = 0;
+        for (size_t i = markG; i < g.transport.reports.size(); ++i) {
+            moved += std::abs(float(g.transport.reports[i].dx));
+        }
+        require(moved > 20.f, "precondition: that yaw moves the pointer");
+    });
+    test("gesture click: no second click while still, rearming needs a neutral stretch", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 250);
+        doTilt(h, TiltShape{}, 100); // immediately again: still locked out
+        h.quiet(20000);
+        require(clicksSince(h, mark) == 1, "repeat or early second click");
+        doTilt(h, TiltShape{}, 700);
+        require(clicksSince(h, mark) == 2, "rearmed after neutral");
+    });
+    test("gesture click: ordinary pointing never clicks, weak or wrong gestures never click", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        std::mt19937 rng(5);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        for (unsigned i = 0; i < 30000; ++i) {
+            rawTick(h, mountIdentity, pointingAt(rng, h.now, until, from, dir, peak));
+        }
+        require(clicksSince(h, mark) == 0, "false click while pointing");
+        require(h.s().uncalibratedDemo(), "pointing must not stop the session");
+        TiltShape weak;
+        weak.peak = 18;
+        TiltShape yaw;
+        yaw.axis = {1, 0, 0};
+        TiltShape reversed;
+        reversed.peak = -60;
+        for (const TiltShape& g : {weak, yaw, reversed}) {
+            const size_t before = h.transport.reports.size();
+            doTilt(h, g, 900);
+            require(clicksSince(h, before) == 0, "a wrong gesture clicked");
+        }
+    });
+    test("gesture click: a release failure faults, stops the session and disables the gesture", [=] {
+        HF h = sessionRig();
+        require(h.s().setClickGesture(true, h.now), "enable");
+        h.quiet(700);
+        const uint32_t faultsBefore = h.s().diagnostics.faults;
+        h.transport.failRelease = true;
+        doTilt(h, TiltShape{}, 170); // calm for 150 ms accepts it; recovery needs 200 ms more
+        require(h.s().state == SystemState::SafeState &&
+                    h.s().diagnostics.faults == faultsBefore + 1,
+                "no fault after a failed release");
+        require(!h.s().uncalibratedDemo() && !h.s().clickGestureEnabled(), "session survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        doTilt(h, TiltShape{}, 900);
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "output continued after the fault");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+        require(!h.s().clickGestureEnabled(), "gesture must be re-enabled explicitly");
+    });
+    test("gesture click: button, invalid sample, disconnect and pause cancel a candidate", [=] {
+        for (int how = 0; how < 4; ++how) {
+            HF h = sessionRig();
+            require(h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            for (unsigned t = 0; t <= 250; t += 10) {
+                rawTick(h, mountIdentity, tiltAt(TiltShape{}, float(t)));
+            }
+            require(h.s().clickStatus(h.now).suppressing, "candidate not open");
+            if (how == 0) {
+                h.sw = true;
+                h.tick();
+                h.sw = false;
+            } else if (how == 1) {
+                h.now += 10;
+                h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+            } else if (how == 2) {
+                h.transport.online = false;
+                h.quiet(50);
+            } else {
+                h.s().pause();
+            }
+            require(!h.s().clickGestureEnabled() && !h.s().uncalibratedDemo(), "still enabled");
+            h.transport.online = true;
+            h.quiet(1500);
+            for (unsigned t = 250; t <= 600; t += 10) {
+                rawTick(h, mountIdentity, tiltAt(TiltShape{}, float(t)));
+            }
+            h.quiet(900);
+            require(clicksSince(h, mark) == 0, "click after a cancelled candidate");
+        }
+    });
+    test("gesture click: works with a missing or failed calibration and a corrupt profile", [=] {
+        {
+            HF h = sessionRig(); // missing profile (uncalRig)
+            require(h.s().setClickGesture(true, h.now) && !h.s().hasProfile, "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1, "missing profile");
+        }
+        {
+            HF h = uncalRig();
+            h.s().calibrate(h.now);
+            for (int i = 0; i < 1000 && h.s().calibration.phase != CalPhase::Failed; ++i) {
+                h.run(hold(0, 40, 100));
+            }
+            h.quiet(400);
+            require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+            h.quiet(300);
+            require(h.s().startUncalibratedDemo(h.now) && h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1 && h.s().calibration.phase == CalPhase::Failed,
+                    "failed calibration");
+        }
+        {
+            HF h(false, EnableKind::Momentary);
+            h.sw = false;
+            require(h.repo.save(UserProfile{}), "save");
+            h.profileStorage.slots[0][20] ^= 0x55;
+            h.profileStorage.slots[1] = h.profileStorage.slots[0];
+            const auto kept = h.profileStorage.slots[0];
+            h.boot();
+            h.quiet(400);
+            require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "train");
+            h.quiet(300);
+            require(h.s().startUncalibratedDemo(h.now) && h.s().setClickGesture(true, h.now), "enable");
+            h.quiet(700);
+            const size_t mark = h.transport.reports.size();
+            doTilt(h, TiltShape{}, 500);
+            require(clicksSince(h, mark) == 1, "corrupt profile");
+            require(h.s().profileState() == ProfileState::Corrupt && h.profileStorage.slots[0] == kept,
+                    "corrupt record must stay reported and untouched");
+        }
+    });
+    test("gesture click: a gesture is bound to the frame it was taught in; relearning invalidates it", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "mapping");
+        h.quiet(300);
+        require(clickTrain(h, mountSideways, true) && h.s().clickTrainAccept(), "train (configured)");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "fallback session");
+        require(!h.s().setClickGesture(true, h.now) &&
+                    std::string(h.s().diagnostics.reason).find("configured") != std::string::npos,
+                "a configured-frame gesture must not enable in the fallback");
+        h.s().stopUncalibratedDemo("test");
+        h.quiet(300);
+        require(h.s().startConfiguredControl(h.now) && h.s().setClickGesture(true, h.now), "configured");
+        h.quiet(700);
+        const size_t mark = h.transport.reports.size();
+        // the body gesture is a side tilt; in the configured frame that is the third row
+        doTilt(h, TiltShape{}, 500, &mountSideways);
+        require(clicksSince(h, mark) == 1, "configured gesture click");
+        h.s().stopUncalibratedDemo("test");
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "relearn");
+        require(!h.s().clickStatus(h.now).ready, "a gesture from the old learned frame survived");
+        HF g = teachRig();
+        require(!g.s().clickTrainStart(g.now, true), "configured gesture needs a learned mapping");
+    });
+    test("gesture click: training failures keep the previous gesture; status JSON is bounded", [=] {
+        HF h = sessionRig();
+        require(h.s().clickStatus(h.now).ready, "precondition");
+        h.s().stopUncalibratedDemo("test");
+        h.quiet(300);
+        require(h.s().clickTrainStart(h.now, false), "start");
+        for (unsigned i = 0; i < 1000 && h.s().state == SystemState::Teaching; ++i) {
+            rawTick(h, mountIdentity, {(i / 40) % 2 ? 40.f : -40.f, 0, 0});
+        }
+        require(h.s().state != SystemState::Teaching && h.s().clickStatus(h.now).ready,
+                "a failed training must keep the previous gesture");
+        require(h.s().clickTrainStart(h.now, false), "restart");
+        h.s().clickTrainCancel();
+        require(h.s().state != SystemState::Teaching && h.s().clickStatus(h.now).ready, "cancel");
+        char buffer[clickJsonCapacity];
+        const size_t n = clickJson(buffer, sizeof buffer, h.s().clickStatus(h.now));
+        require(n > 100 && n < clickJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        h.s().clickClear();
+        require(!h.s().clickStatus(h.now).ready, "forget");
+    });
+
+    test("mapping: ordinary head tilt never blocks or stops configured control; gross remounts do", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountIdentity) && h.s().teachAccept(), "teach");
+        h.quiet(300);
+        auto tilted = [&](float degrees, const std::array<float, 3>& about) {
+            // gravity (0,0,1) rotated by `degrees` about `about` (a unit axis)
+            const float t = degrees * 3.14159265f / 180.f, c = std::cos(t), sn = std::sin(t);
+            const std::array<float, 3> v{0, 0, 1};
+            const std::array<float, 3> cross{about[1] * v[2] - about[2] * v[1],
+                                             about[2] * v[0] - about[0] * v[2],
+                                             about[0] * v[1] - about[1] * v[0]};
+            const float d = about[0] * v[0] + about[1] * v[1] + about[2] * v[2];
+            std::array<float, 3> a{};
+            for (unsigned i = 0; i < 3; ++i) {
+                a[i] = v[i] * c + cross[i] * sn + about[i] * d * (1 - c);
+            }
+            for (unsigned i = 0; i < 40; ++i) {
+                h.now += 10;
+                h.sys->setControlSwitch(h.sw, h.now);
+                h.sys->tick({h.now, {-1.2f, 0, 0}, a, true}, h.now, false);
+            }
+        };
+        for (float deg : {20.f, 40.f, 60.f, 70.f}) { // nod / lean / tilt: ordinary head movement
+            tilted(deg, {1, 0, 0});
+            require(h.s().startConfiguredControl(h.now), "ordinary head tilt blocked a start");
+            h.s().stopUncalibratedDemo("test");
+            tilted(deg, {0, 1, 0});
+            require(h.s().startConfiguredControl(h.now), "ordinary sideways head tilt blocked a start");
+            h.s().stopUncalibratedDemo("test");
+        }
+        tilted(40.f, {1, 0, 0});
+        require(h.s().mappingStatus(h.now).mountingWarning, "a large tilt should show a warning");
+        tilted(0.f, {1, 0, 0});
+        require(!h.s().mappingStatus(h.now).mountingWarning, "no warning at the taught posture");
+        // a running session keeps the mapping through head movement (the guard is a start check only)
+        require(h.s().startConfiguredControl(h.now), "start");
+        tilted(60.f, {1, 0, 0});
+        tilted(0.f, {0, 1, 0});
+        require(h.s().configuredControl(), "head movement stopped the session");
+        h.s().stopUncalibratedDemo("test");
+        // gross re-orientation (the board flipped over): blocked
+        tilted(110.f, {1, 0, 0});
+        require(!h.s().startConfiguredControl(h.now) &&
+                    std::string(h.s().diagnostics.reason) ==
+                        "mounting changed: teach the movements again",
+                "a flipped sensor must be refused");
+        tilted(0.f, {1, 0, 0});
+        // KNOWN LIMIT: a turn about the gravity axis is not visible in the gravity direction at all.
+        // (Here: gravity along the z axis, the board turned about z: the accelerometer reading is the
+        // same, but left/right/up/down no longer match the taught gyro axes.)
+        tilted(90.f, {0, 0, 1});
+        require(h.s().startConfiguredControl(h.now),
+                "documented limit: a turn about the gravity axis cannot be detected");
+    });
+
+    // ------------------------------------------------ R: EXPERIMENTAL quick tilt-and-return click
+    struct Tilt {
+        std::array<float, 3> dir{0, 0, 1};
+        float excursionDeg = 13.f;
+        unsigned ms = 600;
+        float returnFrac = 1.f;
+    };
+    auto tiltRate = [](const Tilt& g, float t) {
+        std::array<float, 3> out{0, 0, 0};
+        if (t < 0 || t > float(g.ms)) {
+            return out;
+        }
+        const float half = float(g.ms) / 2.f;
+        const float amp = g.excursionDeg * 3.14159265f / (half / 1000.f) / 2.f;
+        const float level = t < half ? amp * std::sin(3.14159265f * t / half)
+                                     : -g.returnFrac * amp * std::sin(3.14159265f * (t - half) / half);
+        return std::array<float, 3>{g.dir[0] * level, g.dir[1] * level, g.dir[2] * level};
+    };
+    // cue-driven practice through the System; ends in the preview
+    auto quickPractice = [=](HF& h, const M3& m, bool configuredFrame,
+                             const std::function<Tilt(unsigned)>& shape = nullptr) {
+        require(h.s().quickPracticeStart(h.now, configuredFrame), "practice refused");
+        QuickCue last = QuickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        Tilt current;
+        std::mt19937 pointRng(31);
+        uint32_t pointUntil = 0, pointFrom = 0;
+        std::array<float, 3> pointDir{1, 0, 0};
+        float pointPeak = 30;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const QuickStatus st = h.s().quickStatus(h.now);
+            if (st.phase == QuickPhase::Preview) {
+                break;
+            }
+            if (st.cue == QuickCue::Go && last != QuickCue::Go) {
+                ++attempt;
+                current = shape ? shape(attempt) : Tilt{};
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (st.phase == QuickPhase::Pointing) {
+                // the measured ordinary-pointing sample: yaw/pitch sweeps in random directions
+                b = pointingAt(pointRng, h.now, pointUntil, pointFrom, pointDir, pointPeak);
+            } else if (moving && h.now >= moveStart) {
+                if (h.now - moveStart > current.ms) {
+                    moving = false;
+                } else {
+                    b = tiltRate(current, float(h.now - moveStart));
+                }
+            }
+            rawTick(h, m, b);
+        }
+        return h.s().quickStatus(h.now).phase == QuickPhase::Preview;
+    };
+    auto quickSession = [=]() {
+        HF h = uncalRig();
+        require(quickPractice(h, mountIdentity, false) && h.s().quickPracticeAccept(), "practice");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        h.quiet(300);
+        return h;
+    };
+    auto doQuick = [=](HF& h, const Tilt& g, unsigned tailMs, const M3* mount = nullptr) {
+        const M3& m = mount ? *mount : mountIdentity;
+        for (unsigned t = 0; t <= g.ms; t += 10) {
+            rawTick(h, m, tiltRate(g, float(t)));
+        }
+        for (unsigned t = 0; t < tailMs; t += 10) {
+            rawTick(h, m, {0, 0, 0});
+        }
+    };
+    test("quick gesture: off by default; practice needs no saved profile; enabling is explicit", [=] {
+        HF h = quickSession();
+        require(!h.s().quickGestureEnabled(), "must start disabled");
+        require(h.profileStorage.read(0).empty() && h.configStorage.slots[0].empty() &&
+                    h.controlStorage.slots[0].empty(),
+                "practice must not write any storage");
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 1000);
+        require(clicksSince(h, mark) == 0, "a click before the gesture was enabled");
+        HF fresh = uncalRig();
+        require(!fresh.s().setQuickGesture(true, fresh.now), "enabled without practice or session");
+        require(quickPractice(fresh, mountIdentity, false) && fresh.s().quickPracticeAccept(), "p");
+        require(!fresh.s().setQuickGesture(true, fresh.now), "enabled without a running session");
+        require(fresh.s().startUncalibratedDemo(fresh.now), "session");
+        require(fresh.s().setQuickGesture(true, fresh.now), "enable refused after practice");
+        require(h.s().quickStatus(h.now).ready && !h.s().quickStatus(h.now).enabled, "status");
+    });
+    test("quick gesture: an ambiguous practice is explained and never silently enabled", [=] {
+        HF h = uncalRig();
+        auto shape = [](unsigned attempt) {
+            Tilt g;
+            if (attempt == 1) {
+                g.excursionDeg = 3; // tiny
+            } else if (attempt == 2) {
+                g.dir = {1, 0, 0}; // a pointing movement
+            }
+            return g;
+        };
+        std::string seen;
+        std::mt19937 prng(77);
+        uint32_t puntil = 0, pfrom = 0;
+        std::array<float, 3> pdir{1, 0, 0};
+        float ppeak = 30;
+        require(h.s().quickPracticeStart(h.now, false), "start");
+        QuickCue last = QuickCue::None;
+        unsigned attempt = 0;
+        bool moving = false;
+        uint32_t moveStart = 0;
+        Tilt cur;
+        for (unsigned i = 0; i < 40000 && h.s().state == SystemState::Teaching; ++i) {
+            const QuickStatus st = h.s().quickStatus(h.now);
+            seen += std::string(st.reason) + "|";
+            if (st.phase == QuickPhase::Preview) {
+                break;
+            }
+            if (st.cue == QuickCue::Go && last != QuickCue::Go) {
+                cur = shape(++attempt);
+                moving = true;
+                moveStart = h.now + 300;
+            }
+            last = st.cue;
+            std::array<float, 3> b{};
+            if (st.phase == QuickPhase::Pointing) {
+                b = pointingAt(prng, h.now, puntil, pfrom, pdir, ppeak);
+            } else if (moving && h.now >= moveStart && h.now - moveStart <= cur.ms) {
+                b = tiltRate(cur, float(h.now - moveStart));
+            }
+            rawTick(h, mountIdentity, b);
+        }
+        require(seen.find("too small") != std::string::npos, "tiny tilt not explained");
+        require(seen.find("ordinary pointing") != std::string::npos, "pointing-like tilt not explained");
+        require(!h.s().quickStatus(h.now).ready, "ready before the practice was accepted");
+        require(h.s().quickStatus(h.now).phase == QuickPhase::Preview, "recovered on the third tilt");
+    });
+    test("quick gesture: one press and release, pointer frozen during the candidate, nothing replayed", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        Tilt leaky;
+        leaky.dir = {.2f, 0, .98f}; // a tilt with some yaw in it: pointer-moving, but still a tilt
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, leaky, 300);
+        h.quiet(1500);
+        require(clicksSince(h, mark) == 1, "not exactly one click");
+        require(h.released(), "the release was not sent last");
+        float during = 0, total = 0;
+        unsigned downs = 0;
+        size_t clickAt = h.transport.reports.size();
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            const auto& r = h.transport.reports[i];
+            total += std::abs(float(r.dx)) + std::abs(float(r.dy));
+            if (r.down) {
+                ++downs;
+                clickAt = std::min(clickAt, i);
+                require(r.dx == 0 && r.dy == 0 && r.wheel == 0, "movement inside the click report");
+            }
+        }
+        for (size_t i = mark; i < clickAt; ++i) {
+            during += std::abs(float(h.transport.reports[i].dx));
+        }
+        require(downs == 1, "one press report only");
+        // Before candidate detection nothing can be undone; once it opens, movement is discarded.
+        require(total <= 12.f, "the pointer jumped around the gesture (frozen movement replayed?)");
+        const QuickStatus st = h.s().quickStatus(h.now);
+        require(st.accepted == 1 && st.suppressedMs > 300 && st.lastDurationMs > 400,
+                "accepted/suppressed/duration must be reported");
+        require(st.lastExcursionDeg > 8.f, "excursion must be reported");
+        (void)during;
+        // control: the same yaw alone (no gesture) DOES move the pointer
+        HF g = quickSession();
+        const size_t markG = g.transport.reports.size();
+        g.run(hold(0, 20, 600));
+        float moved = 0;
+        for (size_t i = markG; i < g.transport.reports.size(); ++i) {
+            moved += std::abs(float(g.transport.reports[i].dx));
+        }
+        require(moved > 15.f, "precondition: yaw moves the pointer");
+    });
+    test("quick gesture: no repeat while still, a fresh neutral period and the interval rearm it", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 250);
+        doQuick(h, Tilt{}, 100); // immediately again: not armed
+        h.quiet(20000);
+        require(clicksSince(h, mark) == 1, "repeat or early second click");
+        doQuick(h, Tilt{}, 400);
+        require(clicksSince(h, mark) == 2, "rearmed after neutral and the minimum interval");
+    });
+    test("quick gesture: ordinary pointing, reversals and tremor never click", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        std::mt19937 rng(12);
+        std::uniform_real_distribution<float> u(0.f, 1.f);
+        uint32_t until = 0, from = 0;
+        std::array<float, 3> dir{1, 0, 0};
+        float peak = 30;
+        bool reversal = false;
+        for (unsigned i = 0; i < 30000; ++i) { // 300 s
+            if (h.now >= until) {
+                from = h.now;
+                until = from + 250 + unsigned(1200 * u(rng));
+                const float a = 2 * 3.14159265f * u(rng);
+                dir = {std::cos(a), std::sin(a), .25f * (u(rng) - .5f) * 2.f};
+                peak = 15 + 90 * u(rng);
+                reversal = u(rng) < .3f;
+            }
+            const float x = float(h.now - from) / float(until - from);
+            const float level = reversal ? peak * std::sin(2 * 3.14159265f * x)
+                                         : peak * std::sin(3.14159265f * x);
+            const float tremor = 4.f * std::sin(2 * 3.14159265f * 9.f * float(h.now) / 1000.f);
+            rawTick(h, mountIdentity, {dir[0] * level + tremor, dir[1] * level + tremor, dir[2] * level + tremor});
+        }
+        const QuickStatus st = h.s().quickStatus(h.now);
+        std::printf("INFO synthetic (System): 300 s of pointing: %lu clicks, %lu candidates, %lu ms suppressed\n",
+                    static_cast<unsigned long>(clicksSince(h, mark)), static_cast<unsigned long>(st.candidates),
+                    static_cast<unsigned long>(st.suppressedMs));
+        require(clicksSince(h, mark) == 0, "false click while pointing");
+        require(h.s().uncalibratedDemo(), "pointing must not stop the session");
+    });
+    test("quick gesture: a release failure faults, stops the session and disables it", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const uint32_t faultsBefore = h.s().diagnostics.faults;
+        h.transport.failRelease = true;
+        doQuick(h, Tilt{}, 170); // settled confirmation at 150 ms; recovery needs 200 ms more
+        require(h.s().state == SystemState::SafeState && h.s().diagnostics.faults == faultsBefore + 1,
+                "no fault after a failed release");
+        require(!h.s().uncalibratedDemo() && !h.s().quickGestureEnabled(), "session survived");
+        h.transport.failRelease = false;
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 900);
+        for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+            require(!h.transport.reports[i].down, "output continued after the fault");
+        }
+        h.quiet(600);
+        require(h.s().state != SystemState::Active, "recovery restarted control");
+        require(h.s().startUncalibratedDemo(h.now) && !h.s().quickGestureEnabled(),
+                "an explicit restart must come back with the gesture off");
+    });
+    test("quick gesture: button, website stop, fault, disconnect, calibration and practice cancel it", [=] {
+        for (int how = 0; how < 7; ++how) {
+            HF h = quickSession();
+            require(h.s().setQuickGesture(true, h.now), "enable");
+            h.quiet(800);
+            const size_t mark = h.transport.reports.size();
+            for (unsigned t = 0; t <= 250; t += 10) {
+                rawTick(h, mountIdentity, tiltRate(Tilt{}, float(t)));
+            }
+            require(h.s().quickStatus(h.now).suppressing, "candidate not open");
+            if (how == 0) {
+                h.sw = true;
+                h.tick();
+                h.sw = false;
+            } else if (how == 1) {
+                h.s().stopUncalibratedDemo("website stop");
+            } else if (how == 2) {
+                h.now += 10;
+                h.s().tick({h.now, {NAN, 0, 0}, {0, 0, 1}, true}, h.now, false);
+            } else if (how == 3) {
+                h.transport.online = false;
+                h.quiet(50);
+            } else if (how == 4) {
+                h.s().calibrate(h.now);
+            } else if (how == 5) {
+                h.s().quickPracticeStart(h.now, false);
+            } else {
+                h.s().pause();
+            }
+            require(!h.s().quickGestureEnabled() && !h.s().uncalibratedDemo(), "still enabled");
+            h.transport.online = true;
+            h.s().cancelCalibration();
+            h.s().quickPracticeCancel();
+            h.quiet(1500);
+            for (unsigned t = 250; t <= 600; t += 10) {
+                rawTick(h, mountIdentity, tiltRate(Tilt{}, float(t)));
+            }
+            h.quiet(900);
+            require(clicksSince(h, mark) == 0, "a click after a cancelled candidate");
+            require(h.s().state != SystemState::Active, "something restarted control");
+        }
+    });
+    test("quick gesture: a reboot or a mode change never leaves it enabled", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.boot();
+        h.quiet(600);
+        require(!h.s().quickGestureEnabled() && !h.s().quickStatus(h.now).ready,
+                "a reboot kept the gesture or its practice (RAM only)");
+        HF g = teachRig();
+        require(teachAll(g, mountSideways) && g.s().teachAccept(), "mapping");
+        g.quiet(300);
+        require(quickPractice(g, mountSideways, true) && g.s().quickPracticeAccept(), "configured practice");
+        g.quiet(300);
+        require(g.s().startConfiguredControl(g.now) && g.s().setQuickGesture(true, g.now), "configured");
+        g.s().stopUncalibratedDemo("mode change");
+        require(g.s().startUncalibratedDemo(g.now), "fallback session");
+        require(!g.s().quickGestureEnabled(), "the gesture survived a mode change");
+        require(!g.s().setQuickGesture(true, g.now) &&
+                    std::string(g.s().diagnostics.reason).find("configured") != std::string::npos,
+                "a configured practice must not enable in the fallback");
+    });
+    test("quick gesture: mutually exclusive with dwell and the trained gesture", [=] {
+        HF h = quickSession();
+        h.s().stopUncalibratedDemo("test");
+        require(clickTrain(h, mountIdentity, false) && h.s().clickTrainAccept(), "trained gesture");
+        h.quiet(300);
+        require(h.s().startUncalibratedDemo(h.now), "session");
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell on");
+        require(h.s().setQuickGesture(true, h.now), "quick on");
+        require(!h.s().handsFreeStatus().uncalDwellEnabled && h.s().quickGestureEnabled(),
+                "enabling the quick gesture must turn dwell off");
+        require(h.s().setUncalibratedDwell(true, h.now), "dwell on again");
+        require(!h.s().quickGestureEnabled(), "enabling dwell must turn the quick gesture off");
+        require(h.s().setQuickGesture(true, h.now) && h.s().setClickGesture(true, h.now),
+                "enabling the trained gesture");
+        require(!h.s().quickGestureEnabled() && h.s().clickGestureEnabled(),
+                "the trained gesture must turn the quick one off");
+        require(h.s().setQuickGesture(true, h.now) && !h.s().clickGestureEnabled(),
+                "and vice versa");
+    });
+    test("quick gesture: works in configured pointing for a rotated mounting, no saved profile", [=] {
+        HF h = teachRig();
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "mapping");
+        h.quiet(300);
+        require(quickPractice(h, mountSideways, true) && h.s().quickPracticeAccept(), "practice");
+        h.quiet(300);
+        require(h.s().startConfiguredControl(h.now) && h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 400, &mountSideways);
+        require(clicksSince(h, mark) == 1, "configured quick click");
+        require(h.profileStorage.read(0).empty() && h.controlStorage.slots[0].empty(),
+                "nothing may be saved by the practice");
+        h.s().stopUncalibratedDemo("test");
+        require(teachAll(h, mountSideways) && h.s().teachAccept(), "relearn");
+        require(!h.s().quickStatus(h.now).ready, "a practice from the old learned frame survived");
+    });
+    test("quick gesture: settings are validated and shown; status JSON is bounded", [=] {
+        HF h = quickSession();
+        require(!h.s().setQuickSettings(.4f, .35f) && !h.s().setQuickSettings(1.f, .7f) &&
+                    !h.s().setQuickSettings(NAN, .3f) && !h.s().setQuickSettings(1.f, .1f),
+                "an invalid setting was accepted");
+        require(h.s().setQuickSettings(1.5f, .25f), "valid setting refused");
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        const QuickStatus st = h.s().quickStatus(h.now);
+        require(std::abs(st.sensitivity - 1.5f) < .001f && std::abs(st.returnTolerance - .25f) < .001f,
+                "settings not reported");
+        char buffer[quickJsonCapacity];
+        const size_t n = quickJson(buffer, sizeof buffer, st);
+        require(n > 100 && n < quickJsonCapacity * 3 / 4, "length headroom");
+        for (const char* bad : {"nan", "inf", "null"}) {
+            require(!std::strstr(buffer, bad), "non-finite token");
+        }
+        for (const char* key : {"\"state\":\"", "\"suppressedMs\"", "\"lastReject\"", "\"excursion\"",
+                                "\"residual\"", "\"durationMs\"", "\"sensitivity\""}) {
+            require(std::strstr(buffer, key), key);
+        }
+    });
+
+    test("quick gesture: movements outside the designated direction keep pointing normally, unsuppressed", [=] {
+        HF h = quickSession();
+        require(h.s().setQuickGesture(true, h.now), "enable");
+        h.quiet(800);
+        auto movedAndStatus = [&](const std::function<void()>& move) {
+            const size_t mark = h.transport.reports.size();
+            const uint32_t suppressedBefore = h.s().quickStatus(h.now).suppressedMs;
+            const uint32_t candidatesBefore = h.s().quickStatus(h.now).candidates;
+            move();
+            float moved = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                moved += std::abs(float(h.transport.reports[i].dx)) + std::abs(float(h.transport.reports[i].dy));
+            }
+            const QuickStatus st = h.s().quickStatus(h.now);
+            require(st.suppressedMs == suppressedBefore && st.candidates == candidatesBefore,
+                    "the pointer was suppressed for a movement outside the designated direction");
+            return moved;
+        };
+        // ordinary pointing: yaw, pitch and diagonals
+        require(movedAndStatus([&] { h.run(hold(0, 60, 500)); h.quiet(500); }) > 20.f, "yaw did not point");
+        require(movedAndStatus([&] { h.run(hold(1, 60, 500)); h.quiet(500); }) > 20.f, "pitch did not point");
+        // the OPPOSITE tilt (with some yaw so the pointer would move) must not freeze the pointer
+        Tilt opposite;
+        opposite.dir = {.3f, 0, -.95f};
+        opposite.excursionDeg = 20.f;
+        require(movedAndStatus([&] { doQuick(h, opposite, 500); }) > 5.f,
+                "the opposite tilt was not treated as normal pointing");
+        // a perpendicular tilt (about the pitch axis)
+        Tilt perpendicular;
+        perpendicular.dir = {.2f, .97f, 0};
+        require(movedAndStatus([&] { doQuick(h, perpendicular, 500); }) > 5.f,
+                "a perpendicular movement was not treated as normal pointing");
+        require(h.s().quickStatus(h.now).clicks == 0, "a click from non-designated movement");
+        // while the designated tilt still works afterwards
+        const size_t mark = h.transport.reports.size();
+        doQuick(h, Tilt{}, 700);
+        require(clicksSince(h, mark) == 1, "the designated gesture stopped working");
+    });
+    test("quick gesture: deviation after the candidate began cancels it; pointing resumes, nothing replays", [=] {
+        auto run = [&](bool quick) {
+            HF h = quickSession();
+            if (quick) {
+                require(h.s().setQuickGesture(true, h.now), "enable");
+            }
+            h.quiet(800);
+            Tilt drifting;
+            const size_t mark = h.transport.reports.size();
+            // an aligned start, then a strong sideways drift (a pointing move) that never returns
+            for (unsigned t = 0; t <= 900; t += 10) {
+                auto b = tiltRate(drifting, float(t));
+                if (t >= 100) {
+                    b[0] += 30.f; // a strong yaw: the user starts pointing instead
+                }
+                rawTick(h, mountIdentity, b);
+            }
+            h.quiet(300);
+            float moved = 0, biggest = 0;
+            for (size_t i = mark; i < h.transport.reports.size(); ++i) {
+                const float step = std::abs(float(h.transport.reports[i].dx));
+                moved += step;
+                biggest = std::max(biggest, step);
+            }
+            return std::array<float, 4>{moved, biggest, float(clicksSince(h, mark)),
+                                        float(h.s().quickStatus(h.now).rejected)};
+        };
+        const auto control = run(false), gated = run(true);
+        require(gated[2] == 0, "clicked after a deviating gesture");
+        require(gated[3] >= 1, "the candidate should have been rejected");
+        require(gated[0] > 5.f, "pointing must resume after the cancel");
+        require(gated[0] <= control[0] + 1.f, "frozen movement was replayed");
+        require(gated[1] <= start::uncalDemoMaxStep, "a jump after the cancel");
+        require(gated[0] < control[0], "the frozen part of the movement must be discarded");
+    });
+    test("quick gesture: the designated direction changes only through another practice", [=] {
+        HF h = quickSession();
+        const QuickStatus first = h.s().quickStatus(h.now);
+        require(first.designated && std::abs(first.direction[2]) > .9f, "direction not reported");
+        require(h.s().setQuickSettings(1.f, .35f, 45.f) &&
+                    std::abs(h.s().quickStatus(h.now).directionToleranceDeg - 45.f) < .01f,
+                "the angular tolerance is a validated setting");
+        require(!h.s().setQuickSettings(1.f, .35f, 5.f) && !h.s().setQuickSettings(1.f, .35f, 75.f),
+                "an out-of-range angle was accepted");
+        const auto kept = h.s().quickStatus(h.now).direction;
+        require(h.s().quickStatus(h.now).direction == kept, "settings must not change the direction");
+        h.s().stopUncalibratedDemo("test");
+        // practise a DIFFERENT direction (a tilt with a large yaw-free component along axis 1 is a
+        // pointing move, so use another out-of-plane direction)
+        require(quickPractice(h, mountIdentity, false, [](unsigned) {
+                    Tilt g;
+                    g.dir = {.35f, .2f, -.91f};
+                    return g;
+                }) && h.s().quickPracticeAccept(),
+                "second practice");
+        const QuickStatus second = h.s().quickStatus(h.now);
+        require(second.designated && second.direction[2] < -.6f && first.direction[2] > .6f,
+                "the new practice must replace the designated direction (and its sign)");
+        h.s().quickClear();
+        require(!h.s().quickStatus(h.now).designated, "forgetting must clear the designated direction");
+        char buffer[quickJsonCapacity];
+        quickJson(buffer, sizeof buffer, second);
+        require(std::strstr(buffer, "\"designated\":true") && std::strstr(buffer, "\"direction\":["),
+                "direction fields");
+    });
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed ? 1 : 0;

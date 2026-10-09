@@ -3,6 +3,20 @@ import { sourceLabels } from './source.js';
 import { createPerformanceLab } from './lab-view.js';
 import { drawCursor } from './cursor.js';
 import { createHandsFreeView } from './handsfree-view.js';
+import { mappingView } from './mapping.js';
+import { clickView } from './click.js';
+import { quickView } from './quick.js';
+import { KEEP_NOTE, LINK_NOTE, PALETTE_NOTE, SCROLL_NOTE, panelView } from './actions.js';
+import {
+  BANNER,
+  DWELL_NOTE,
+  SPEED_NOTE,
+  speedText,
+  ROTATION_GUIDE,
+  mappingLines,
+  pauseOnBlur,
+  uncalView,
+} from './uncal.js';
 const client = new DeviceClient();
 const $ = (id) => document.getElementById(id);
 let device = null,
@@ -128,16 +142,21 @@ function render(data, applyReports = true) {
   $('pause').textContent = data.state === 'ACTIVE' ? 'Ⅱ Pause' : '▷ Resume';
   const cal = data.calibration;
   if (instructions[cal]) {
-    $('instruction').textContent = instructions[cal][0];
-    $('phaseDescription').textContent =
-      cal === 'FAILED'
+    const cue = Math.ceil((data.calibrationCueMs || 0) / 1000);
+    $('instruction').textContent = cue
+      ? `${cue} — get ready: ${instructions[cal][0].toLowerCase()}`
+      : instructions[cal][0];
+    $('phaseDescription').textContent = cue
+      ? 'Nothing is measured during the countdown.'
+      : cal === 'FAILED'
         ? data.calibrationReason
         : cal === 'COMPLETE'
           ? `Your ${labels.profile} profile is saved. Resume when ready.`
           : instructions[cal][1];
     $('phaseLabel').textContent = cal === 'COMPLETE' ? 'PROFILE GENERATED' : 'CALIBRATION / ' + cal;
   }
-  $('calibrate').disabled = performanceLab.running || data.state === 'CALIBRATING';
+  $('calibrate').disabled =
+    performanceLab.running || ['CALIBRATING', 'TEACHING'].includes(data.state);
   $('cancel').disabled = data.state !== 'CALIBRATING';
   $('calProgress').style.width = data.calibrationProgress * 100 + '%';
   $('calPercent').textContent = Math.round(data.calibrationProgress * 100) + '%';
@@ -198,6 +217,12 @@ function render(data, applyReports = true) {
     $('studioResult').textContent =
       `Selections: ${selections} · Scroll: ${scrollTotal} · Drag distance: ${dragDistance.toFixed(0)} px`;
   }
+  renderUncal(data);
+  renderMapping(data);
+  renderClick(data);
+  renderQuick(data);
+  renderActions(data);
+  statusChannel?.postMessage(data);
   handsFree.render(data);
   performanceLab.check(data);
   renderCursor();
@@ -267,7 +292,7 @@ const performanceLab = createPerformanceLab({
 const handsFree = createHandsFreeView({ $, action, toast });
 handsFree.bind();
 document.querySelectorAll('.nav').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
-$('calibrate').onclick = () => action('calibrate');
+$('calibrate').onclick = () => action('calibrate', { guided: true });
 $('cancel').onclick = () => action('cancel');
 $('resume').onclick = () => action('resume');
 $('pause').onclick = () => action(device?.state === 'ACTIVE' ? 'pause' : 'resume');
@@ -380,14 +405,14 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => {
   keys.clear();
   setHeld(false);
-  action('pause');
+  if (pauseOnBlur(device)) action('pause');
   if (performanceLab.running) performanceLab.abort('window lost focus');
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     keys.clear();
     setHeld(false);
-    action('pause');
+    if (pauseOnBlur(device)) action('pause');
     if (performanceLab.running) performanceLab.abort('page hidden');
   }
 });
@@ -396,6 +421,245 @@ window.addEventListener('resize', () => {
   renderCursor();
 });
 window.addEventListener('scroll', renderCursor);
+const statusChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('nodx-status') : null;
+function renderActions(data) {
+  const view = panelView(data);
+  $('actionsPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  const a = view.a;
+  $('actionsTag').textContent = view.enabled ? 'ENABLED' : 'OFF';
+  $('actionsBanner').textContent = view.banner.text;
+  $('actionsDetail').textContent =
+    `${view.banner.exitHint ? `${view.banner.exitHint}. ` : ''}${view.banner.detail}`;
+  $('actionsEnable').disabled = view.overlay || (!view.canEnable && !view.enabled);
+  $('actionsEnable').checked = view.enabled;
+  $('actionsKeep').disabled = !view.enabled;
+  $('actionsKeep').checked = view.enabled && a.keep;
+  $('actionsStop').disabled = data.state !== 'ACTIVE';
+  $('actionsBar').style.width = `${Math.round((a.scroll === 'ACTIVE' ? a.exitProgress : a.dwell.progress) * 100)}%`;
+  for (const [id, value] of [
+    ['actionsMs', a.dwellMs],
+    ['actionsTol', a.tolerance],
+  ])
+    if (document.activeElement !== $(id) && value) $(id).value = value;
+  $('actionsNote').textContent = `${PALETTE_NOTE} ${KEEP_NOTE} ${SCROLL_NOTE} ${LINK_NOTE}`;
+  $('actionsStats').textContent = [view.stats, view.link].filter(Boolean).join(' · ');
+  $('actionsBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+  if (view.enabled) {
+    // exclusive with the other click modes: the device turns them off, the page shows it
+    $('clickEnable').checked = false;
+    $('quickEnable').checked = false;
+    $('uncalDwell').checked = false;
+  }
+}
+function renderQuick(data) {
+  const view = quickView(data);
+  $('quickPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('quickTag').textContent = view.enabled ? 'ENABLED' : view.practising ? 'PRACTISING' : 'OFF';
+  $('quickTitle').textContent = view.title;
+  $('quickBig').textContent = view.big;
+  $('quickBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('quickInstruction').textContent = view.instruction;
+  $('quickPracticeLine').textContent = view.practiceLine;
+  $('quickDirection').textContent = view.directionLine;
+  $('quickPracticeFallback').disabled = !view.canPracticeFallback;
+  $('quickPracticeConfigured').disabled = !view.canPracticeConfigured;
+  $('quickAccept').disabled = !view.canAccept;
+  $('quickRetry').disabled = !view.canRetry;
+  $('quickCancel').disabled = !view.canCancel;
+  $('quickClear').disabled = !view.canClear;
+  $('quickEnable').disabled = !view.canEnable && !view.enabled;
+  $('quickEnable').checked = view.enabled;
+  for (const [id, value] of [
+    ['quickSens', view.q.sensitivity],
+    ['quickTol', view.q.returnTolerance],
+    ['quickAngle', view.q.directionTolerance],
+  ])
+    if (document.activeElement !== $(id)) $(id).value = value;
+  $('quickStats').textContent = view.stats;
+  $('quickBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+  if (view.enabled) {
+    // exclusive with the other click recognisers: the device turns them off, the page shows it
+    $('clickEnable').checked = false;
+    $('uncalDwell').checked = false;
+  }
+}
+function renderClick(data) {
+  const view = clickView(data);
+  $('olderClick').hidden = !view.hardware;
+  $('clickPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('clickTag').textContent = view.enabled ? 'ENABLED' : view.training ? 'TEACHING' : 'OFF';
+  $('clickTitle').textContent = view.title;
+  $('clickBig').textContent = view.big;
+  $('clickBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('clickInstruction').textContent = view.instruction;
+  $('clickTrainFallback').disabled = !view.canTrainFallback;
+  $('clickTrainConfigured').disabled = !view.canTrainConfigured;
+  $('clickAccept').disabled = !view.canAccept;
+  $('clickCancel').disabled = !view.canCancel;
+  $('clickClear').disabled = !view.canClear;
+  $('clickEnable').disabled = !view.canEnable && !view.enabled;
+  $('clickEnable').checked = view.enabled;
+  $('clickStats').textContent = view.stats;
+  $('clickBlocked').textContent = view.enableBlocked ? `Enabling: ${view.enableBlocked}.` : '';
+}
+function renderMapping(data) {
+  const view = mappingView(data);
+  $('mapPanel').hidden = !view.hardware;
+  if (!view.hardware) return;
+  $('mapTag').textContent = view.running ? 'CONFIGURED' : view.teaching ? 'TEACHING' : 'OFF';
+  $('mapTitle').textContent = view.title;
+  $('mapBig').textContent = view.big;
+  $('mapBar').style.width = `${Math.round(view.progress * 100)}%`;
+  $('mapInstruction').textContent = view.instruction;
+  $('mapPreview').hidden = !(view.teaching && view.m.phase === 'PREVIEW');
+  $('mapDot').style.left = `${50 + (view.preview.angleX / 45) * 45}%`;
+  $('mapDot').style.top = `${50 + (view.preview.angleY / 45) * 45}%`;
+  $('mapStart').disabled = !view.canStart;
+  $('mapAccept').disabled = !view.canAccept;
+  $('mapCancel').disabled = !view.canCancel;
+  $('mapSave').disabled = !view.canSave;
+  $('mapClear').disabled = !view.canClear;
+  $('mapControl').disabled = !view.canControl;
+  $('mapControlStop').disabled = !view.running;
+  $('mapSettings').textContent = `${view.settings} ${view.saveResult === 'SAVE_FAILED_RAM_ONLY' ? 'Saving failed: it works in memory only.' : view.saveResult === 'SAVED' ? 'Saved.' : ''}`;
+  $('mapStored').textContent = view.stored;
+  $('mapBlocked').textContent = [
+    view.controlBlocked ? `Configured control: ${view.controlBlocked}.` : '',
+    view.mountingNote,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+function renderUncal(data) {
+  const view = uncalView(data);
+  $('uncalPanel').hidden = !view.hardware;
+  $('uncalBanner').hidden = !view.active;
+  $('uncalBannerText').textContent = view.banner || BANNER;
+  $('uncalPermissionNote').textContent =
+    view.permissionNote || 'Movement only. Not a calibration. Nothing is saved.';
+  document.title = view.active ? `${view.banner} · NodX Adapt` : baseTitle;
+  if (!view.hardware) return;
+  $('uncalTag').textContent = view.active ? 'ACTIVE' : 'OFF';
+  $('uncalStatus').textContent = view.status;
+  $('uncalCalibration').textContent = view.calibration;
+  $('uncalStart').disabled = !view.canStart;
+  $('uncalStop').disabled = !view.active;
+  $('uncalStopBanner').disabled = !view.active;
+  if (document.activeElement !== $('uncalSpeed')) $('uncalSpeed').value = view.u.speed;
+  $('uncalSpeedValue').textContent = speedText(view.u.speed);
+  $('uncalSpeedNote').textContent = SPEED_NOTE;
+  if (document.activeElement !== $('uncalRevX')) $('uncalRevX').checked = view.u.reverseX;
+  if (document.activeElement !== $('uncalRevY')) $('uncalRevY').checked = view.u.reverseY;
+  $('uncalDwell').disabled = !view.canEnableDwell;
+  $('uncalDwell').checked = view.dwellOn;
+  $('uncalDwellBar').style.width = `${Math.round(view.u.dwell.progress * 100)}%`;
+  $('uncalDwellStatus').textContent = view.dwellStatus;
+  $('uncalDwellNote').textContent = DWELL_NOTE;
+  $('uncalClicks').textContent = view.dwellOn ? `Clicks this run: ${view.u.dwell.clicks}` : '';
+  for (const [id, value] of [
+    ['uncalDwellMs', view.u.dwell.ms],
+    ['uncalDwellTol', view.u.dwell.tolerance],
+  ])
+    if (document.activeElement !== $(id) && value) $(id).value = value;
+  $('uncalRotations').replaceChildren(
+    ...ROTATION_GUIDE.map((line) => Object.assign(document.createElement('li'), { textContent: line })),
+  );
+  $('uncalMapping').replaceChildren(
+    ...mappingLines(data).map((line) => Object.assign(document.createElement('li'), { textContent: line })),
+  );
+  $('uncalParams').textContent =
+    `Fixed START values: ${view.u.gain} px/° gain, ${view.u.deadzone} °/s deadzone, ` +
+    `at most ${view.u.maxStep} px per report.`;
+}
+const baseTitle = document.title;
+for (const id of ['uncalRevX', 'uncalRevY'])
+  $(id).onchange = () =>
+    action('handsfree', {
+      op: 'uncalreverse',
+      horizontal: $('uncalRevX').checked,
+      vertical: $('uncalRevY').checked,
+    });
+$('uncalSpeed').oninput = () => {
+  $('uncalSpeedValue').textContent = speedText($('uncalSpeed').value);
+};
+$('uncalSpeed').onchange = () =>
+  action('handsfree', { op: 'uncalspeed', factor: Number($('uncalSpeed').value) });
+$('uncalSpeedReset').onclick = () => action('handsfree', { op: 'uncalspeed', factor: 1 });
+$('uncalDwell').onchange = () =>
+  action('handsfree', { op: 'uncaldwell', enabled: $('uncalDwell').checked });
+$('uncalDwellApply').onclick = () =>
+  action('handsfree', {
+    op: 'uncaldwellset',
+    ms: Number($('uncalDwellMs').value),
+    tolerance: Number($('uncalDwellTol').value),
+  });
+$('reconnect').onclick = async () => {
+  try {
+    const result = await request({ action: 'reconnect' });
+    toast(result.ok ? 'Reconnecting: the board is rebooting (about 5 seconds).' : result.reason);
+  } catch (error) {
+    toast(`Reconnect failed: ${error.message}`);
+  }
+};
+for (const [id, extra] of [
+  ['quickPracticeFallback', { op: 'practice', frame: 'fallback' }],
+  ['quickPracticeConfigured', { op: 'practice', frame: 'configured' }],
+  ['quickAccept', { op: 'accept' }],
+  ['quickRetry', { op: 'retry' }],
+  ['quickCancel', { op: 'cancel' }],
+  ['quickClear', { op: 'clear' }],
+])
+  $(id).onclick = () => action('quick', extra);
+$('actionsEnable').onchange = () =>
+  action('actions', { op: 'enable', enabled: $('actionsEnable').checked });
+$('actionsKeep').onchange = () =>
+  action('actions', { op: 'keep', enabled: $('actionsKeep').checked });
+$('actionsStop').onclick = () => action('control', { op: 'stop' });
+$('actionsApply').onclick = () =>
+  action('handsfree', {
+    op: 'uncaldwellset',
+    ms: Number($('actionsMs').value),
+    tolerance: Number($('actionsTol').value),
+  });
+$('actionsOpen').onclick = () => {
+  const opened = window.open('palette.html', 'nodxPalette', 'popup,width=300,height=560');
+  if (!opened) toast('The palette window was blocked: allow pop-ups for this page, then try again.');
+};
+$('quickEnable').onchange = () =>
+  action('quick', { op: 'enable', enabled: $('quickEnable').checked });
+$('quickApply').onclick = () =>
+  action('quick', {
+    op: 'set',
+    sensitivity: Number($('quickSens').value),
+    returnTolerance: Number($('quickTol').value),
+    directionTolerance: Number($('quickAngle').value),
+  });
+for (const [id, extra] of [
+  ['clickTrainFallback', { op: 'train', frame: 'fallback' }],
+  ['clickTrainConfigured', { op: 'train', frame: 'configured' }],
+  ['clickAccept', { op: 'accept' }],
+  ['clickCancel', { op: 'cancel' }],
+  ['clickClear', { op: 'clear' }],
+])
+  $(id).onclick = () => action('click', extra);
+$('clickEnable').onchange = () =>
+  action('click', { op: 'enable', enabled: $('clickEnable').checked });
+for (const [id, action_, extra] of [
+  ['mapStart', 'map', { op: 'start' }],
+  ['mapAccept', 'map', { op: 'accept' }],
+  ['mapCancel', 'map', { op: 'cancel' }],
+  ['mapSave', 'map', { op: 'save' }],
+  ['mapClear', 'map', { op: 'clear' }],
+  ['mapControl', 'control', { op: 'start' }],
+  ['mapControlStop', 'control', { op: 'stop' }],
+])
+  $(id).onclick = () => action(action_, extra);
+$('uncalStart').onclick = () => action('handsfree', { op: 'uncal', enabled: true });
+for (const id of ['uncalStop', 'uncalStopBanner'])
+  $(id).onclick = () => action('handsfree', { op: 'uncal', enabled: false });
 async function tick() {
   if (busy || document.hidden) return;
   busy = true;

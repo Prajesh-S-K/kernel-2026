@@ -1,0 +1,591 @@
+# BENCH_PLAN · breadboard bring-up stages (prepared, NOT yet run on hardware)
+
+Everything here is local preparation. **Nothing has been flashed** and no hardware reading exists yet. The
+native USB port `/dev/cu.usbmodem101` was seen present and unoccupied (read-only check). Do not flash until an explicit instruction to flash is given (and the port is re-checked first). Hardware logs stay on this machine in `hardware-evidence/` (git-ignored) and are not
+published without review.
+
+Fixed rules for every stage: the buzzer stays disconnected (`NODX_BUZZER=-1`); no 3V3/5V reaches the button;
+the bench pins (SDA GPIO8, SCL GPIO9, enable button GPIO4) are **START candidates** that exist only in the
+`bench-*` PlatformIO environments, while the released and general environments keep every GPIO disabled;
+nothing is described as validated until a reading says so.
+
+## Stage 0 · before power (no USB, no tools beyond a multimeter)
+
+| Check | How | Record |
+|---|---|---|
+| Button contact pairs | Continuity test with the button **not** pressed: find the two pin pairs that beep with each other, then confirm pressing connects the pairs. Appearance proves nothing | Which physical pins are pair A and pair B (photo + note) |
+| Button wiring | Pair A to GPIO4, pair B to GND. **No 3V3/5V** | Photo of the breadboard |
+| MPU6050 breakout | Identify the VCC arrangement (3.3 V vs 5 V input and regulator), AD0 to GND, SDA GPIO8, SCL GPIO9 | Breakout markings, schematic or photo |
+| Board identification | Module marking (expect ESP32-S3-WROOM-1 N16R8), which USB-C is UART and which is native USB, pins GPIO8/9/4 exposed and not strapping/PSRAM/USB (avoid 35-37, 19/20) | Photos, exact silkscreen |
+| Buzzer | Not connected | Photo |
+
+Gate: wiring photographed and continuity facts written down. Otherwise stop.
+
+## Native USB connection and upload (current setup: one cable, the board's USB port)
+
+The only cable goes to the board's native USB port, which enumerates as Espressif "USB JTAG/serial debug unit"
+(303a:1001). `bench-diag` is built for it: `ARDUINO_USB_MODE=1` and `ARDUINO_USB_CDC_ON_BOOT=1` are set
+explicitly in `platformio.ini` (the board definition sets only the mode, and without CDC-on-boot `Serial`
+would be UART0, invisible over this cable). Verified from the build, not assumed: both flags, the pins
+(SDA 8, SCL 9, button 4), `NODX_BUZZER=-1`, `HWCDC` linked, and **no BLE/HID code** (zero `NimBLEDevice`/`BLEHID`
+symbols in the ELF). It also repeats a banner every 3 s until the first command, because anything printed
+before the host opens the port is lost.
+
+1. Check the port without opening it (read-only: USB registry, `ls`, `lsof`):
+   ```bash
+   python3 scripts/bench_port.py --expect /dev/cu.usbmodem101
+   ```
+   It said `READY` on the day it was prepared (one Espressif device, one port, no process holding it).
+2. Build (allowed): `pio run -e bench-diag`.
+3. **Upload (NOT RUN: needs your explicit flash instruction):**
+   ```bash
+   pio run -e bench-diag -t upload --upload-port /dev/cu.usbmodem101
+   ```
+   The USB-JTAG/serial unit normally resets into the ROM bootloader by itself. If upload cannot connect (the
+   board may currently run something that uses USB), hold BOOT, tap RESET, release BOOT, re-identify the port
+   (it changes in download mode) and repeat. The `qio_opi`/`opi` settings of the N16R8 candidate and the
+   unresolved DIO/QIO header question apply: a wrong memory setting shows up at boot, not at upload.
+4. **After upload the port may change** (the chip re-enumerates). Re-identify before any stage; do not reuse the
+   old name blindly:
+   ```bash
+   python3 scripts/bench_port.py          # note the port it reports as <PORT>
+   ```
+5. Stages 1-3 use `scripts/bench_log.py` with the repo's virtualenv (it has pyserial 3.5). It opens the port with
+   DTR and RTS held low so that watching the board does not reset it, echoes every line live and saves a local,
+   git-ignored session under `hardware-evidence/`. A port is only ever used when you pass it with `--port`.
+
+## Stage 1 · board facts (`bench-diag`)
+
+```bash
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage1 --send info --seconds 20   # NOT RUN
+```
+
+Record: chip/revision, flash size and mode, PSRAM size, USB CDC-on-boot and mode, reset reason, free heap. This
+is the first real evidence on the open **N16R8 memory/USB question and the DIO/QIO image-header question**.
+START check: flash 16 MB, PSRAM 8 MB. If either differs, stop and fix the configuration before anything else.
+
+## Stage 2 · I2C bus and MPU6050 (`bench-diag`)
+
+Board still on the bench:
+
+```bash
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage2 --send scan --send "imu 10" --seconds 45   # NOT RUN
+```
+
+Reads: SDA/SCL idle levels, device at 0x68, WHO_AM_I, the firmware's own init register sequence, **how often
+the data-ready bit (register 0x3A) is seen with and without INT_ENABLE (0x38)**, about 100 distinct frames/s,
+read errors, 10 ms poll jitter, gyro bias and noise, accelerometer magnitude, temperature.
+
+Why the data-ready row matters: `MPU6050Sensor::read` only accepts a frame when that status bit is set, and
+`begin()` does not set INT_ENABLE. If the bit only appears after INT_ENABLE, the shipped sensor path would
+never produce a sample. If the measurement shows that, the fix is made locally in `core/src/sensor.cpp` with a
+regression test and recorded before/after evidence (the diagnostic's own numbers, the same stage re-run on a
+`bench-firmware` telemetry check). Gate: WHO_AM_I 0x68, frames about 100/s, no read errors. Otherwise stop.
+
+### Stage 2b · the firmware's own sensor driver (`imuinit`)
+
+After `imuregs` has captured the as-found state, `imuinit 10` runs `MPU6050Sensor::begin()` (identity, the
+documented register writes, read-back of every one) and then reads frames through the driver for 10 s. The
+analyser judges: begin accepted with a variant, about 100 valid frames/s, accelerometer magnitude about 1 g.
+It writes sensor registers, which is why it comes after the read-only dump. **Written locally, not yet
+flashed or run.**
+
+```bash
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage2b --send imuregs --send "imuinit 10" --seconds 30   # NOT RUN
+```
+
+## Stage 3 · the enable button (`bench-diag`)
+
+Press and release a few times (a quick tap, a normal press, a long hold) when the prompt line appears:
+
+```bash
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage3 --send "button 20" --seconds 30   # NOT RUN
+```
+
+Reads: idle level HIGH, every press/release **burst** with its edge count and span in microseconds (the real
+bounce), and the real `EnableGate` toggling (`gateToggle`, latched). Expect one toggle per press of 30 ms or
+more and none for a shorter tap. Also do by hand and note: reset while the button is held (permission must stay
+off), a floating-pin check (disconnect GPIO4 briefly: the pull-up must read HIGH).
+Gate: bounce within START limits (20 edges, 10 ms) or the debounce values are revisited with the evidence.
+
+## Stage 4 · BLE (`bench-ble-probe`) — PREPARED, NOT FLASHED, NOT RUN; wait for an explicit instruction
+
+Prerequisites already met on the bench: stages 1-3 pass (board facts, sensor via the firmware driver, enable button).
+The probe uses the firmware's REAL BLE adapter (`BLEHID`: report-protocol mouse, bonded pairing, encrypted
+reports) and none of the control engine. **Reports leave only on a serial command**; the probe never moves the host
+pointer by itself. It builds without warnings and contains no bond-deleting code. The enable button, the sensor and
+the buzzer are not touched.
+
+Host-side precautions (the host is this Mac or another computer, because the board will appear as a real Bluetooth mouse):
+* Close anything that a stray click could activate. Park the pointer over an empty, harmless window before `down confirm`.
+* Pairing creates a **bond**, stored in the board's NVS by the BLE stack and on the host. Never erase the whole flash/NVS to
+  "clear" it. To start clean, remove "NodX Adapt" in the host's Bluetooth settings, and use `bonds` to read how many pairings
+  the board holds (read-only). The real-control firmware will see the same bond.
+* The native USB serial link and the Bluetooth link are independent: keep the USB cable connected for logging.
+
+```bash
+pio run -e bench-ble-probe                                               # build is allowed now
+pio run -e bench-ble-probe -t upload --upload-port /dev/cu.usbmodem101  # NOT RUN: needs the explicit go (re-check the port first)
+python3 scripts/bench_port.py                                            # re-identify the port after the upload: <PORT>
+.venv/bin/python scripts/bench_log.py --port <PORT> --label stage4-pair --send status --send bonds --seconds 60   # NOT RUN
+```
+
+Checklist, in order, each recorded with the host-side result written next to the board's `BLE,` lines:
+1. **Advertising and boot:** the heartbeat shows `state` lines every 3 s with `connected=0`; the host lists "NodX Adapt".
+2. **Pair from the host's Bluetooth settings:** expect `secured=1`, then `subscribed=1`, `connected=1` in `link-change` lines,
+   in that order. Record whether the host asks for confirmation or a PIN (the adapter declares no input/output).
+3. **Delivery:** `ping` (no movement, no buttons) reports `delivered=1`; `nudge` (+2 then -2) moves the host pointer by nothing net;
+   `delivered=0` before the link is secured and subscribed is the expected, correct refusal.
+4. **Reconnect:** disconnect from the host side, then reconnect; the board advertises again by itself and the link returns
+   secured and subscribed without re-pairing. Also drop the link by moving the board out of range or turning host Bluetooth off.
+5. **Button down during a lost link:** with the pointer over a harmless spot, `down confirm` (host button pressed), turn host
+   Bluetooth off, then back on and `up`. Record what the host did (released on disconnect? stuck?). The probe prints
+   `link-lost-with-button-down` as a warning. This is the case the real firmware must handle (drag during disconnect).
+6. **Idle traffic:** with a secured link and no command, watch the host for unsolicited reports (expect none).
+7. **Both sides' view:** the host's Bluetooth details (device name, appearance) next to the probe's `state` lines.
+
+Gate: a secured, subscribed link that delivers commanded reports and survives disconnect/reconnect, and a recorded host-side
+result for the button-down link loss. Known gaps this stage will measure but not fix: idle report traffic and the missing
+Device Information service (separate tasks).
+
+## Stage 5 · the real firmware (`bench-firmware`), attended movement-only demo
+
+`bench-firmware` is the real firmware with the START bench pins (SDA 8, SCL 9, enable button GPIO4, buzzer off, native USB
+serial), the MPU-6500-class driver, BLE mouse and the hands-free engine. Order, each step recorded in `hardware-evidence/`:
+
+1. **Flash** (explicit authorization given; port re-checked first; no full erase, NVS and the BLE bond preserved):
+   `pio run -e bench-firmware -t upload --upload-port /dev/cu.usbmodem101`, then `python3 scripts/bench_port.py`.
+2. **Prerequisites seen in telemetry** (`status`): `source` HARDWARE, `sensor.seen` with frames increasing and a small `ageMs`,
+   `connected` true (BLE secured + subscribed), `state` never ACTIVE at boot.
+3. **Axis mapping from measurement while output is inhibited.** The operator performs three isolated movements, each separated
+   by stillness: yaw (turn left, return, turn right, return), pitch (tilt up, return, tilt down, return), roll (tilt right, return,
+   tilt left, return). `scripts/bench_axes.py` finds the dominant raw gyro axis and the first-lobe direction of each, and the
+   gravity axes, and prints build flags; it refuses a capture whose movements were not isolated. The flags go into the bench
+   environment and the board is re-flashed with them. Conventions it targets: yaw left negative, pitch up negative, roll right positive.
+4. **Real calibration and gesture training** through the companion in hardware mode (`python3 desktop/server.py --serial <PORT>`):
+   no synthetic gestures (`gesture` is refused on hardware), no bypassed prerequisites; the operator performs the movements.
+5. **Movement-only demo**: `handsfree demo on` (or the checkbox in the setup view): no dwell click, no drag, no wheel, steps
+   bounded to 6 px per report, the saved profile unchanged, off after every restart.
+6. **Enable permission and intentional resume**: press the enable button (latch), then the resume gesture; gently rotate/tilt the
+   assembly while watching the pointer; press the button to disable and confirm the pointer stops.
+Not run in this stage: clicking, dragging, held-button disconnect.
+
+## Stage 5 (original outline) — superseded by the list above
+
+Build is allowed now: `pio run -e bench-firmware`. After a go-ahead: flash it, run
+`python3 desktop/server.py --serial <PORT>` and use the companion (source label `HARDWARE`).
+Order: status and telemetry; the enable button latch and chips; calibration with the real axes (the START axis
+mapping and signs must be checked against real motion first); gesture training; commit; resume by gesture;
+dwell; drag; every release cause including BLE disconnect during drag; reboot with the button held; fault
+recovery; NVS persistence across power cycles and (separately) interrupted saves.
+
+## Stage 6 · accidental activation and comfort
+
+Long unscripted sessions per [TEST_PLAN](TEST_PLAN.md): count candidates, rejections and executions per hour;
+training burden; comfort. Only this stage can say anything about suitability.
+
+## Not done here
+
+Items outside this preparation and still needed before stage 5 can pass: the MPU data-ready initialisation
+(if stage 2 shows it), idle BLE report traffic and the Device Information service, local HTTP `Host`
+validation, version-string consistency (separate tasks). V1 hardware readiness is **not** claimed until stages
+0-5 have real readings and stage 6 has been run.
+
+## Local evidence layout
+
+`hardware-evidence/<timestamp>-<label>/raw.log` (host-timestamped serial text), `summary.txt` and
+`summary.json` from `scripts/bench_analyze.py`. Analyse an existing log without a port:
+`python3 scripts/bench_log.py --analyze <raw.log>`. `bench_log.py` needs `--port` explicitly, only sends the
+allow-listed diagnostic commands, never flashes and never guesses a port.
+
+## Uncalibrated pointer demo (temporary bench aid)
+
+Purpose: show the real sensor moving the Mac pointer while calibration is missing or FAILED. It is not a
+calibration, saves nothing and never reports a profile. Start values are in `docs/PARAMETERS.md`.
+
+* Start: companion, Setup page, "Start without calibration" (hardware device only). Clicking it is the
+  authorisation for this TEMPORARY demo: the physical enable button is not needed to start it, and the page
+  says "WEBSITE-START PERMISSION ACTIVE" while it runs. It needs a healthy sensor (20 good samples), a valid
+  axis mapping, an unfaulted BLE link and no calibration, training or active control in progress. It works
+  when calibration is missing or failed or the saved profile is corrupt (reported separately).
+  Any press of the physical enable button stops it at the press edge (no sensor sample needed) and revokes
+  the permission; so do Stop demo, any fault, a disconnect and starting a calibration. Each needs another
+  explicit website start; a connection, reconnect, fault or reboot never starts it. Configured control keeps
+  the physical enable-button permission (unchanged).
+* Reversal: "Reverse horizontal" / "Reverse vertical" flip the default mapping's pointer direction (RAM only,
+  cleared by a reboot). The fallback uses the default axis mapping and promises nothing for other mountings.
+* Real sensor -> AxisTransform -> filtering -> bounded output -> SafetyManager -> HIDManager. Clicks,
+  dwell, drag and wheel are removed; pointer steps are at most 4 px per report.
+* Stop: "Stop demo" (banner and panel), the next press of the enable button (at the press edge, no sample needed),
+  starting a calibration, pause, any fault (sensor, mapping, timing, calculation), BLE disconnect or
+  delivery failure. After any stop the demo stays off until started again; reconnecting or rebooting
+  never starts it. Pause-on-focus-loss is suspended only while this demo runs, so the pointer can be
+  watched in another window.
+* A corrupt saved profile stays reported as CORRUPT (`profileState`); the demo uses its own RAM profile
+  and never repairs, replaces or accepts the record. It uses no NVS writes.
+* Banner text while active: "UNCALIBRATED DEMO — LIVE SENSOR". The Performance Lab refuses to start
+  while it is active, so it cannot enter a comparison.
+
+Pointer direction for the measured bench mounting (USB end = back; axis mapping measured with
+`scripts/bench_axes.py`, not inferred from the sensor identity). The mapping the firmware actually uses is
+shown on the panel from the `axes` telemetry (gyro axes 2,0,1 signs +,+,+ for the bench build):
+
+| Board motion | Pointer |
+| --- | --- |
+| Turn left (yaw rate negative) | left |
+| Turn right | right |
+| Tilt front end up (pitch rate negative) | up |
+| Tilt front end down | down |
+| Sideways roll | nothing (no scrolling) |
+
+A different mounting needs a new measured mapping, never an inferred one.
+
+### BLE report rate (found while preparing the demo)
+
+The control loop used to hand the BLE adapter a report on every 10 ms sensor tick, including all-zero
+reports while idle (about 100 notifications per second). A BLE link carries far fewer; this matched the
+repeated "HID connection or delivery failed" faults and may be linked to the serial stalls (unproven).
+Now the core sends an idle zero report only once (a stop always sends its release) and the adapter
+coalesces movement to one notification per 20 ms; a button change or an all-zero report is sent at once.
+
+### Loop watchdog and reset reason
+
+After the serial link was seen to go silent for good (35 s to 6 min after boot, sensor healthy and 100 Hz
+until the last reply, no fault counted), the loop task watchdog is enabled and the last reset reason is
+printed at boot (`[BOOT] reset reason: ...`) and reported as `reset` in hardware telemetry. A hung control
+loop now reboots the board (the panic text with its backtrace goes to serial) and the reason shows TASK_WDT,
+which separates a firmware lock-up from a USB-serial glitch. Watchdog timeout is the framework default.
+
+## Uncalibrated demo: dwell clicking (attended)
+
+Optional, explicitly enabled, off at every start of the demo. No motion calibration or gesture training is
+needed, and sensor health, the safety gate and the HID manager are unchanged. Reuses `SelectionManager`:
+250 ms arming, then 1200 ms progress, then one primary click (press, then release), then a lockout until the
+pointer has moved more than 1.5 x the tolerance (12 units at the default 8). Staying still never repeats the
+click; a deliberate move away re-arms it. If the release is not delivered the system enters the existing
+fault/recovery path and the demo and dwell stay off until you restart them.
+
+Cancelled by: movement beyond the tolerance, pause, the enable button, an invalid or stale sensor sample, BLE
+disconnect or delivery failure, Stop demo, starting a calibration. Reconnecting never restarts anything.
+Drag, double-click, right-click and scrolling stay disabled. The trained pause/resume gesture is NOT offered:
+gesture training and recognition both require a valid saved motion profile, which this demo does not have.
+
+Short attended demonstration (harmless target only, for example an empty text editor or a button that just
+counts clicks):
+1. Reload the companion; wait until the demo panel says Ready. Click "Start uncalibrated pointer demo"
+   (movement only; banner "UNCALIBRATED DEMO — LIVE SENSOR"). Confirm left/right/up/down as before.
+2. Park the pointer over the harmless target and keep the board still.
+3. Tick "Enable dwell clicking" (banner becomes "UNCALIBRATED DEMO — DWELL CLICK"). Watch the progress bar fill
+   (about 1.5 s including arming); expect exactly one click on the target and "Clicks this run: 1".
+4. Stay still for 10 s: no second click (status says it is locked out).
+5. Move the board clearly away and back to the target, then hold still: one more click (rearmed).
+6. Untick the box or click "Stop demo" (or press the enable button): clicking stops at once.
+Do not test drag, held buttons or disconnects with the button held.
+
+## Guided mapping and configured control (software complete, hardware pending)
+
+Companion Setup page, "Teach the movements": 1) hold still (2 s contiguous within 10 s; interruptions are
+counted and explained), 2) teach RIGHT, LEFT, UP, DOWN, three examples each with a 3-2-1 countdown, GO, a
+recording indicator and a return-to-centre cue (not measured), then one check example per direction; a failed
+example is retried alone (3 tries); 3) preview (a dot follows the learned mapping) and Accept. Accept keeps
+the mapping in memory only; "Save settings" is a separate explicit step. "Start configured control" needs
+the same preconditions as the fallback plus an unchanged mounting. The fallback "Start without calibration"
+remains available when calibration is missing or failed or the saved profile is corrupt.
+
+Software evidence only (synthetic recordings, no hardware): learning for identity, upside-down, two
+sideways and two oblique mountings; rejection of wobbles, wrong directions, indistinguishable or non-opposite
+directions; One Euro versus the old EMA (run `./build/nodx_mapping_tests` to print the table). Hardware
+measurement of jitter, drift, gentle response and stopping delay is still to do; every parameter stays START.
+
+## Gesture click (optional, software complete, hardware pending)
+
+Off by default and in memory only. Companion Setup page, "Gesture click": teach for the fallback or for
+configured control (a gesture is bound to the frame it was taught in): hold still, five examples and two
+checks (3-2-1, GO, recording, return to centre), then 5 s of ordinary pointing that must not trigger it.
+Enable it explicitly while control runs. One accepted gesture gives exactly one press and release through
+SelectionManager's pulse path, SafetyManager and HIDManager; after it the gesture must not be repeated until a
+300 ms neutral stretch; while a possible gesture is being recognised the pointer is held and that movement is
+discarded. A failed release faults and stops the session. Dwell stays optional and off; scrolling, drag and
+other gestures stay disabled. The existing hands-free pause/resume and drag gestures are not used here: their
+training requires a saved calibrated profile.
+
+Software evidence only (synthetic recordings, no hardware): `./build/nodx_click_tests` prints acceptance of
+varied gestures and false-click counts over 600 s of ordinary and of hard (heavy wrist roll) pointing, with how
+often the pointer was held. Real-user hit and false-trigger rates are still to measure.
+
+## Attended hardware demonstration (needs a firmware upload; do not flash without authorisation)
+
+1. Fallback pointing: press the enable button, "Start without calibration", confirm left/right/up/down, use
+   the reversal boxes if a direction is wrong, Stop.
+2. Guided mapping: "Start guided setup", follow the cues (hold still, four directions x 3 examples, 4 checks),
+   check the preview dot, Accept; the status says the mapping is in memory only; optionally Save settings.
+3. Smooth configured pointing: press the enable button, "Start configured control"; compare the feel with the
+   fallback; record notes (local only).
+4. Gesture click: "Teach for configured control" (or fallback), five examples, two checks, ordinary pointing;
+   Accept; with the pointer parked over a harmless target tick "Enable gesture click"; make the gesture:
+   one click; stay still: no repeat; make it again after a pause: second click.
+5. Immediate stop: press the enable button (or Stop demo): the pointer and clicks stop at once.
+Never test dragging, held buttons or disconnects with a button held.
+
+## What the mounting check can and cannot detect
+
+Configured control remembers the gravity direction (in the sensor frame) from the teaching. At start it
+compares the current gravity direction with it:
+* Detected and blocked: a gross re-orientation of the sensor relative to gravity, more than 75 degrees (for
+  example the board flipped over or stood on its side). A warning is shown above 35 degrees.
+* Deliberately NOT blocked: ordinary head movement. Nodding, leaning and tilting change the gravity direction
+  in the sensor frame legitimately, so the check is only made when starting and never stops a running session;
+  tilts up to 75 degrees from the taught posture are accepted. Start from roughly the posture used for
+  teaching.
+* NOT detectable by gravity alone: a turn about the gravity axis (for example the board turned 90 degrees
+  while the head stays upright), a remount that keeps the gravity direction similar, or a mirrored mount. After
+  any physical remount the movements must be taught again; use the preview to confirm, and the reversal
+  controls of the fallback for a simple flip. A test documents the undetectable turn about the gravity axis.
+
+## Acceptance status of the provisional criteria (software, synthetic recordings only)
+
+* Stopping delay of the configured filter at most +30 ms against the old EMA: MET in software after tuning
+  (worst case over 3 speeds x 7 seeds: EMA 50 ms, One Euro 60 ms). The first parameter set did NOT meet it
+  (100 ms) and was replaced. Not yet checked on hardware.
+* Jitter, drift, gentle-motion response on real recordings: not measured. No acceptance is claimed.
+
+## EXPERIMENTAL quick tilt-and-return click (software complete; real recordings pending)
+
+Replaces the template-training requirement for the bench demo; the trained recognizer stays as an alternative.
+Companion Setup page, "Quick gesture click": practise once (stillness, then one comfortable sideways tilt and
+return; the 3-D direction and size are learned, no raw axis needed), try it in a preview that never clicks,
+retry or accept, then enable it while control runs. The label "EXPERIMENTAL QUICK GESTURE CLICK" is shown in the
+banner and the panel. Off by default, memory only, exclusive with dwell and the trained gesture, no saved
+profile needed, works in the fallback and in configured pointing (a practice is bound to the frame it was
+done in).
+
+Recognizer: neutral (250 ms calm) -> outward stroke -> return stroke -> settled confirmation (150 ms) -> click ->
+rearm (fresh neutral period and 500 ms since the click). The bias-corrected gyro is integrated over the real
+sample intervals; a click needs a clear outward excursion, an opposite return stroke and a small FINAL
+three-axis residual (gravity is never used to prove the return). Rejections: tiny noise, too much off-direction
+motion, no or partial return, more than 1000 ms from onset to the settled return, irregular or invalid samples.
+The pointer is frozen from candidate detection until acceptance or rejection and the frozen movement is
+discarded, never replayed. Movement before detection (the first part of the outward stroke) cannot be undone,
+and no global pointing delay is added to hide it.
+
+Reported in the companion: practice cues and a preview with the recognizer state (ready, outward, return,
+settling, accepted or rejected), rejection reasons, candidate duration, excursion, return residual, click
+count and the total time the pointer was paused.
+
+Attended demo over a harmless test target (needs a firmware upload; do not flash without authorisation):
+1. Start without calibration (or configured control); confirm pointing as before.
+2. "Practise for the fallback": hold still, one tilt and return on GO, try it in the preview, Accept.
+3. Park the cursor over a harmless target (an empty editor or a click counter). Tick "Enable quick gesture click".
+4. Make the gesture: one click; stay still: no repeat; point around normally: no clicks; make it again after a
+   pause: a second click. Watch "pointer paused" while a candidate is open.
+5. Untick it (pointing stays active), then Stop demo or press the enable button: everything stops.
+Never test drag, held buttons or disconnects with a button held.
+
+Evidence status: all numbers are synthetic (modelled noise and idealised tilts). On synthetic data: 75 of 75
+comfortable tilts (5 orientations x 5 speeds x 3 amplitudes) clicked once; 600 s of pointing with fast
+reversals and tremor gave 0 false clicks and 0 candidates (so 0 ms of suppression); incomplete returns,
+wandering, tiny tilts and timeouts were rejected with reasons. Real wearable recordings, false clicks, missed
+gestures and suppression time on a person are NOT measured yet and are reported separately when they are.
+
+## Real wearable recordings (tooling ready; nothing recorded yet)
+
+No real recording exists yet: the status stream is 10 Hz, too coarse for 150 ms confirmations, so the quick
+gesture was tuned on synthetic data only. The next firmware upload adds a passive raw capture (`capture
+start <1-20 s>`, `capture stop`, `capture get <offset>`; 32 KB of RAM, never affects control, simulator
+refuses it) and the host tools:
+
+* `python3 scripts/capture_session.py --label practice --seconds 15` writes
+  `hardware-evidence/captures/<time>-<label>.csv` (+ a small .json; local, git-ignored, no device identifiers).
+* `build/nodx_replay quick --practice practice.csv --eval pointing.csv --eval gestures.csv:2000,6000` replays
+  the practice through the same guided practice the device runs, configures the recognizer from it and reports,
+  per evaluation file: clicks, candidates, rejections, pointer-suppressed time (also as a percentage), and with
+  the intended gesture times (ms from the file start) hits, MISSED gestures and FALSE clicks.
+
+Plan for the attended recording session (wearing it, harmless target, nothing flashed beyond the authorised
+upload): (1) capture the practice while practising; (2) 10 s captures of normal pointing in several styles
+(slow, fast, reversals, diagonals, tremor-like, wrist rolls, head tilts); (3) 10 s captures with deliberate
+gestures at noted times; (4) replay all of it, report hits, misses, false clicks and suppression time as
+HARDWARE results, separately from the synthetic ones, and only then consider tuning the EXPERIMENTAL START
+values (which are never tuned on the same recordings used to report them).
+
+## Quick gesture: the designated direction
+
+The practice defines ONE designated direction. Demonstrate the direction you want (for example tilting your
+head toward your right shoulder) and return; the firmware stores the outward direction as a SIGNED unit
+three-dimensional gyro vector in the control frame, so it follows the sensor's fixed mounting. The companion
+shows it (components and a plain-words reading) together with its angular tolerance. A candidate may only start
+when the movement exceeds the noise-qualified threshold, points within the validated tolerance (default 30
+degrees, 10-60) of the designated direction AND has the right sign. The opposite direction, perpendicular
+movements and ordinary pointing never start a candidate, so they keep pointing normally with no suppression.
+Once a candidate has started the pointer is frozen; excessive deviation from the direction cancels it at once
+(no click, the frozen movement discarded, pointing resumes); otherwise the opposite return stroke and a
+settled return near the start within the one-second window are required. The direction can only be changed
+by another practice capture (the tolerance and sensitivity are separate validated settings).
+
+The practice never assumes where ordinary pointing happens (the default mapping's pointing plane is
+unverified in the fallback). After the movement it records a short sample of the user's OWN pointing (5 s of
+movement, in varied directions) and rejects a direction that carries more than 20 percent of that pointing's
+variance, or that the recognizer would click or pause the pointer for (more than 5 percent of the sample) when
+the sample is replayed through it; the reason names the measured share. The measured pointing is kept, so a
+retried movement is checked against it again. The companion shows the designated direction as a signed vector
+in the control frame with its dominant component and tolerance, and deliberately gives it NO body-direction
+name (left, right, shoulder, roll, ...), because the mounting and axis mapping behind those names are not
+verified.
+
+## Quick gesture: return handling and settling (software results)
+
+* The return stroke must run OPPOSITE to the designated direction (below -max(exit + 2, 0.25 x enter) deg/s)
+  after a clear outward excursion. Tested: a return that overshoots into the opposite side is rejected
+  (NOT_BACK_TO_START); a creeping return (3 deg/s) never registers as a return and is rejected; the opposite
+  stroke FIRST followed by the designated one opens no candidate; a detour return is rejected.
+* Near-zero settling: the final three-axis residual must be at most the return tolerance (default 35 percent)
+  of the excursion: residuals up to 25 percent settle, 40 percent and more are refused, and the boundary moves
+  with the setting (15-60 percent). The settled return needs 150 ms below max(6, 4 sigma) deg/s; a disturbance
+  inside that window restarts the calm (the click is delayed, never doubled); a return that keeps moving about
+  the exit threshold never settles and times out.
+* Integration drift: a gyro bias estimate error of about 2 deg/s still settles; 3 deg/s and more is rejected.
+  The bias comes from the 1.5 s stillness (expected error far smaller on the bench sensor); hardware drift over
+  the hour is unmeasured.
+
+## EXPERIMENTAL dwell action palette (software complete; hardware pending a firmware upload)
+Needs firmware newer than `49970b8` (the palette, the secondary-button report and the new status block are in
+the working tree, not flashed). Everything below is a prototype for an attended demonstration.
+
+What it is. One dwell (START 1200 ms + 250 ms arming, adjustable 500-5000 ms, tolerance 2-50) does everything.
+The companion's palette window (`palette.html`, opened from the "Dwell action palette" panel) shows six large
+controls: Left-click (default), Right-click, Double-click, Drag, Drop, Cancel, Scroll, Stop. Each is a large
+labelled tile with a circular dwell-progress ring that fills while the pointer rests on it; a local hover
+highlight appears at once (the ring follows the device's own dwell). The selected action is written out
+("Selected action: ...") and a held drag shows a very large DRAGGING banner. Hold the pointer still on a
+control to choose it; hold still on a target to act on it. No physical click is needed anywhere. It is a normal
+companion window you place BESIDE the target application; it is not a system-wide overlay and is not kept on top.
+
+Behaviour (each covered by a test).
+- Left-click: one click per completed dwell; after any click the pointer must move deliberately (more than 1.5 x
+  the tolerance) before another dwell can arm.
+- Right-click and Double-click: one shot, then back to Left-click. Double-click is press, release, press, release.
+- Drag: dwell presses and holds the left button (DRAGGING is shown very large). The release dwell starts at once
+  where the button went down, so standing still for the dwell time releases it: a drag that was never started can
+  always be ended without moving. Moving restarts that dwell, so a real drag is not cut short. After a release,
+  deliberate movement is needed before the next press can arm. Entering the palette while dragging releases the
+  button FIRST (the release is sent before any selection can begin), and so does choosing another action.
+  The release is then CONFIRMED (the report was delivered with the button up) before any selection is
+  possible: a dwell that completes before that is counted as inhibited, and a failed release takes the existing
+  inhibiting fault path instead of being "confirmed". Release on entry means the button comes up where the
+  pointer enters the palette, not on the drop target: to drop on the target, dwell there (or stand still).
+- Drop and Cancel (dwell-selected palette controls, no movement needed): Drop releases a held drag and returns
+  to Left-click; Cancel does the same and also clears everything waiting (a chosen one-shot, an armed Scroll,
+  a click waiting out the commit time). Because entering the palette already releases a held button, they mostly
+  confirm and tidy up, but they work with no movement, and they are highlighted in red while a drag is held.
+- One selection per hover: after a control is chosen the pointer must leave it (to another control, the palette
+  background or the target) before it can be chosen again; staying on it, even through more dwells and
+  movement, selects nothing more.
+- Scroll: choosing it neither clicks nor freezes; dwell on the content starts it (no click); the pointer then
+  freezes and vertical head movement drives bounded wheel reports (neutral zone 3 deg/s beyond the 2.5 deg/s
+  pointer deadzone; head down scrolls down, following the pointer's reversal setting). The palette and the main
+  panel then show **HOLD STILL TO EXIT SCROLLING** in large type with a progress bar: hold BOTH axes still for the
+  dwell time. **Pausing to read also exits Scroll**; use a longer dwell for reading, or dwell on the content again.
+  Sideways movement is not stillness.
+- Stop: choosing it ends control. In Left, Right, Double, Drag and armed Scroll it is reachable by pointer dwell.
+  While Scroll is ACTIVE the pointer is frozen, so reach Stop by leaving Scroll first (hold still) or use the
+  website Stop or the physical button, which always work.
+- Stop, the physical button, a fault, a disconnect or turning the palette off clear every pending action, release
+  a held drag through the normal stop path and never restart by themselves. A failed release of a click, a
+  double-click or a drag release fails the emit and takes the existing inhibiting transport-fault path (the
+  session ends, an explicit restart is needed).
+
+### Compact window, keep option and pointer speed
+- The palette window is compact (about 300 x 560 px, two columns; the hint text is the tile's tooltip). It is an
+  ordinary browser window opened beside the working application: **it cannot guarantee always-on-top behaviour**
+  (another window can cover it), it is not a native overlay, and the device stops acting if it stops reporting.
+- **Keep selected action** (a checkbox in the main page's palette panel, off by default, off again at every
+  session start): Right-click and Double-click stay selected after they run, until another action or Cancel.
+  The current action is written out ("Selected action: ... one shot / KEPT"). It never applies to Drag or Scroll,
+  which always need their own dwell to start.
+- **Pointer speed** (a slider in the fallback panel, 0.25x-2x, default 1x, Reset; RAM only, kept until a reboot):
+  it multiplies the pointer step BEFORE the existing output bounds. It does not change the wheel speed, the
+  gesture thresholds or the buttons, and the per-report step limit (4 units) is not scaled, so a fast head
+  movement is clipped even at 1x. Because the dwell tolerance (8 units) and the re-arming distance (12 units)
+  count accumulated outgoing movement, **changing the speed also changes how much head movement leaves the
+  tolerance**: synthetic measurement, a 12 deg/s movement needs 77 / 22 / 13 ticks of 10 ms to accumulate 24
+  units at 0.25x / 1x / 2x, and the same short movement that re-arms the dwell at 1x does not at 0.25x. A speed
+  change restarts a dwell in progress. At 0.25x a slow drift needs much more movement to cancel a dwell; at 2x
+  a smaller movement cancels it.
+
+### Click-through: what is and is not guaranteed
+The device cannot see the screen. It learns that the pointer is on the palette only from reports sent by the
+companion page (browser -> localhost -> companion -> serial -> firmware), which can be late, lost or stale. "The
+palette window has no click handlers" does NOT prove that no OS click can leak, so the device does this instead:
+- A target action (click, right-click, double-click, drag press, scroll start) needs a FRESH palette report that
+  the pointer is outside the palette. The page repeats its report (every 0.5 s over a control, every 1 s outside); a
+  report older than 2.5 s counts as missing, and with no fresh report NOTHING acts on a target (the main panel and
+  the palette show "PALETTE WINDOW NOT REPORTING"). Releasing a held drag is the one action that never needs a
+  report (releasing is the safe direction).
+- A completed target dwell is not executed at once. It waits a 150 ms commit time, and a palette entry reported in
+  that time cancels it (movement beyond the tolerance cancels it too).
+- A palette entry (a control OR the bare palette window, reported as `frame`) inhibits target actions before any
+  selection begins; a completed dwell on a control selects it and never clicks, on the bare window it selects
+  nothing. The page reports `frame` for the whole page, so the margins and background count as the palette.
+- Leaving the palette clears the dwell and re-arms it only after deliberate movement. Choosing the same control
+  again needs deliberate movement too.
+- NOT guaranteed: a report that arrives later than about 1.6 s after the pointer stopped inside the palette (250 ms
+  arming + 1200 ms dwell + 150 ms commit) cannot be detected, and a click can then reach the target. The unit
+  tests show the boundary: no click for delays up to 1.55 s, a click for 1.9 s and more. The palette window's own
+  frame (title bar, borders) lies outside the page, so the page cannot report it: do not rest the pointer on the
+  window chrome (a drag press there would move the window). Browser background throttling, an occluded or minimised
+  window, or a stalled serial link make reports stale, which stops actions (fail closed) rather than leaking them.
+  This is NOT a guarantee against click-through.
+
+### Measured report delay (software and earlier hardware recording; hover over the new firmware is unmeasured)
+- Browser/companion/simulator path: median 0.4 ms, worst 0.7 ms over 300 hover commands. The software path is
+  negligible.
+- Real board, serial path, from the earlier 10 Hz status recording (firmware `1895b9f`-family frame of about 3.5 KB,
+  TWO clients polling the same link, so queueing is included; each cycle lasts max(100 ms, round trip)): median
+  105 ms; 32% of cycles over 150 ms; 15% at or over 500 ms (a cluster near 513 ms); 95th percentile 516 ms; 99th
+  536 ms; worst 835 ms; none between 1 s and the outages. Five outages over 1.5 s were recorded (10 s, 10 s, 59 s,
+  309 s, 1468 s). A hover report travels the same path and its acknowledgement is the same status frame (now about
+  4.1 KB), so delays of 0.5 s are to be expected and a stall can last seconds. A stall makes the report stale, so
+  actions stop. A delay between 1.6 s and 2.5 s is the uncovered window. The palette window now times every report
+  to the device's acknowledgement and shows last / median / 95% / worst / lost; read it during the demo.
+
+### Honest limits
+The dwell tolerance is in accumulated outgoing HID movement units, not verified screen pixels (the Mac applies
+pointer acceleration). Reading while in Scroll needs a longer dwell or re-entering Scroll. Scroll speed and the
+neutral zone are synthetic-input START values, never tried on a person. The extra reports raise serial traffic
+(2 Hz hovering, 1 Hz outside, each answered by a status frame); whether that aggravates the known serial stalls is
+unmeasured.
+
+### Attended demonstration (after an authorised firmware upload, pointer over a harmless target)
+Identify the board and its port yourself first (list the serial devices and the USB bus, confirm the companion
+reports the MPU-6500 on that port); never reuse a port name from an earlier session.
+1. Start without calibration; check pointing with every click mode off; open the palette window beside a test page.
+2. Enable the palette. Confirm the palette shows its link line, then Left-click: five dwells on a harmless button;
+   confirm one click each and no repeats.
+3. Right-click then Double-click on a page that shows them; confirm the return to Left-click.
+4. Drag a harmless item; confirm DRAGGING, move, release. Start a drag and stand still: it releases after the
+   dwell. Start a drag and move onto the palette: it releases before any selection. Press the physical button
+   during a drag: it releases and stops.
+5. Scroll a long page; confirm HOLD STILL TO EXIT SCROLLING; leave it by holding still; try the website Stop while
+   scrolling; note that pausing to read exits it.
+6. Dwell on each palette control, and on the bare palette background, with a page that would show a click if one
+   leaked; confirm none does. Close the palette window while the palette is enabled and confirm nothing clicks.
+Record per step: wrong or missed actions, accidental clicks, time to select, the link line (median/95%/worst/lost),
+any serial stall.
+
+## Bluetooth held-button link-loss test (SEPARATE, attended; not part of the normal demo)
+Open hardware question: does the Mac release a button that was held when the Bluetooth link dropped? The normal
+demo never switches the board off or drops the link during a drag. Run this only when the user asks for it,
+attended, with these preconditions: a harmless text area (not a file manager or a window you could move or
+delete from), the palette in Drag, the pointer over the text area, the website Stop and the physical button within
+reach, and a mouse or trackpad available to click and clear any stuck state. Procedure: start a drag (button held),
+then either power the board off or walk out of Bluetooth range; observe whether the Mac keeps dragging/selecting,
+then whether it stops by itself, and how long it takes; recover by clicking with the trackpad. Record the host
+behaviour, the time, and whether anything was selected or moved. Nothing in the software claims or assumes the
+result.
+
+## Desktop action overlay (software complete; needs the firmware with the overlay commands flashed)
+See `docs/OVERLAY.md` for the walkthrough, setup, permissions and limits. Firmware change: `actions overlay`,
+`actions menu`, `actions select`, `actions keyboard` and the `controller/menu/ready/keyboard` status fields;
+nothing is flashed yet, so the board still runs the previous build and the overlay cannot claim the controls on
+it. After an authorised upload run the attended checklist at the end of `docs/OVERLAY.md`, record the report delay
+and accidental actions as for the browser palette, and keep the Bluetooth held-button link-loss test separate.

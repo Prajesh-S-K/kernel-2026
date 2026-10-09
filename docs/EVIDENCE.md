@@ -76,6 +76,17 @@ Firmware: `esp32s3` (775,465 B flash), `esp32s3-sim` (782,773 B) and `esp32s3-n1
 GPIO defaults remain disabled and `NODX_ENABLE`/`NODX_BUZZER` default to -1. Compilation is not hardware
 qualification, and the DIO/QIO image-header question from the N16R8 note remains open.
 
+## Bench bring-up tooling (prepared; no hardware reading exists)
+
+Local preparation for the breadboard stages in [BENCH_PLAN](BENCH_PLAN.md): bench PlatformIO environments
+`bench-diag` (serial-only diagnostic), `bench-ble-probe` (real BLE adapter, reports only on command) and
+`bench-firmware` (the real firmware with the START pins), all of which build; `scripts/bench_log.py` and
+`scripts/bench_analyze.py` (local logging and START-threshold analysis); and host tests of the helpers
+(`tests/test_diag.cpp`, `tests/test_bench_tools.py`). The tests use synthetic logs and prove that the code does
+what it says, nothing about a board. One real defect was found by them (the analyser's burst list was
+overwritten by a summary key of the same name). Nothing was flashed, no port was opened and no USB port has
+been confirmed.
+
 ## Enable push button (momentary, four-pin tactile)
 
 The control-enable input is now, by default, one momentary push button (GPIO4 and GND on different contact

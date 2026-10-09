@@ -96,6 +96,162 @@ void command(const std::string& line, uint32_t now, bool truncated) {
         } else {
             ok = false;
         }
+    } else if (ok && operation == "map") {
+        std::string verb;
+        input >> verb;
+        ok = (input >> std::ws).eof();
+        if (ok && verb == "start") {
+            ok = system.teachStart(now);
+        } else if (ok && verb == "cancel") {
+            system.teachCancel();
+        } else if (ok && verb == "accept") {
+            ok = system.teachAccept();
+        } else if (ok && verb == "save") {
+            ok = system.teachSave();
+        } else if (ok && verb == "clear") {
+            system.clearLearned();
+        } else {
+            ok = false;
+        }
+    } else if (ok && operation == "capture") {
+#ifdef NODX_SIMULATED
+        ok = false;
+#else
+        std::string verb;
+        input >> verb;
+        if (verb == "start") {
+            unsigned seconds = 0;
+            ok = bool(input >> seconds) && (input >> std::ws).eof() && seconds >= 1 && seconds <= 20;
+            if (ok) {
+                captureState.count = 0;
+                captureState.untilMs = now + seconds * 1000u;
+                captureState.active = true;
+            }
+        } else if (verb == "stop") {
+            ok = (input >> std::ws).eof();
+            captureState.active = false;
+        } else if (verb == "get") {
+            unsigned long offset = 0;
+            ok = bool(input >> offset) && (input >> std::ws).eof() && offset < captureState.count;
+            if (ok) {
+                captureState.pageOffset = size_t(offset);
+            }
+        } else {
+            ok = false;
+        }
+#endif
+    } else if (ok && operation == "quick") {
+        std::string verb, value;
+        input >> verb;
+        if (verb == "practice") {
+            input >> value;
+            ok = (value == "fallback" || value == "configured") && (input >> std::ws).eof() &&
+                 system.quickPracticeStart(now, value == "configured");
+        } else if (verb == "enable") {
+            input >> value;
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setQuickGesture(value == "on", now);
+        } else if (verb == "set") {
+            float sensitivity = 0, tolerance = 0, angle = 0;
+            ok = bool(input >> sensitivity >> tolerance);
+            if (ok && !(input >> std::ws).eof()) {
+                ok = bool(input >> angle) && (input >> std::ws).eof() &&
+                     system.setQuickSettings(sensitivity, tolerance, angle);
+            } else if (ok) {
+                ok = system.setQuickSettings(sensitivity, tolerance);
+            }
+        } else if (verb == "retry" || verb == "cancel" || verb == "accept" || verb == "clear") {
+            ok = (input >> std::ws).eof();
+            if (ok && verb == "retry") {
+                system.quickPracticeRetry(now);
+            } else if (ok && verb == "cancel") {
+                system.quickPracticeCancel();
+            } else if (ok && verb == "accept") {
+                ok = system.quickPracticeAccept();
+            } else if (ok) {
+                system.quickClear();
+            }
+        } else {
+            ok = false;
+        }
+    } else if (ok && operation == "actions") {
+        std::string verb, value;
+        input >> verb >> value;
+        if (verb == "enable") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setActionPalette(value == "on", now);
+        } else if (verb == "overlay") {
+            unsigned long session = 0, epoch = 0;
+            if (value == "on") {
+                ok = bool(input >> session >> epoch) && (input >> std::ws).eof() &&
+                     session <= 0xFFFFFFFFul && epoch <= 0xFFFFFFFFul &&
+                     system.setActionOverlay(true, now, uint32_t(session), uint32_t(epoch));
+            } else if (value == "off") {
+                ok = bool(input >> epoch) && (input >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                     system.setActionOverlay(false, now, 0, uint32_t(epoch));
+            } else {
+                ok = false;
+            }
+        } else if (verb == "menu") {
+            unsigned long epoch = 0;
+            ok = (value == "open" || value == "close") && bool(input >> epoch) &&
+                 (input >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                 system.setOverlayMenu(value == "open", now, uint32_t(epoch));
+        } else if (verb == "select") {
+            nodx::PaletteTarget target;
+            unsigned long epoch = 0;
+            ok = nodx::parsePaletteTarget(value.c_str(), target) && bool(input >> epoch) &&
+                 (input >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                 system.overlaySelect(target, now, uint32_t(epoch));
+        } else if (verb == "keyboard") {
+            unsigned long epoch = 0;
+            ok = (value == "on" || value == "off") && bool(input >> epoch) &&
+                 (input >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                 system.setOverlayKeyboard(value == "on", uint32_t(epoch));
+        } else if (verb == "keep") {
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setActionKeep(value == "on");
+        } else if (verb == "hover") {
+            nodx::PaletteTarget target;
+            ok = nodx::parsePaletteTarget(value.c_str(), target) && (input >> std::ws).eof() &&
+                 system.setActionHover(target, now);
+        } else {
+            ok = false;
+        }
+    } else if (ok && operation == "click") {
+        std::string verb, value;
+        input >> verb;
+        if (verb == "train") {
+            input >> value;
+            ok = (value == "fallback" || value == "configured") && (input >> std::ws).eof() &&
+                 system.clickTrainStart(now, value == "configured");
+        } else if (verb == "enable") {
+            input >> value;
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setClickGesture(value == "on", now);
+        } else if (verb == "cancel" || verb == "accept" || verb == "clear") {
+            ok = (input >> std::ws).eof();
+            if (ok && verb == "cancel") {
+                system.clickTrainCancel();
+            } else if (ok && verb == "accept") {
+                ok = system.clickTrainAccept();
+            } else if (ok) {
+                system.clickClear();
+            }
+        } else {
+            ok = false;
+        }
+    } else if (ok && operation == "control") {
+        std::string verb;
+        input >> verb;
+        ok = (input >> std::ws).eof();
+        if (ok && verb == "start") {
+            ok = system.startConfiguredControl(now);
+        } else if (ok && verb == "stop") {
+            system.stopUncalibratedDemo("control stopped by the user; explicit restart required");
+        } else {
+            ok = false;
+        }
     } else if (ok && operation == "handsfree") {
         std::string verb, value;
         input >> verb;
@@ -108,6 +264,49 @@ void command(const std::string& line, uint32_t now, bool truncated) {
             if (ok) {
                 system.stageSwitchless(value == "on");
             }
+        } else if (verb == "demo") {
+            input >> value;
+            ok = (value == "on" || value == "off") && (input >> std::ws).eof() &&
+                 system.setDemoMovementOnly(value == "on");
+        } else if (verb == "uncal") {
+            input >> value;
+            if (value == "reverse") {
+                // reverse <horizontal 0|1> <vertical 0|1>   (RAM only)
+                int horizontal = -1, vertical = -1;
+                ok = bool(input >> horizontal >> vertical) && (input >> std::ws).eof() &&
+                     (horizontal == 0 || horizontal == 1) && (vertical == 0 || vertical == 1);
+                if (ok) {
+                    system.setUncalibratedReversal(horizontal == 1, vertical == 1);
+                }
+            } else if (value == "speed") {
+                // speed <factor 0.25-2>   (RAM only; works whether or not a session is running)
+                float factor = 0;
+                ok = bool(input >> factor) && (input >> std::ws).eof() &&
+                     system.setUncalibratedSpeed(factor, now);
+            } else if (value == "dwell") {
+                // dwell on|off  |  dwell set <ms> <tolerance>   (RAM only, demo must be running)
+                std::string action;
+                input >> action;
+                if (action == "on" || action == "off") {
+                    ok = (input >> std::ws).eof() &&
+                         system.setUncalibratedDwell(action == "on", now);
+                } else if (action == "set") {
+                    unsigned long dwellMs = 0;
+                    float tolerance = 0;
+                    ok = bool(input >> dwellMs >> tolerance) && (input >> std::ws).eof() &&
+                         system.setUncalibratedDwellSettings(uint32_t(dwellMs), tolerance);
+                } else {
+                    ok = false;
+                }
+            } else {
+                ok = (value == "start" || value == "stop") && (input >> std::ws).eof();
+                if (ok && value == "start") {
+                    ok = system.startUncalibratedDemo(now);
+                } else if (ok) {
+                    system.stopUncalibratedDemo(
+                        "demo stopped by the user; explicit restart required");
+                }
+            }
         } else if (verb == "enable") {
             input >> value;
             ok = (value == "maintained" || value == "momentary") && (input >> std::ws).eof();
@@ -117,6 +316,14 @@ void command(const std::string& line, uint32_t now, bool truncated) {
             }
         } else {
             ok = false;
+        }
+    } else if (ok && operation == "calibrate" && !(input >> std::ws).eof()) {
+        std::string mode;
+        input >> mode;
+        ok = mode == "guided" && (input >> std::ws).eof();
+        if (ok) {
+            system.calibrate(now, nodx::start::calibrationCueMs);
+            ok = system.state == SystemState::Calibrating;
         }
     } else if (ok && !(input >> std::ws).eof()) {
         ok = false;

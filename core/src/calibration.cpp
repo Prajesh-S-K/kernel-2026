@@ -41,10 +41,11 @@ void Statistics::add(float value) {
 float Statistics::sigma() const {
     return count > 1 ? std::sqrt(m2 / (count - 1)) : 0.f;
 }
-void CalibrationEngine::start(uint32_t now) {
+void CalibrationEngine::start(uint32_t now, uint32_t leadMs) {
     *this = CalibrationEngine{};
     phase = CalPhase::Rest;
-    phaseStart_ = now;
+    leadMs_ = leadMs;
+    phaseStart_ = now + leadMs;
     reason = "collecting";
 }
 void CalibrationEngine::cancel() {
@@ -61,8 +62,15 @@ float CalibrationEngine::progress(uint32_t now) const {
     if (phase >= CalPhase::Analyze) {
         return .95f;
     }
-    return (int(phase) - 1 + std::min(1.f, float(uint32_t(now - phaseStart_)) / start::phaseMs)) /
-           6.f;
+    float elapsed = std::max(0.f, float(int32_t(now - phaseStart_)));
+    return (int(phase) - 1 + std::min(1.f, elapsed / start::phaseMs)) / 6.f;
+}
+uint32_t CalibrationEngine::cueRemainingMs(uint32_t now) const {
+    if (phase < CalPhase::Rest || phase > CalPhase::Natural) {
+        return 0;
+    }
+    int32_t left = int32_t(phaseStart_ - now);
+    return left > 0 ? uint32_t(left) : 0;
 }
 void CalibrationEngine::tick(const MotionSample& sample, uint32_t now) {
     if (phase < CalPhase::Rest || phase > CalPhase::Save) {
@@ -92,6 +100,9 @@ void CalibrationEngine::tick(const MotionSample& sample, uint32_t now) {
     if (phase == CalPhase::Save) {
         return; // System owns transactional persistence
     }
+    if (phase <= CalPhase::Natural && int32_t(now - phaseStart_) < 0) {
+        return; // countdown cue: nothing is collected yet
+    }
     if (phase == CalPhase::Rest) {
         for (unsigned i = 0; i < 3; ++i) {
             rest_[i].add(sample.gyro[i]);
@@ -116,7 +127,7 @@ void CalibrationEngine::tick(const MotionSample& sample, uint32_t now) {
         return;
     }
     phase = static_cast<CalPhase>(int(phase) + 1);
-    phaseStart_ = now;
+    phaseStart_ = phase <= CalPhase::Natural ? now + leadMs_ : now;
 }
 void CalibrationEngine::analyze() {
     for (unsigned i = 0; i < 3; ++i) {

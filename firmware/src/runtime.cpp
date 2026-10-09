@@ -1,4 +1,6 @@
 #include "runtime.hpp"
+#include <algorithm>
+#include <cmath>
 NVSStorage storage;
 I2CBus bus;
 MPU6050Sensor mpu(bus);
@@ -7,12 +9,32 @@ BLEHID ble;
 ProfileRepository repository(storage);
 NVSConfigStorage configStorage;
 HandsFreeRepository configRepository(configStorage);
+NVSControlStorage controlStorage;
+ControlRepository controlRepository(controlStorage);
 #ifdef NODX_SIMULATED
 bool simulatedEnable = false; // raw enable input: released
 std::vector<Rates> gestureScript;
 size_t gesturePosition = 0;
 #endif
 System* systemEngine = nullptr;
+SensorSnapshot sensorSnapshot;
+CaptureState captureState;
+CaptureRow captureRows[captureCapacity];
+void captureSample(const MotionSample& sample, uint32_t now) {
+    if (!captureState.active) {
+        return;
+    }
+    if (captureState.count >= captureCapacity || int32_t(now - captureState.untilMs) >= 0) {
+        captureState.active = false;
+        return;
+    }
+    CaptureRow& row = captureRows[captureState.count++];
+    row.t = now;
+    for (unsigned i = 0; i < 3; ++i) {
+        row.g[i] = int16_t(std::lround(std::clamp(sample.gyro[i] * 131.f, -32768.f, 32767.f)));
+        row.a[i] = int16_t(std::lround(std::clamp(sample.accel[i] * 16384.f, -32768.f, 32767.f)));
+    }
+}
 DebouncedSwitch pauseSwitch, calSwitch;
 uint32_t lastPoll = 0, lastSample = 0, lastProbe = 0, lastDiagnostic = 0;
 bool previousPause = false, previousCal = false;
@@ -21,10 +43,11 @@ bool serialOverflow = false;
 bool pressed(int pin) {
     return pin >= 0 && digitalRead(pin) == LOW;
 }
+const char* bootResetReason = "UNKNOWN";
 void initializeRuntime() {
     Serial.begin(115200);
     Serial.println("[NODX] 0.2.0 pre-hardware; START parameters; ESP32-S3");
-    bool storageOK = storage.begin() && configStorage.begin();
+    bool storageOK = storage.begin() && configStorage.begin() && controlStorage.begin();
     Serial.println(storageOK ? "[STORAGE] initialized" : "[STORAGE] failed");
     for (int pin : {NODX_SWITCH, NODX_PAUSE, NODX_CALIBRATE, NODX_ENABLE}) {
         if (pin >= 0) {
@@ -40,15 +63,37 @@ void initializeRuntime() {
         Wire.setTimeOut(20);
     }
     bool imuOK = mpu.begin();
-    Serial.println(imuOK ? "[IMU] detected" : "[IMU] unavailable; outputs inhibited");
+    Serial.println(imuOK ? (std::string("[IMU] detected ") + nodx::name(mpu.variant())).c_str()
+                         : "[IMU] unavailable; outputs inhibited");
     ble.begin();
     systemEngine = new System(ble, repository, configRepository);
+    systemEngine->setControlRepository(controlRepository);
     // Hands-free needs the enable input (switch or push button); without NODX_ENABLE control stays
     // inhibited unless setup qualified an alternative.
 #ifdef NODX_SIMULATED
     systemEngine->configureEnableInput(true);
 #else
     systemEngine->configureEnableInput(NODX_ENABLE >= 0);
+#endif
+#ifndef NODX_SIMULATED
+    // Optional MEASURED sensor-to-head axis mapping from the build (bench sessions): gyro
+    // axes/signs for yaw, pitch, roll and accel axes/signs for mapped x, lateral y, vertical z.
+    // Without these flags the START mount assumption in AxisTransform applies. An invalid mapping
+    // makes every sample invalid.
+#ifdef NODX_GYRO_AXES
+    systemEngine->axes.axes = {NODX_GYRO_AXES};
+#endif
+#ifdef NODX_GYRO_SIGNS
+    systemEngine->axes.signs = {NODX_GYRO_SIGNS};
+#endif
+#ifdef NODX_ACCEL_AXES
+    systemEngine->axes.accelAxes = {NODX_ACCEL_AXES};
+#endif
+#ifdef NODX_ACCEL_SIGNS
+    systemEngine->axes.accelSigns = {NODX_ACCEL_SIGNS};
+#endif
+    Serial.println(systemEngine->axes.valid() ? "[AXES] mapping valid"
+                                              : "[AXES] mapping INVALID; samples will be rejected");
 #endif
 #ifdef NODX_SIMULATED
     systemEngine->axes.axes = {0, 1, 2};
@@ -123,6 +168,16 @@ void serviceRuntime() {
 #else
         MotionSample sample = mpu.read(now);
         if (sample.valid) {
+            const double dt =
+                sensorSnapshot.seen ? double(uint32_t(now - sensorSnapshot.lastAtMs)) / 1000.0 : 0;
+            for (unsigned i = 0; i < 3 && dt > 0 && dt <= 0.05; ++i) {
+                sensorSnapshot.angle[i] += double(sample.gyro[i]) * dt;
+            }
+            captureSample(sample, now);
+            sensorSnapshot.last = sample;
+            sensorSnapshot.seen = true;
+            sensorSnapshot.lastAtMs = now;
+            ++sensorSnapshot.frames;
             lastSample = now;
             s.tick(sample, now, selectionPressed);
         } else if (uint32_t(now - lastSample) > start::timeoutMs) {

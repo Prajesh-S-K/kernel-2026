@@ -1,5 +1,6 @@
 """Bounded native/serial transport; a failed native session must be restarted."""
 
+import faulthandler
 import json
 import math
 import os
@@ -93,13 +94,85 @@ class NativeDevice:
 class SerialDevice:
     """Correlate acknowledgements; retain fragments until a complete JSON line."""
 
+    # After this many consecutive timeouts the link is reopened once (which reboots the board).
+    AUTO_REOPEN_AFTER = 5
+    AUTO_REOPEN_COOLDOWN_SECONDS = 15.0
+
     def __init__(self, port):
+        self.port = port
+        self.failures = 0
+        self.last_reopen = 0.0
+        self._open()
+        self.sequence = 0
+        # Optional raw capture of everything the device sends (bench evidence; kept local).
+        tee = os.environ.get("NODX_SERIAL_TEE")
+        self.tee = open(tee, "ab", buffering=0) if tee else None
+
+    def _open(self):
         import serial
 
-        self.serial = serial.Serial(port, 115200, timeout=0.05, write_timeout=0.2)
-        self.sequence = 0
+        # DTR/RTS are held LOW before the port opens: on the ESP32-S3 native USB port their edges
+        # reset the chip, and the companion must not reboot the device by connecting to it.
+        self.serial = serial.Serial()
+        self.serial.port = self.port
+        self.serial.baudrate = 115200
+        self.serial.timeout = 0.05
+        self.serial.write_timeout = 0.2
+        self.serial.dtr = False
+        self.serial.rts = False
+        self.serial.open()
+
+    def reopen(self):
+        """Close and reopen the port. The board reboots (opening the native USB port resets it), so
+        every mode and latch starts from its safe boot state; nothing is saved or erased."""
+        try:
+            self.serial.close()
+        except OSError:
+            pass
+        time.sleep(0.3)
+        self._open()
+        self.failures = 0
+        self.last_reopen = time.monotonic()
 
     def request(self, command):
+        try:
+            reply = self._traced(command)
+        except RuntimeError as error:
+            if "timed out" in str(error):
+                self.failures = getattr(self, "failures", 0) + 1
+                cooldown = time.monotonic() - getattr(self, "last_reopen", 0.0)
+                if (
+                    self.failures >= self.AUTO_REOPEN_AFTER
+                    and cooldown > self.AUTO_REOPEN_COOLDOWN_SECONDS
+                ):
+                    self.reopen()
+            raise
+        self.failures = 0
+        return reply
+
+    def _traced(self, command):
+        # Optional bench trace (NODX_SERIAL_TRACE=<file>): every non-status command, every slow or
+        # failed request, and a thread dump if one request runs longer than four seconds.
+        trace = os.environ.get("NODX_SERIAL_TRACE")
+        if not trace:
+            return self._request(command)
+        started = time.monotonic()
+        with open(trace, "a", buffering=1) as log:
+            faulthandler.dump_traceback_later(4, file=log)
+            try:
+                reply = self._request(command)
+                outcome = "ok"
+                return reply
+            except Exception as error:
+                outcome = f"ERROR {error}"
+                raise
+            finally:
+                faulthandler.cancel_dump_traceback_later()
+                elapsed = time.monotonic() - started
+                if outcome != "ok" or elapsed > 0.5 or command.split()[0] not in ("status", "step"):
+                    log.write(f"{time.time():.3f} {command[:60]!r} {outcome} {elapsed:.3f}s\n")
+
+    def _request(self, command):
         op = command.split()[0]
         if op in ("corrupt", "record"):
             raise ValueError("This action is available only for the native simulator")
@@ -114,6 +187,8 @@ class SerialDevice:
         pending = bytearray()
         while time.monotonic() < deadline:
             fragment = self.serial.readline()
+            if getattr(self, "tee", None) and fragment:
+                self.tee.write(fragment)
             pending.extend(fragment)
             if len(pending) > MAX_REPLY_BYTES:
                 raise ValueError("Serial reply too large")

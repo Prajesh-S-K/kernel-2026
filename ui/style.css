@@ -1181,3 +1181,140 @@ hr {
   color: inherit;
   font: inherit;
 }
+
+.uncal-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 24px;
+  background: #5a1d1d;
+  color: #ffe9e4;
+  border-bottom: 2px solid #ff7a66;
+  letter-spacing: 0.08em;
+}
+.uncal-banner[hidden] {
+  display: none;
+}
+.uncal-banner span {
+  flex: 1;
+  opacity: 0.85;
+}
+.uncal-stop {
+  background: #d93a2b;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 12px 22px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.uncal-stop:disabled {
+  background: #3a2a2a;
+  color: #8a7470;
+  cursor: not-allowed;
+}
+.uncal[hidden] {
+  display: none;
+}
+.uncal {
+  margin-bottom: 20px;
+  border-color: #6b3a33;
+}
+.uncal-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.uncal-status {
+  font-weight: 600;
+}
+.uncal-note,
+.uncal-grid small {
+  color: var(--muted);
+}
+.uncal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+}
+.uncal-grid ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.uncal-dwell {
+  margin: 14px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.uncal-bar {
+  height: 8px;
+  background: #1a2a32;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+.uncal-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--cyan);
+}
+.uncal-dwell input[type='number'] {
+  width: 90px;
+  background: #0b1217;
+  color: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px;
+}
+.uncal-dwell small {
+  color: var(--muted);
+  display: block;
+}
+
+.map-big {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  min-height: 70px;
+  color: var(--cyan);
+}
+.map-preview {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.map-preview i {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  left: 50%;
+  top: 50%;
+}
+.map-preview[hidden] {
+  display: none;
+}
+
+/* The older trained-gesture recogniser stays collapsed and visually apart from the quick gesture. */
+.older-recognizer {
+  margin-top: 28px;
+  border-style: dashed;
+  opacity: 0.75;
+}
+.older-recognizer > summary {
+  cursor: pointer;
+  font-size: 0.85em;
+}
