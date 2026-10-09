@@ -395,42 +395,59 @@ class CommandValidation(HandsFreeCase):
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 SERVER.command_for(bad)
+        claim = {"action": "actions", "op": "overlay", "enabled": True, "session": 3, "epoch": 99}
+        self.assertEqual(SERVER.command_for(claim), "actions overlay on 3 99")
         self.assertEqual(
-            SERVER.command_for({"action": "actions", "op": "overlay", "enabled": True}),
-            "actions overlay on",
+            SERVER.command_for(
+                {"action": "actions", "op": "overlay", "enabled": False, "epoch": 99}
+            ),
+            "actions overlay off 99",
         )
         self.assertEqual(
-            SERVER.command_for({"action": "actions", "op": "overlay", "enabled": False}),
-            "actions overlay off",
+            SERVER.command_for({"action": "actions", "op": "menu", "open": True, "epoch": 99}),
+            "actions menu open 99",
         )
         self.assertEqual(
-            SERVER.command_for({"action": "actions", "op": "menu", "open": True}),
-            "actions menu open",
+            SERVER.command_for({"action": "actions", "op": "menu", "open": False, "epoch": 99}),
+            "actions menu close 99",
         )
         self.assertEqual(
-            SERVER.command_for({"action": "actions", "op": "menu", "open": False}),
-            "actions menu close",
-        )
-        self.assertEqual(
-            SERVER.command_for({"action": "actions", "op": "keyboard", "enabled": True}),
-            "actions keyboard on",
+            SERVER.command_for(
+                {"action": "actions", "op": "keyboard", "enabled": True, "epoch": 99}
+            ),
+            "actions keyboard on 99",
         )
         for target in ("left", "right", "double", "drag", "drop", "cancel", "scroll", "stop"):
             self.assertEqual(
-                SERVER.command_for({"action": "actions", "op": "select", "target": target}),
-                f"actions select {target}",
+                SERVER.command_for(
+                    {"action": "actions", "op": "select", "target": target, "epoch": 99}
+                ),
+                f"actions select {target} 99",
             )
         for bad in (
-            {"action": "actions", "op": "overlay"},
-            {"action": "actions", "op": "overlay", "enabled": 1},
-            {"action": "actions", "op": "menu"},
-            {"action": "actions", "op": "menu", "open": "yes"},
-            {"action": "actions", "op": "keyboard"},
-            {"action": "actions", "op": "select"},
-            {"action": "actions", "op": "select", "target": "frame"},
-            {"action": "actions", "op": "select", "target": "none"},
-            {"action": "actions", "op": "select", "target": "left; stop"},
-            {"action": "actions", "op": "select", "target": 1},
+            {"action": "actions", "op": "overlay", "enabled": True, "epoch": 99},  # no session
+            {"action": "actions", "op": "overlay", "enabled": True, "session": 3},  # no epoch
+            {"action": "actions", "op": "overlay", "enabled": True, "session": 3, "epoch": 0},
+            {"action": "actions", "op": "overlay", "enabled": True, "session": -1, "epoch": 5},
+            {
+                "action": "actions",
+                "op": "overlay",
+                "enabled": True,
+                "session": 3,
+                "epoch": 4294967296,
+            },
+            {"action": "actions", "op": "overlay", "enabled": True, "session": "3", "epoch": 5},
+            {"action": "actions", "op": "overlay", "enabled": False},
+            {"action": "actions", "op": "menu", "open": True},
+            {"action": "actions", "op": "menu", "open": "yes", "epoch": 5},
+            {"action": "actions", "op": "keyboard", "enabled": True},
+            {"action": "actions", "op": "select", "target": "left"},
+            {"action": "actions", "op": "select", "target": "frame", "epoch": 5},
+            {"action": "actions", "op": "select", "target": "none", "epoch": 5},
+            {"action": "actions", "op": "select", "target": "left; stop", "epoch": 5},
+            {"action": "actions", "op": "select", "target": 1, "epoch": 5},
+            {"action": "actions", "op": "select", "target": "left", "epoch": True},
+            {"action": "actions", "op": "select", "target": "left", "epoch": 1.5},
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 SERVER.command_for(bad)
@@ -1175,28 +1192,41 @@ class ActionPaletteSimulatorTest(HandsFreeCase):
         self.quiet(50)
         self.assertTrue(self.send("handsfree uncal start")["ok"])
         self.quiet(50)
-        claim = self.send("actions overlay on")
+        status = self.send("status")["actions"]
+        session, epoch = status["session"], 5000
+        claim = self.send(f"actions overlay on {session} {epoch}")
         self.assertTrue(claim["ok"] and claim["actions"]["controller"] == "OVERLAY")
+        self.assertEqual(claim["actions"]["epoch"], epoch)
         # one controller at a time
         self.assertFalse(self.send("actions enable on")["ok"])
         self.assertFalse(self.send("actions hover left")["ok"])
         # the menu state is acknowledged in the reply; selection needs it
-        self.assertFalse(self.send("actions select right")["ok"], "selected with the menu closed")
-        opened = self.send("actions menu open")
+        self.assertFalse(
+            self.send(f"actions select right {epoch}")["ok"], "selected with the menu closed"
+        )
+        opened = self.send(f"actions menu open {epoch}")
         self.assertTrue(opened["ok"] and opened["actions"]["menu"] and opened["actions"]["ready"])
-        chosen = self.send("actions select right")
+        # a stale epoch is refused, whatever it says
+        self.assertFalse(self.send(f"actions select right {epoch - 1}")["ok"])
+        chosen = self.send(f"actions select right {epoch}")
         self.assertTrue(chosen["ok"] and chosen["actions"]["mode"] == "RIGHT")
-        self.assertTrue(self.send("actions keyboard on")["actions"]["keyboard"])
-        self.assertFalse(self.send("actions keyboard maybe")["ok"])
-        chosen = self.send("actions select left")  # any action returns to ordinary control
+        self.assertTrue(self.send(f"actions keyboard on {epoch}")["actions"]["keyboard"])
+        self.assertFalse(self.send(f"actions keyboard maybe {epoch}")["ok"])
+        chosen = self.send(f"actions select left {epoch}")  # any action returns to ordinary control
         self.assertTrue(chosen["ok"] and not chosen["actions"]["keyboard"])
-        self.assertTrue(self.send("actions menu close")["ok"])
-        stop = self.send("actions menu open")
-        self.assertTrue(stop["ok"])
-        stopped = self.send("actions select stop")
+        self.assertTrue(self.send(f"actions menu close {epoch}")["ok"])
+        self.assertTrue(self.send(f"actions menu open {epoch}")["ok"])
+        stopped = self.send(f"actions select stop {epoch}")
         self.assertTrue(stopped["ok"])
         self.assertNotEqual(stopped["state"], "ACTIVE")
         self.assertEqual(stopped["actions"]["controller"], "NONE")
+        # a delayed claim from that old session is refused, even after an explicit new start
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        late = self.send(f"actions overlay on {session} {epoch + 1}")
+        self.assertFalse(late["ok"], "a stale claim reclaimed the controls in a new session")
+        self.assertEqual(late["actions"]["controller"], "NONE")
 
     def test_without_palette_reports_nothing_clicks(self):
         self.quiet(50)

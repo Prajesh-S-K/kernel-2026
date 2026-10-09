@@ -289,13 +289,19 @@ class OverlayApp:
         self.view.setNeedsDisplay_(True)
         self._debug(now, view)
 
+    def release_controls(self):
+        """Tell the device the overlay is going away: close the menu report and release the claim, both under the
+        epoch in force (a command from an older epoch would be refused)."""
+        self.controller.worker.stop()
+        bridge = self.controller.worker.bridge
+        model = self.controller.model
+        for kind in ("menu", "overlay"):
+            bridge.post(body_for(kind, False, model.session, model.epoch))
+
     def shutdown(self):
         """A clean quit switches the overlay's device controls off at once (a held button is released by the
         device's normal path). A crash or kill -9 cannot do this: the device then times the overlay out in 5 s."""
-        self.controller.worker.stop()
-        bridge = self.controller.worker.bridge
-        for kind, value in (("menu", False), ("overlay", False)):
-            bridge.post(body_for(kind, value))
+        self.release_controls()
         NSApplication.sharedApplication().terminate_(None)
 
     def _debug(self, now, view):

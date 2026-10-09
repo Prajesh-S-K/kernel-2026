@@ -175,10 +175,17 @@ public:
     // Desktop overlay controller (the browser palette and the overlay are mutually exclusive: one active
     // controller at a time, and a command from the other one is refused). The overlay times its own menu
     // dwell and the device keeps timing the target dwell, so no action can be executed by both.
-    bool setActionOverlay(bool on, uint32_t now);
-    bool setOverlayMenu(bool on, uint32_t now);            // the pointer is on the overlay (acknowledged in status)
-    bool overlaySelect(PaletteTarget target, uint32_t now); // a validated menu selection
-    bool setOverlayKeyboard(bool on);                      // system keyboard open: target dwell clicks suppressed
+    // Every overlay command carries a token so a delayed or queued command from an OLD overlay session can
+    // never act: a claim must name the CURRENT session serial (bumped by every explicit start) and an epoch
+    // higher than any accepted before; menu, select and keyboard commands must carry the epoch of the claim
+    // that is in force. Anything else is refused, whatever its content.
+    bool setActionOverlay(bool on, uint32_t now, uint32_t session, uint32_t epoch);
+    bool setOverlayMenu(bool on, uint32_t now, uint32_t epoch);            // the pointer is on the overlay
+    bool overlaySelect(PaletteTarget target, uint32_t now, uint32_t epoch); // a validated menu selection
+    bool setOverlayKeyboard(bool on, uint32_t epoch);                      // system keyboard: target dwell clicks paused
+    uint32_t sessionSerial() const {
+        return sessionSerial_;
+    }
     // "Keep selected action" (needs the palette on; off at every start): Right and Double stay selected.
     bool setActionKeep(bool on);
     bool actionPaletteEnabled() const {
@@ -272,6 +279,7 @@ private:
     ActionPalette palette_;
     bool actionsEnabled_ = false;
     PaletteTarget hoverSeen_ = PaletteTarget::None;
+    uint32_t sessionSerial_ = 0, lastOverlayEpoch_ = 0;
     int actionsWheel_ = 0;
     uint32_t uncalDwellMs_ = start::uncalDwellMs;
     float uncalDwellTolerance_ = start::uncalDwellTolerance;

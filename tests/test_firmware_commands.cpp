@@ -519,20 +519,23 @@ void hardwareChecks() {
     expect(ok(send("handsfree uncal speed 0.5")) && has(status(), "\"speed\":0.50"),
            "a valid pointer speed is accepted and reported");
     expect(ok(send("handsfree uncal speed 1")) && has(status(), "\"speed\":1.00"), "speed reset");
-    // Desktop overlay controller: validated, refused without a session or the claim.
-    expect(refused(send("actions overlay on")), "the overlay needs a running session");
-    for (const char* bad : {"actions overlay", "actions overlay maybe", "actions overlay on now",
-                            "actions menu", "actions menu maybe", "actions menu open now",
-                            "actions select", "actions select middle", "actions select left now",
-                            "actions select frame", "actions select none", "actions keyboard",
-                            "actions keyboard maybe"}) {
+    // Desktop overlay controller: validated, refused without a session or the claim; every command needs its token.
+    expect(refused(send("actions overlay on 1 1000")), "the overlay needs a running session");
+    for (const char* bad :
+         {"actions overlay", "actions overlay maybe", "actions overlay on", "actions overlay on 1",
+          "actions overlay on 1 0", "actions overlay on 1 1000 now", "actions overlay on -1 1000",
+          "actions overlay on 1 4294967296", "actions overlay on x 1000", "actions overlay off",
+          "actions menu", "actions menu maybe 5", "actions menu open", "actions menu open 5 now",
+          "actions select", "actions select middle 5", "actions select left", "actions select left 5 now",
+          "actions select frame 5", "actions select none 5", "actions keyboard", "actions keyboard on",
+          "actions keyboard maybe 5"}) {
         expect(refused(send(bad)), bad);
     }
-    expect(refused(send("actions menu open")) && refused(send("actions menu close")) &&
-               refused(send("actions select left")) && refused(send("actions select stop")) &&
-               refused(send("actions keyboard on")),
+    expect(refused(send("actions menu open 5")) && refused(send("actions menu close 5")) &&
+               refused(send("actions select left 5")) && refused(send("actions select stop 5")) &&
+               refused(send("actions keyboard on 5")),
            "overlay commands refused without the overlay claim");
-    expect(ok(send("actions overlay off")), "releasing an unclaimed overlay is accepted");
+    expect(ok(send("actions overlay off 5")), "releasing an unclaimed overlay is accepted");
     expect(has(status(), "\"controller\":\"NONE\"") && has(status(), "\"menu\":false") &&
                has(status(), "\"keyboard\":false"),
            "controller fields reported");

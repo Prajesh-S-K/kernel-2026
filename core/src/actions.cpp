@@ -98,11 +98,13 @@ void ActionPalette::reset() {
     keep_ = false; // the option is off at every session and every reset
     keyboard_ = false;
     controller_ = Controller::None;
+    epoch_ = 0;
 }
-void ActionPalette::claim(Controller controller, uint32_t now) {
+void ActionPalette::claim(Controller controller, uint32_t now, uint32_t epoch) {
     reset();
     controller_ = controller;
     claimedAt_ = now;
+    epoch_ = epoch;
 }
 bool ActionPalette::setMenu(bool on, uint32_t now) {
     if (controller_ != Controller::Overlay) {
@@ -379,7 +381,7 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         "\"dwellMs\":%lu,\"tolerance\":%.1f,\"neutral\":%.1f,"
         "\"dwell\":{\"state\":\"%s\",\"progress\":%.3f},\"exit\":{\"progress\":%.3f},"
         "\"locked\":\"%s\",\"controller\":\"%s\",\"menu\":%s,\"ready\":%s,\"keyboard\":%s,"
-        "\"keyboardSuppressed\":%lu,\"lostMs\":%lu,"
+        "\"keyboardSuppressed\":%lu,\"lostMs\":%lu,\"session\":%lu,\"epoch\":%lu,\"epochFloor\":%lu,"
         "\"counts\":{\"left\":%lu,\"right\":%lu,\"double\":%lu,\"dragStart\":%lu,"
         "\"dragRelease\":%lu,\"scrollStart\":%lu,\"scrollExit\":%lu,\"wheel\":%lu,"
         "\"drop\":%lu,\"cancel\":%lu},"
@@ -392,7 +394,8 @@ size_t actionsJson(char* out, size_t capacity, const ActionsStatus& s) {
         s.tolerance, s.neutral, s.dwellState, s.dwellProgress, s.exitProgress, s.locked,
         s.controller, s.menu ? "true" : "false", s.ready ? "true" : "false",
         s.keyboard ? "true" : "false", static_cast<unsigned long>(s.keyboardSuppressed),
-        static_cast<unsigned long>(s.lostMs),
+        static_cast<unsigned long>(s.lostMs), static_cast<unsigned long>(s.session),
+        static_cast<unsigned long>(s.epoch), static_cast<unsigned long>(s.epochFloor),
         static_cast<unsigned long>(s.left), static_cast<unsigned long>(s.right),
         static_cast<unsigned long>(s.doubles), static_cast<unsigned long>(s.dragStarts),
         static_cast<unsigned long>(s.dragReleases), static_cast<unsigned long>(s.scrollStarts),

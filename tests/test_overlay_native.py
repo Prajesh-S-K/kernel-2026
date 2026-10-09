@@ -44,6 +44,45 @@ class NativePanel(unittest.TestCase):
         self.assertTrue(self.result["canJoinAllSpaces"])
         self.assertTrue(self.result["fullScreenAuxiliary"])
 
+    def test_a_clean_quit_releases_the_claim_with_the_epoch_in_force(self):
+        class Recorder:
+            def __init__(self):
+                self.bodies = []
+
+            def post(self, body):
+                self.bodies.append(body)
+                return {"ok": True}
+
+        class W:
+            def __init__(self, bridge):
+                self.bridge = bridge
+
+            def stop(self):
+                pass
+
+            def drain(self):
+                return []
+
+            def send(self, *a, **k):
+                pass
+
+            def ensure_traffic(self, *a):
+                pass
+
+            def set_epoch(self, *a):
+                pass
+
+        recorder = Recorder()
+        model = app.L.OverlayModel("macos", epoch0=555)
+        model.on_reply({"state": "ACTIVE", "actions": {"session": 4}}, 1.0)
+        panel_app = app.OverlayApp(app.Controller(W(recorder), model), "right")
+        panel_app.panel.setFrameOrigin_((-20000.0, -20000.0))
+        panel_app.release_controls()
+        self.assertEqual(
+            [(b["op"], b.get("open", b.get("enabled")), b["epoch"]) for b in recorder.bodies],
+            [("menu", False, 555), ("overlay", False, 555)],
+        )
+
     def test_every_state_renders(self):
         self.assertEqual(len(self.result["png"]), 8)
         for path in self.result["png"]:

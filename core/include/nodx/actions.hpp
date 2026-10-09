@@ -87,6 +87,8 @@ struct ActionsStatus {
              scrollExits = 0, wheelUnits = 0;
     bool keep = false;           // "keep selected action": Right and Double stay selected after executing
     const char* controller = "NONE";
+    uint32_t session = 0, epoch = 0;   // the session serial and the overlay claim epoch (stale commands are refused)
+    uint32_t epochFloor = 0;           // the highest overlay epoch ever accepted: a new claim must be above it
     bool menu = false;           // overlay: the pointer is on the overlay (target actions inhibited)
     bool ready = false;          // overlay: menu active, report fresh, any held drag released AND confirmed
     bool keyboard = false;       // overlay: keyboard mode (target dwell clicks suppressed)
@@ -135,7 +137,10 @@ public:
         return controller_;
     }
     // Claim the palette for a controller (None releases it). Claiming resets everything else.
-    void claim(Controller controller, uint32_t now);
+    void claim(Controller controller, uint32_t now, uint32_t epoch = 0);
+    uint32_t epoch() const { // the overlay claim this palette belongs to (0 for the browser or none)
+        return epoch_;
+    }
     // Overlay report: the pointer is on the overlay (tile or menu) or not. The overlay repeats it; a
     // report older than actionReportFreshMs counts as missing. While on the overlay target actions are
     // inhibited, a held drag is released first, and nothing can be selected until that release is confirmed.
@@ -195,7 +200,7 @@ private:
     bool everReported_ = false, pending_ = false, releaseUnconfirmed_ = false, keep_ = false,
          keyboard_ = false;
     Controller controller_ = Controller::None;
-    uint32_t claimedAt_ = 0;
+    uint32_t claimedAt_ = 0, epoch_ = 0;
     PaletteTarget lockedTarget_ = PaletteTarget::None;
     float pendingX_ = 0, pendingY_ = 0;
     void select(PaletteTarget target);

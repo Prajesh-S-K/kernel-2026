@@ -8,6 +8,7 @@ display scaling (Retina) does not change any of the numbers here.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 
 MENU_ITEMS = (
@@ -45,6 +46,11 @@ HEARTBEAT_S = 0.5  # the overlay repeats its state; the device treats > 2.5 s of
 LOST_AFTER_S = 2.5  # no successful bridge reply for this long: the overlay is "lost"
 CLAIM_GRACE_S = 1.5  # a claim command is in flight: the status may not show it yet
 DEFAULT_DWELL_S = 1.2
+KEYBOARD_HINT = (
+    "Keyboard mode: NodX clicks are paused. NodX only knows the keyboard's host process is running, not that a "
+    "keyboard is on screen. No keyboard? Dwell on this tile and choose Keyboard again, Cancel or any action to "
+    "get NodX clicks back. Pause / Stop and the physical button also work."
+)
 
 
 @dataclass(frozen=True)
@@ -238,6 +244,8 @@ class Command:
 
     kind: str
     value: object = None
+    session: int | None = None  # the device session this command belongs to
+    epoch: int | None = None  # the overlay claim epoch: the device refuses a stale one
 
 
 @dataclass
@@ -271,7 +279,11 @@ class OverlayModel:
     to send and a `View` to draw. The overlay times only its own menu dwell; the firmware keeps timing target
     dwells, so no action can be executed by both."""
 
-    def __init__(self, keyboard_clicks: str = "macos"):
+    def __init__(self, keyboard_clicks: str = "macos", epoch0: int | None = None):
+        # Every loss, stop or hide starts a NEW epoch. Commands and replies carry the epoch they were made in; the
+        # worker drops stale queued commands, the controller ignores stale replies, and the device refuses a claim
+        # that is not newer than any it accepted. A time-based start keeps a restarted overlay above an old one.
+        self.epoch = int(time.time()) if epoch0 is None else epoch0
         self.state = "hidden"
         self.keyboard_clicks = (
             keyboard_clicks  # macos: suppress NodX target clicks while the keyboard is open
@@ -294,6 +306,13 @@ class OverlayModel:
         self.status: dict | None = None
 
     # ---- inputs -----------------------------------------------------------------------------------
+    @property
+    def session(self) -> int:
+        return int(_actions(self.status).get("session") or 0)
+
+    def _cmd(self, kind: str, value: object = None) -> "Command":
+        return Command(kind, value, self.session, self.epoch)
+
     def on_reply(self, status: dict | None, now: float) -> None:
         """A bridge reply (or None for a failure)."""
         if status is not None:
@@ -354,7 +373,7 @@ class OverlayModel:
         # the overlay repeats whether the pointer is on it; the device acts on target dwells only while it is not
         if self.claimed and self.state in ("tile", "menu"):
             if zone != self.last_zone or now - self.last_beat >= HEARTBEAT_S:
-                out.append(Command("menu", zone))
+                out.append(self._cmd("menu", zone))
                 self.last_zone, self.last_beat = zone, now
         return out
 
@@ -362,9 +381,10 @@ class OverlayModel:
     def _expand(self, now: float) -> list[Command]:
         out: list[Command] = []
         if not self.claimed or self.state in ("lost", "unclaimed"):
-            out.append(
-                Command("overlay", True)
-            )  # an explicit dwell on the tile claims the controls
+            # An explicit dwell on the tile claims the controls, in an epoch above everything the device accepted.
+            floor = int(_actions(self.status).get("epochFloor") or 0)
+            self.epoch = max(self.epoch, floor + 1)
+            out.append(self._cmd("overlay", True))
             self.claimed = True
             self.claim_sent_at = now
         self.state = "menu"
@@ -387,16 +407,16 @@ class OverlayModel:
             return []
         out: list[Command] = []
         if item == "keyboard":
-            out.append(Command("keyboard_toggle"))
+            out.append(self._cmd("keyboard_toggle"))
         elif item in SELECT_TARGETS:
-            out.append(Command("select", item))
+            out.append(self._cmd("select", item))
         self._collapse()
-        self.tile_locked = (
-            True  # one selection per hover: leave the tile before it can expand again
-        )
+        # one selection per hover: leave the tile before it can expand again
+        self.tile_locked = True
         return out
 
     def _lose(self, now: float) -> None:
+        self.epoch += 1  # everything queued or in flight so far is now stale
         self.claimed = False
         self.menu_open = False
         self.state = "lost"
@@ -404,6 +424,10 @@ class OverlayModel:
         self.dwell.reset()
 
     def _reset(self) -> None:
+        if self.state != "hidden":
+            self.epoch += (
+                1  # the session ended: a delayed reply or queued command from it must not act
+            )
         self.claimed = False
         self.menu_open = False
         self.state = "hidden"
@@ -421,6 +445,8 @@ class OverlayModel:
         v.visible = True
         v.expanded = self.state == "menu"
         v.notice = self.notice if now < self.notice_until else ""
+        if not v.notice and _actions(self.status).get("keyboard"):
+            v.notice = KEYBOARD_HINT  # persistent while keyboard mode lasts
         if self.state == "lost":
             v.title, v.sub, v.alert, v.colour = (
                 "NodX ▾",

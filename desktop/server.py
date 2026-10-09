@@ -171,12 +171,29 @@ def command_for(data):
         operation = data.get("op")
         if operation == "enable":
             return "actions enable " + ("on" if required_boolean(data, "enabled") else "off")
+        if operation in ("overlay", "menu", "keyboard", "select"):
+            epoch = data.get("epoch")
+            if type(epoch) is not int or not 1 <= epoch <= 4294967295:
+                raise ValueError("An overlay command needs its epoch (1 to 4294967295)")
         if operation == "overlay":
-            return "actions overlay " + ("on" if required_boolean(data, "enabled") else "off")
+            if required_boolean(data, "enabled"):
+                session = data.get("session")
+                if type(session) is not int or not 0 <= session <= 4294967295:
+                    raise ValueError("An overlay claim needs the session serial")
+                return f"actions overlay on {session} {epoch}"
+            return f"actions overlay off {epoch}"
         if operation == "menu":
-            return "actions menu " + ("open" if required_boolean(data, "open") else "close")
+            return (
+                "actions menu "
+                + ("open" if required_boolean(data, "open") else "close")
+                + f" {epoch}"
+            )
         if operation == "keyboard":
-            return "actions keyboard " + ("on" if required_boolean(data, "enabled") else "off")
+            return (
+                "actions keyboard "
+                + ("on" if required_boolean(data, "enabled") else "off")
+                + f" {epoch}"
+            )
         if operation == "select" and data.get("target") in (
             "left",
             "right",
@@ -187,7 +204,7 @@ def command_for(data):
             "scroll",
             "stop",
         ):
-            return f"actions select {data['target']}"
+            return f"actions select {data['target']} {epoch}"
         if operation == "keep":
             return "actions keep " + ("on" if required_boolean(data, "enabled") else "off")
         if operation == "hover" and data.get("target") in (

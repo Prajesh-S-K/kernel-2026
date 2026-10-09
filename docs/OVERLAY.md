@@ -78,8 +78,37 @@ switches in your macOS version could not be checked without the interface; the d
 pane. If you would rather have NodX's own dwell press the keys, start the overlay with `--keyboard-clicks nodx`
 (then no clicks are paused and the keyboard's own dwell must stay off, or keys type twice).
 
-Limits: detection only shows that the keyboard's host is running, not that its window is visible (reading window
-lists would need the Screen Recording permission, which the overlay deliberately does not ask for).
+**Process detection is not visibility.** NodX can only tell that the keyboard's host process is running, not that
+a keyboard is on screen (reading window lists would need the Screen Recording permission, which the overlay
+deliberately does not ask for). So keyboard mode is worded that way, and the tile keeps a recovery hint on screen
+for as long as it lasts:
+
+> Keyboard mode: NodX clicks are paused. NodX only knows the keyboard's host process is running, not that a
+> keyboard is on screen. No keyboard? Dwell on this tile and choose Keyboard again, Cancel or any action to get
+> NodX clicks back. Pause / Stop and the physical button also work.
+
+**If you see no keyboard:** (1) dwell on the NodX tile (the menu is timed by the overlay, so it works while NodX
+clicks are paused) and choose **Keyboard** again, **Cancel** or any action: NodX clicks are back at once; (2) to show
+the keyboard use the Accessibility Shortcut or System Settings > Accessibility > Keyboard; (3) **Pause / Stop**,
+the website Stop and the physical button are always reachable. If the keyboard's host process quits while keyboard
+mode is on, the overlay turns keyboard mode off by itself and says so. Tested in software: Cancel, Stop, Keyboard
+and an ordinary action are all selectable from the menu in keyboard mode.
+
+### Two click generators: leaving keyboard mode does not turn the keyboard's own dwell off
+Closing NodX's keyboard mode only gives **NodX's** dwell clicks back. It does **not** switch off the Accessibility
+Keyboard's own dwell (or macOS **Dwell Control** under Pointer Control, if you use it), which are separate macOS
+settings that NodX neither reads nor changes. Two click generators active at the same time give duplicate or
+unwanted clicks, so after returning to pointing choose ONE:
+- **NodX clicks (the usual choice for pointing):** hide or switch off the Accessibility Keyboard, or turn its dwell
+  option off in System Settings > Accessibility > Keyboard, and leave Dwell Control off.
+- **macOS dwell:** keep NodX's clicks paused (stay in keyboard mode) while you use it, and do not use NodX target
+  clicks at the same time.
+- If you want NodX's own dwell to press the keys, run the overlay with `--keyboard-clicks nodx` and keep the
+  keyboard's own dwell OFF.
+
+Check once with the board attended: after choosing an action to leave keyboard mode, rest on a harmless target and
+confirm exactly one click happens. Unverified here: whether the keyboard's own dwell still acts on other windows
+while its keyboard is hidden on your macOS version; assume it may, and turn it off if you see extra clicks.
 
 ## How it is built
 
@@ -104,6 +133,16 @@ lists would need the Screen Recording permission, which the overlay deliberately
   (pointing continues), a held drag is released and the release confirmed before any selection, and a pending
   click is cancelled. On close the dwell is cleared and deliberate movement is required before target actions
   re-arm.
+- **Stale commands never act.** A command or reply from an old overlay session must not reclaim the controls,
+  reopen the menu or run an action after a Stop, a timeout or a reconnect (tested explicitly):
+  the device keeps a **session serial** (every explicit start is a new session) and accepts an overlay claim only
+  for the current session with an **epoch** higher than any it accepted before; menu, select and keyboard commands
+  must carry the epoch of the claim in force, so an old one is refused whatever it says (it may sit in a queue or
+  be held up in flight for seconds and still does nothing). The overlay starts a new epoch on every loss, Stop or
+  hide, drops queued commands of an older epoch before sending them, ignores replies that belong to an older epoch,
+  and claims in an epoch above the device's reported floor (`actions.epochFloor`), so even a restarted overlay
+  process stays above an older one. This protects against delayed or queued traffic; it is not authentication:
+  any local process can still talk to the bridge.
 - **Loss.** The overlay shows **LOST** and stops sending when the bridge does not answer for 2.5 s; the device
   stops acting on targets after 2.5 s without a report and switches the overlay controls OFF after 5 s, releasing a
   held button through its normal path. Nothing resumes by itself: after a loss, a device timeout, a stop, a fault
@@ -147,6 +186,10 @@ lists would need the Screen Recording permission, which the overlay deliberately
 6. Overlay Stop, website Stop and the physical button.
 7. Applications: a text editor, Finder, a browser page; full-screen app; a second display if you have one.
 8. Keyboard: with the Accessibility Keyboard on and its dwell enabled, open it from the menu, choose keys by
-   head movement with no duplicate characters, then return to pointing by choosing an action.
-9. Record the report delay (the overlay's `NODX_OVERLAY_LOG` plus the recorder), missed or accidental actions and
+   head movement with no duplicate characters, then return to pointing by choosing an action. Also: with the
+   keyboard's host running but no keyboard visible, check the hint shows and Keyboard/Cancel/Stop recover; after
+   leaving keyboard mode rest on a harmless target and confirm exactly ONE click (no second click generator).
+9. Stale commands on hardware: press the website Stop while the menu is open or a selection is pending, restart
+   the session yourself, and confirm nothing is claimed, opened or executed until you dwell on the tile again.
+10. Record the report delay (the overlay's `NODX_OVERLAY_LOG` plus the recorder), missed or accidental actions and
    failed releases; stop if reports go stale.

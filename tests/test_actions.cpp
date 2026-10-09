@@ -56,6 +56,7 @@ size_t mark(const HF& h) {
 // below send that heartbeat like the real page does, so a test can stop it to model a missing report.
 PaletteTarget gCurrent = PaletteTarget::None;
 bool gReporting = true;
+uint32_t gEpoch = 1000; // the overlay claim epoch in force
 bool gOverlay = false, gMenu = false; // overlay mode: the heartbeat repeats "pointer on the overlay or not"
 unsigned gTicks = 0;
 void report(HF& h, PaletteTarget target) {
@@ -65,7 +66,7 @@ void report(HF& h, PaletteTarget target) {
 void tk(HF& h, const Rates& rate = {}) {
     if (gReporting && gTicks++ % 50 == 0) {
         if (gOverlay) {
-            h.s().setOverlayMenu(gMenu, h.now);
+            h.s().setOverlayMenu(gMenu, h.now, gEpoch);
         } else {
             h.s().setActionHover(gCurrent, h.now);
         }
@@ -98,13 +99,17 @@ HF paletteRig(bool saveProfile = false) {
     return h;
 }
 // The desktop overlay: claims the palette, then repeats "pointer on the overlay" like the real overlay does.
+bool claimOverlay(HF& h) { // a claim names the current session and an epoch above every earlier one
+    ++gEpoch;
+    return h.s().setActionOverlay(true, h.now, h.s().sessionSerial(), gEpoch);
+}
 void menu(HF& h, bool on) {
     gMenu = on;
-    h.s().setOverlayMenu(on, h.now);
+    h.s().setOverlayMenu(on, h.now, gEpoch);
 }
 HF overlayRig(bool saveProfile = false) {
     HF h = rig(saveProfile);
-    require(h.s().setActionOverlay(true, h.now), "overlay claim refused");
+    require(claimOverlay(h), "overlay claim refused");
     gOverlay = true;
     menu(h, false); // the overlay's first heartbeat
     qt(h, 100);
@@ -114,7 +119,7 @@ HF overlayRig(bool saveProfile = false) {
 bool ovSelect(HF& h, PaletteTarget target) {
     menu(h, true);
     qt(h, 50);
-    const bool ok = h.s().overlaySelect(target, h.now);
+    const bool ok = h.s().overlaySelect(target, h.now, gEpoch);
     menu(h, false);
     qt(h, 50);
     return ok;
@@ -1504,28 +1509,28 @@ int main() {
         HF b = rig();
         require(b.s().setActionPalette(true, b.now), "browser claim");
         require(std::strcmp(b.s().actionsStatus(b.now).controller, "BROWSER") == 0, "controller");
-        require(!b.s().setActionOverlay(true, b.now), "overlay claimed over the browser palette");
-        require(!b.s().setOverlayMenu(true, b.now) && !b.s().overlaySelect(PaletteTarget::Left, b.now) &&
-                    !b.s().setOverlayKeyboard(true),
+        require(!claimOverlay(b), "overlay claimed over the browser palette");
+        require(!b.s().setOverlayMenu(true, b.now, gEpoch) && !b.s().overlaySelect(PaletteTarget::Left, b.now, gEpoch) &&
+                    !b.s().setOverlayKeyboard(true, gEpoch),
                 "overlay commands accepted while the browser controls");
         require(b.s().setActionHover(PaletteTarget::None, b.now), "browser hover refused");
         HF o = rig();
-        require(o.s().setActionOverlay(true, o.now), "overlay claim");
+        require(claimOverlay(o), "overlay claim");
         gOverlay = true;
         require(std::strcmp(o.s().actionsStatus(o.now).controller, "OVERLAY") == 0, "controller");
         require(!o.s().setActionPalette(true, o.now) && !o.s().setActionPalette(false, o.now),
                 "the browser took the palette from the overlay");
         require(!o.s().setActionHover(PaletteTarget::Left, o.now), "browser hover accepted during overlay");
-        require(o.s().setOverlayMenu(false, o.now), "overlay menu refused");
+        require(o.s().setOverlayMenu(false, o.now, gEpoch), "overlay menu refused");
         require(o.s().actionPaletteEnabled(), "overlay controls not on");
-        require(o.s().setActionOverlay(false, o.now) && !o.s().actionPaletteEnabled(), "overlay release");
+        require(o.s().setActionOverlay(false, o.now, 0, gEpoch) && !o.s().actionPaletteEnabled(), "overlay release");
         require(std::strcmp(o.s().actionsStatus(o.now).controller, "NONE") == 0, "controller after release");
-        require(!o.s().setOverlayMenu(true, o.now), "menu accepted with nothing claimed");
+        require(!o.s().setOverlayMenu(true, o.now, gEpoch), "menu accepted with nothing claimed");
         // never without a running session
         HF n(false, EnableKind::Momentary);
         n.sw = false;
         n.quiet(400);
-        require(!n.s().setActionOverlay(true, n.now), "claimed without a session");
+        require(!claimOverlay(n), "claimed without a session");
     });
 
     test("overlay: the device keeps timing the TARGET dwell and clicks once, as Left-click by default", [] {
@@ -1544,13 +1549,13 @@ int main() {
         qt(h, 8000); // a long rest on the overlay: the device must not select anything by itself
         require(h.s().actionsStatus(h.now).selections == before, "the device selected from a resting pointer");
         require(std::strcmp(mode(h), "LEFT") == 0, "mode changed by itself");
-        require(h.s().overlaySelect(PaletteTarget::Right, h.now), "validated select refused");
+        require(h.s().overlaySelect(PaletteTarget::Right, h.now, gEpoch), "validated select refused");
         require(std::strcmp(mode(h), "RIGHT") == 0, "select not applied");
         menu(h, false);
-        require(!h.s().overlaySelect(PaletteTarget::Left, h.now), "select accepted with the menu closed");
+        require(!h.s().overlaySelect(PaletteTarget::Left, h.now, gEpoch), "select accepted with the menu closed");
         for (PaletteTarget bad : {PaletteTarget::None, PaletteTarget::Frame}) {
             menu(h, true);
-            require(!h.s().overlaySelect(bad, h.now), "a non-action was selectable");
+            require(!h.s().overlaySelect(bad, h.now, gEpoch), "a non-action was selectable");
         }
     });
 
@@ -1582,13 +1587,13 @@ int main() {
         const size_t m = mark(h);
         menu(h, true); // the pointer reaches the overlay
         // at this instant the button is still down: a selection must be refused
-        require(!h.s().overlaySelect(PaletteTarget::Left, h.now), "a selection executed over a held button");
+        require(!h.s().overlaySelect(PaletteTarget::Left, h.now, gEpoch), "a selection executed over a held button");
         tk(h);
         tk(h);
         require(!seen(h, m).primaryHeld && !h.s().actionsStatus(h.now).dragging, "the drag was not released");
         const auto st = h.s().actionsStatus(h.now);
         require(st.paletteReleases == 1 && st.ready, "release not confirmed in the status");
-        require(h.s().overlaySelect(PaletteTarget::Left, h.now), "selection refused after the release");
+        require(h.s().overlaySelect(PaletteTarget::Left, h.now, gEpoch), "selection refused after the release");
     });
 
     test("overlay: Drop releases a drag without movement; Cancel releases and clears pending actions", [] {
@@ -1599,16 +1604,16 @@ int main() {
         require(h.s().actionsStatus(h.now).dragging, "precondition");
         menu(h, true);
         qt(h, 100);
-        require(h.s().overlaySelect(PaletteTarget::Drop, h.now), "Drop refused");
+        require(h.s().overlaySelect(PaletteTarget::Drop, h.now, gEpoch), "Drop refused");
         require(std::strcmp(mode(h), "LEFT") == 0 && h.s().actionsStatus(h.now).drops == 1, "Drop");
         require(h.released(), "button still held after Drop");
         // Cancel clears a chosen one-shot and an armed scroll
-        require(h.s().overlaySelect(PaletteTarget::Right, h.now), "Right");
-        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now), "Cancel refused");
+        require(h.s().overlaySelect(PaletteTarget::Right, h.now, gEpoch), "Right");
+        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now, gEpoch), "Cancel refused");
         require(std::strcmp(mode(h), "LEFT") == 0, "Cancel kept the action");
-        require(h.s().overlaySelect(PaletteTarget::Scroll, h.now), "Scroll");
+        require(h.s().overlaySelect(PaletteTarget::Scroll, h.now, gEpoch), "Scroll");
         require(std::strcmp(h.s().actionsStatus(h.now).scroll, "ARMED") == 0, "scroll not armed");
-        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now), "Cancel refused");
+        require(h.s().overlaySelect(PaletteTarget::Cancel, h.now, gEpoch), "Cancel refused");
         require(std::strcmp(h.s().actionsStatus(h.now).scroll, "OFF") == 0, "Cancel kept the armed scroll");
     });
 
@@ -1669,25 +1674,25 @@ int main() {
         require(h.s().state == SystemState::Active, "the session was stopped (pointing must continue)");
         // a late heartbeat does NOT bring it back
         gReporting = true;
-        require(!h.s().setOverlayMenu(false, h.now), "a late report revived the overlay controls");
+        require(!h.s().setOverlayMenu(false, h.now, gEpoch), "a late report revived the overlay controls");
         qt(h, 3000);
         const size_t m = mark(h);
         qt(h, 4000);
         require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "a click without the overlay controls");
         // only an explicit new claim resumes
-        require(h.s().setActionOverlay(true, h.now), "re-claim refused");
+        require(claimOverlay(h), "re-claim refused");
         require(std::strcmp(mode(h), "LEFT") == 0 && !h.s().actionsStatus(h.now).keep, "stale state after a re-claim");
     });
 
     test("overlay: Stop from the menu ends control at once (also with a drag held); refused off the menu", [] {
         HF h = overlayRig();
-        require(!h.s().overlaySelect(PaletteTarget::Stop, h.now), "Stop accepted with the menu closed");
+        require(!h.s().overlaySelect(PaletteTarget::Stop, h.now, gEpoch), "Stop accepted with the menu closed");
         require(ovSelect(h, PaletteTarget::Drag), "drag select");
         moveAway(h);
         qt(h, 1900);
         require(h.s().actionsStatus(h.now).dragging, "precondition");
         menu(h, true);
-        require(h.s().overlaySelect(PaletteTarget::Stop, h.now), "Stop refused");
+        require(h.s().overlaySelect(PaletteTarget::Stop, h.now, gEpoch), "Stop refused");
         require(h.s().state != SystemState::Active && h.released(), "not stopped and released");
         qt(h, 3000);
         require(h.s().state != SystemState::Active && h.released(), "restarted by itself");
@@ -1714,7 +1719,7 @@ int main() {
 
     test("overlay: keyboard mode suppresses target dwell clicks, keeps pointing, and any action returns", [] {
         HF h = overlayRig();
-        require(h.s().setOverlayKeyboard(true), "keyboard refused");
+        require(h.s().setOverlayKeyboard(true, gEpoch), "keyboard refused");
         require(h.s().actionsStatus(h.now).keyboard, "keyboard flag");
         moveAway(h);
         const size_t m = mark(h);
@@ -1727,7 +1732,7 @@ int main() {
         // the menu still works and selecting an action returns to ordinary control
         menu(h, true);
         qt(h, 50);
-        require(h.s().overlaySelect(PaletteTarget::Left, h.now), "menu selection refused in keyboard mode");
+        require(h.s().overlaySelect(PaletteTarget::Left, h.now, gEpoch), "menu selection refused in keyboard mode");
         menu(h, false);
         require(!h.s().actionsStatus(h.now).keyboard, "keyboard mode survived selecting an action");
         moveAway(h);
@@ -1735,9 +1740,9 @@ int main() {
         qt(h, 1900);
         require(seen(h, after).primary == 1, "no click after returning to ordinary control");
         // keyboard needs the overlay controller and ends with the session
-        require(h.s().setOverlayKeyboard(true), "keyboard again");
+        require(h.s().setOverlayKeyboard(true, gEpoch), "keyboard again");
         h.s().stopUncalibratedDemo("test");
-        require(!h.s().setOverlayKeyboard(true), "keyboard accepted without a session");
+        require(!h.s().setOverlayKeyboard(true, gEpoch), "keyboard accepted without a session");
     });
 
     test("overlay: a failed entry release inhibits output; reconnect never resumes", [] {
@@ -1782,6 +1787,126 @@ int main() {
         h.s().stopUncalibratedDemo("done");
         require(h.repo.load(after) && before.dwellMs == after.dwellMs && before.gain[0] == after.gain[0],
                 "the profile changed");
+    });
+
+    // ================= stale overlay commands (old session, timeout, reconnect) =================
+    test("stale overlay: after Stop and a NEW session, an old claim, menu, select and keyboard are refused", [] {
+        HF h = overlayRig();
+        const uint32_t oldSession = h.s().sessionSerial();
+        const uint32_t oldEpoch = gEpoch;
+        require(ovSelect(h, PaletteTarget::Right), "select Right");
+        menu(h, true);
+        h.s().stopUncalibratedDemo("website stop"); // Stop: the old overlay's commands may still be queued
+        qt(h, 400);
+        require(h.s().startUncalibratedDemo(h.now), "an explicit new session");
+        qt(h, 300);
+        require(h.s().sessionSerial() == oldSession + 1, "the session serial did not advance");
+        const auto before = h.s().actionsStatus(h.now);
+        require(!h.s().actionPaletteEnabled() && std::strcmp(before.controller, "NONE") == 0, "palette on");
+        // delayed commands from the OLD overlay session arrive now
+        require(!h.s().setActionOverlay(true, h.now, oldSession, oldEpoch), "an old claim (old session) reclaimed");
+        require(!h.s().setActionOverlay(true, h.now, oldSession, oldEpoch + 50), "an old-session claim with a higher epoch");
+        require(!h.s().setOverlayMenu(true, h.now, oldEpoch), "an old menu report reopened the menu");
+        require(!h.s().overlaySelect(PaletteTarget::Left, h.now, oldEpoch), "an old selection executed");
+        require(!h.s().setOverlayKeyboard(true, oldEpoch), "an old keyboard command was accepted");
+        require(!h.s().actionPaletteEnabled(), "the controls came back by themselves");
+        // a claim of the CURRENT session with an epoch that is not newer is stale too
+        require(!h.s().setActionOverlay(true, h.now, h.s().sessionSerial(), oldEpoch), "a non-newer epoch reclaimed");
+        const size_t m = mark(h);
+        qt(h, 4000);
+        require(seen(h, m).primary == 0 && seen(h, m).secondary == 0, "an action ran from a stale command");
+        // only a fresh claim of this session works, and the old epoch stays refused afterwards
+        ++gEpoch;
+        require(h.s().setActionOverlay(true, h.now, h.s().sessionSerial(), gEpoch), "the fresh claim was refused");
+        gOverlay = true;
+        menu(h, true);
+        require(!h.s().overlaySelect(PaletteTarget::Right, h.now, oldEpoch), "old epoch accepted after a new claim");
+        // an old menu report must not reopen or close the menu of the NEW claim, nor an old keyboard command act
+        menu(h, false);
+        qt(h, 50);
+        require(!h.s().actionsStatus(h.now).menu, "precondition: menu closed");
+        require(!h.s().setOverlayMenu(true, h.now, oldEpoch), "an old-epoch menu report was accepted");
+        tk(h);
+        require(!h.s().actionsStatus(h.now).menu, "an old menu report reopened the menu");
+        require(!h.s().setOverlayKeyboard(true, oldEpoch), "an old-epoch keyboard command was accepted");
+        require(!h.s().actionsStatus(h.now).keyboard, "an old keyboard command paused the clicks");
+        menu(h, true);
+        require(h.s().overlaySelect(PaletteTarget::Right, h.now, gEpoch), "the current epoch was refused");
+    });
+
+    test("stale overlay: after a timeout a queued claim, menu or selection cannot revive the controls", [] {
+        HF h = overlayRig();
+        const uint32_t session = h.s().sessionSerial();
+        const uint32_t epoch = gEpoch;
+        require(ovSelect(h, PaletteTarget::Drag), "drag select");
+        moveAway(h);
+        qt(h, 1900);
+        require(h.s().actionsStatus(h.now).dragging, "precondition");
+        gReporting = false; // the overlay stops reporting
+        qt(h, 6500);        // beyond the 5 s limit: controls off, button released
+        require(!h.s().actionPaletteEnabled() && h.released(), "the timeout did not switch the controls off");
+        // everything the old overlay had queued arrives late, in the worst order
+        require(!h.s().setActionOverlay(true, h.now, session, epoch), "a delayed claim (same epoch) reclaimed");
+        require(!h.s().setOverlayMenu(true, h.now, epoch), "a delayed menu report reopened the menu");
+        require(!h.s().overlaySelect(PaletteTarget::Cancel, h.now, epoch), "a delayed selection executed");
+        require(!h.s().overlaySelect(PaletteTarget::Stop, h.now, epoch), "a delayed Stop executed");
+        require(!h.s().setOverlayKeyboard(true, epoch), "a delayed keyboard command executed");
+        require(h.s().state == SystemState::Active, "the session itself was disturbed by stale commands");
+        require(!h.s().actionPaletteEnabled(), "the controls came back");
+        // a new claim needs a higher epoch
+        require(!h.s().setActionOverlay(true, h.now, session, epoch - 1), "a lower epoch reclaimed");
+        ++gEpoch;
+        require(h.s().setActionOverlay(true, h.now, session, gEpoch), "the explicit new claim was refused");
+    });
+
+    test("stale overlay: after a disconnect and reconnect no old command resumes anything", [] {
+        HF h = overlayRig();
+        const uint32_t session = h.s().sessionSerial();
+        const uint32_t epoch = gEpoch;
+        menu(h, true);
+        h.transport.online = false;
+        qt(h, 400);
+        h.transport.online = true;
+        qt(h, 3000);
+        require(h.s().state != SystemState::Active && !h.s().actionPaletteEnabled(), "precondition");
+        for (int i = 0; i < 3; ++i) { // the overlay's queue drains after the reconnect
+            require(!h.s().setActionOverlay(true, h.now, session, epoch), "an old claim after the reconnect");
+            require(!h.s().setOverlayMenu(true, h.now, epoch), "an old menu report after the reconnect");
+            require(!h.s().overlaySelect(PaletteTarget::Left, h.now, epoch), "an old selection after the reconnect");
+            qt(h, 100);
+        }
+        require(h.s().state != SystemState::Active, "the session resumed");
+        // an explicit restart does not make the old claim valid either
+        require(h.s().startUncalibratedDemo(h.now), "explicit restart");
+        qt(h, 300);
+        require(!h.s().setActionOverlay(true, h.now, session, epoch + 1), "a pre-restart claim reclaimed");
+        require(!h.s().actionPaletteEnabled(), "controls on without a new overlay claim");
+    });
+
+    test("stale overlay: refused commands change nothing the user can see", [] {
+        HF h = overlayRig();
+        const uint32_t epoch = gEpoch;
+        require(ovSelect(h, PaletteTarget::Double), "select Double");
+        const auto before = h.s().actionsStatus(h.now);
+        h.s().stopUncalibratedDemo("stop");
+        require(h.s().startUncalibratedDemo(h.now), "restart");
+        qt(h, 300);
+        (void)h.s().overlaySelect(PaletteTarget::Right, h.now, epoch);
+        (void)h.s().setOverlayMenu(true, h.now, epoch);
+        const auto after = h.s().actionsStatus(h.now);
+        require(std::strcmp(after.mode, "LEFT") == 0 && !after.menu && !after.enabled, "stale commands changed state");
+        require(after.selections == 0 && after.session == before.session + 1, "counters or session wrong");
+        require(after.epoch == 0, "an epoch is shown without a claim");
+    });
+
+    test("overlay tokens: status reports the session serial and the claim epoch", [] {
+        HF h = overlayRig();
+        const auto st = h.s().actionsStatus(h.now);
+        require(st.session == h.s().sessionSerial() && st.session >= 1, "session not reported");
+        require(st.epoch == gEpoch, "epoch not reported");
+        char buffer[actionsJsonCapacity];
+        require(actionsJson(buffer, sizeof buffer, st) > 0, "json");
+        require(std::strstr(buffer, "\"session\":") && std::strstr(buffer, "\"epoch\":"), "fields missing in the JSON");
     });
 
     std::printf("%d passed, %d failed\n", passed, failed);

@@ -50,45 +50,59 @@ def drain(worker, seconds=1.0):
 
 class BodyMapping(unittest.TestCase):
     def test_every_overlay_body_is_accepted_by_the_server_and_maps_to_the_firmware_command(self):
+        session, epoch = 7, 1234
         expected = {
             ("status", None): "status",
-            ("overlay", True): "actions overlay on",
-            ("overlay", False): "actions overlay off",
-            ("menu", True): "actions menu open",
-            ("menu", False): "actions menu close",
-            ("keyboard", True): "actions keyboard on",
-            ("keyboard", False): "actions keyboard off",
+            ("overlay", True): f"actions overlay on {session} {epoch}",
+            ("overlay", False): f"actions overlay off {epoch}",
+            ("menu", True): f"actions menu open {epoch}",
+            ("menu", False): f"actions menu close {epoch}",
+            ("keyboard", True): f"actions keyboard on {epoch}",
+            ("keyboard", False): f"actions keyboard off {epoch}",
         }
         for target in ("left", "right", "double", "drag", "drop", "scroll", "cancel", "stop"):
-            expected[("select", target)] = f"actions select {target}"
+            expected[("select", target)] = f"actions select {target} {epoch}"
         for (kind, value), command in expected.items():
-            self.assertEqual(SERVER.command_for(body_for(kind, value)), command)
+            self.assertEqual(SERVER.command_for(body_for(kind, value, session, epoch)), command)
         with self.assertRaises(ValueError):
-            body_for("click", True)
+            body_for("click", True, session, epoch)
+        # a command without its token cannot even be built
+        for kind, value in (
+            ("menu", True),
+            ("select", "left"),
+            ("keyboard", True),
+            ("overlay", False),
+        ):
+            with self.assertRaises(ValueError):
+                body_for(kind, value, session, None)
+        with self.assertRaises(ValueError):
+            body_for("overlay", True, None, epoch)  # a claim needs the session serial
         # nothing the overlay can build is a mouse or serial primitive
         for kind in ("status", "overlay", "menu", "select", "keyboard"):
-            self.assertEqual(body_for(kind, "left").get("action") in ("status", "actions"), True)
+            self.assertIn(body_for(kind, "left", 1, 1).get("action"), ("status", "actions"))
 
     def test_menu_items_the_overlay_selects_are_all_valid_targets(self):
         for ident, _label in L.MENU_ITEMS:
             if ident in L.SELECT_TARGETS:
-                SERVER.command_for(body_for("select", ident))
+                SERVER.command_for(body_for("select", ident, 1, 1))
 
 
 class WorkerOrdering(unittest.TestCase):
     def test_a_selection_is_never_reordered_behind_a_later_menu_report(self):
         bridge = FakeBridge()
         worker = Worker(bridge)
+        worker.set_epoch(5)
         # queue before the thread runs so everything is pending together
-        worker.send("menu", True)
-        worker.send("select", "right")
-        worker.send("menu", False)
-        worker.send("menu", False)  # a repeat of the tail: coalesced
+        worker.send("menu", True, 1, 5)
+        worker.send("select", "right", 1, 5)
+        worker.send("menu", False, 1, 5)
+        worker.send("menu", False, 1, 5)  # a repeat of the tail: coalesced
         worker.start()
         drain(worker)
         worker.stop()
         kinds = [(b["op"], b.get("open", b.get("target"))) for b in bridge.bodies]
         self.assertEqual(kinds, [("menu", True), ("select", "right"), ("menu", False)])
+        self.assertTrue(all(b["epoch"] == 5 for b in bridge.bodies))
 
     def test_failures_are_reported_as_none_and_counted(self):
         worker = Worker(FakeBridge(fail=True))
@@ -122,7 +136,10 @@ class FakeWorker:
         out, self.replies = self.replies, []
         return out
 
-    def send(self, kind, value=None):
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def send(self, kind, value=None, session=None, epoch=None):
         self.sent.append((kind, value))
 
     def ensure_traffic(self, now):
@@ -186,7 +203,7 @@ class ControllerKeyboard(unittest.TestCase):
 
     def test_replies_are_fed_to_the_model_and_failures_are_ignored(self):
         c, w, k, m = self.make(True)
-        w.replies = [(1.0, None, {}), (1.1, {"error": "x"}, {})]
+        w.replies = [(1.0, None, {}, None), (1.1, {"error": "x"}, {}, None)]
         c.tick(11.0, (0, 0), L.collapsed_layout(L.Rect(0, 0, L.TILE_W, L.TILE_H)))
         self.assertEqual(m.last_ok, 10.0, "an unusable reply must not count as contact")
 

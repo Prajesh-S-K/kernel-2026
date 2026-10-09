@@ -945,6 +945,7 @@ bool System::startSession(uint32_t now, bool configured) {
     state_ = SystemState::Active;
     uncal_ = true; // after resetInteraction(); never persisted, never reported as calibration
     uncalClicks_ = 0;
+    ++sessionSerial_; // every explicit start is a new session: older overlay commands are stale
     diagnostics_.faultCode = FaultCode::None;
     diagnostics_.reason = configured ? "configured control active; movement only"
                                      : "uncalibrated demo active; movement only";
@@ -1473,9 +1474,13 @@ bool System::setActionPalette(bool on, uint32_t now) {
     diagnostics_.reason = "EXPERIMENTAL dwell action palette on; Left-click is selected";
     return true;
 }
-bool System::setActionOverlay(bool on, uint32_t now) {
+bool System::setActionOverlay(bool on, uint32_t now, uint32_t session, uint32_t epoch) {
     if (!on) {
         if (actionsEnabled_ && palette_.controller() == Controller::Overlay) {
+            if (epoch != palette_.epoch()) {
+                diagnostics_.reason = "stale overlay command refused";
+                return false;
+            }
             actionsEnabled_ = false;
             uncalProfile_ = uncalibratedDemoProfile();
             selection_.reset(false, now);
@@ -1484,6 +1489,10 @@ bool System::setActionOverlay(bool on, uint32_t now) {
             return true;
         }
         return !actionsEnabled_; // the browser palette is not the overlay's to turn off
+    }
+    if (session != sessionSerial_ || epoch == 0 || epoch <= lastOverlayEpoch_) {
+        diagnostics_.reason = "stale overlay claim refused (old session or old epoch)";
+        return false; // a delayed or queued claim from an old overlay session must not reclaim the controls
     }
     if (actionsEnabled_) {
         if (palette_.controller() == Controller::Overlay) {
@@ -1501,20 +1510,22 @@ bool System::setActionOverlay(bool on, uint32_t now) {
     quickEnabled_ = false;
     actionsEnabled_ = true;
     uncalProfile_ = uncalibratedDemoProfile();
-    palette_.claim(Controller::Overlay, now);
+    lastOverlayEpoch_ = epoch;
+    palette_.claim(Controller::Overlay, now, epoch);
     hoverSeen_ = PaletteTarget::None;
     selection_.reset(false, now);
     diagnostics_.reason = "EXPERIMENTAL desktop overlay controls on; Left-click is selected";
     return true;
 }
-bool System::setOverlayMenu(bool on, uint32_t now) {
-    if (!uncal_ || !actionsEnabled_) {
+bool System::setOverlayMenu(bool on, uint32_t now, uint32_t epoch) {
+    if (!uncal_ || !actionsEnabled_ || epoch != palette_.epoch()) {
         return false;
     }
     return palette_.setMenu(on, now);
 }
-bool System::overlaySelect(PaletteTarget target, uint32_t now) {
-    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay) {
+bool System::overlaySelect(PaletteTarget target, uint32_t now, uint32_t epoch) {
+    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay ||
+        epoch != palette_.epoch()) {
         return false;
     }
     if (target == PaletteTarget::Stop) {
@@ -1528,8 +1539,9 @@ bool System::overlaySelect(PaletteTarget target, uint32_t now) {
     }
     return palette_.selectFromMenu(target, now);
 }
-bool System::setOverlayKeyboard(bool on) {
-    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay) {
+bool System::setOverlayKeyboard(bool on, uint32_t epoch) {
+    if (!uncal_ || !actionsEnabled_ || palette_.controller() != Controller::Overlay ||
+        epoch != palette_.epoch()) {
         return false;
     }
     palette_.setKeyboard(on);
@@ -1584,6 +1596,9 @@ ActionsStatus System::actionsStatus(uint32_t now) const {
     st.commitMs = start::actionCommitMs;
     st.keep = palette_.keep();
     st.controller = name(palette_.controller());
+    st.session = sessionSerial_;
+    st.epochFloor = lastOverlayEpoch_;
+    st.epoch = palette_.controller() == Controller::Overlay ? palette_.epoch() : 0;
     st.keyboardSuppressed = palette_.keyboardSuppressed;
     st.drops = palette_.drops;
     st.cancels = palette_.cancels;

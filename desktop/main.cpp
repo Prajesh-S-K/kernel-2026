@@ -540,18 +540,33 @@ int main(int argc, char** argv) {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setActionPalette(value == "on", now);
                 } else if (verb == "overlay") {
-                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
-                         sys.setActionOverlay(value == "on", now);
+                    unsigned long session = 0, epoch = 0;
+                    if (value == "on") {
+                        ok = bool(cmd >> session >> epoch) && (cmd >> std::ws).eof() &&
+                             session <= 0xFFFFFFFFul && epoch <= 0xFFFFFFFFul &&
+                             sys.setActionOverlay(true, now, uint32_t(session), uint32_t(epoch));
+                    } else if (value == "off") {
+                        ok = bool(cmd >> epoch) && (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                             sys.setActionOverlay(false, now, 0, uint32_t(epoch));
+                    } else {
+                        ok = false;
+                    }
                 } else if (verb == "menu") {
-                    ok = (value == "open" || value == "close") && (cmd >> std::ws).eof() &&
-                         sys.setOverlayMenu(value == "open", now);
+                    unsigned long epoch = 0;
+                    ok = (value == "open" || value == "close") && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.setOverlayMenu(value == "open", now, uint32_t(epoch));
                 } else if (verb == "select") {
                     PaletteTarget target;
-                    ok = parsePaletteTarget(value.c_str(), target) && (cmd >> std::ws).eof() &&
-                         sys.overlaySelect(target, now);
+                    unsigned long epoch = 0;
+                    ok = parsePaletteTarget(value.c_str(), target) && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.overlaySelect(target, now, uint32_t(epoch));
                 } else if (verb == "keyboard") {
-                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
-                         sys.setOverlayKeyboard(value == "on");
+                    unsigned long epoch = 0;
+                    ok = (value == "on" || value == "off") && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.setOverlayKeyboard(value == "on", uint32_t(epoch));
                 } else if (verb == "keep") {
                     ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
                          sys.setActionKeep(value == "on");

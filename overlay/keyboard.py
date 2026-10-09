@@ -28,8 +28,15 @@ SETUP_TEXT = (
     "and turn on its dwell option so keys are chosen by holding the pointer still. Then choose Keyboard again."
 )
 OPENED_TEXT = (
-    "Keyboard open: keys use the macOS dwell, NodX clicks are paused. Choose any action to return."
+    "Keyboard mode: NodX clicks are paused. The Accessibility Keyboard's host process is running, but NodX "
+    "cannot see whether a keyboard is on screen. No keyboard? Dwell on the tile and choose Keyboard again, "
+    "Cancel or any action to get NodX clicks back."
 )
+CLOSED_TEXT = (
+    "Keyboard mode off: NodX clicks are active again. This does NOT switch off the Accessibility Keyboard's own "
+    "dwell: hide the keyboard or turn its dwell off so only one thing clicks (see docs/OVERLAY.md)."
+)
+GONE_TEXT = "The Accessibility Keyboard stopped running: NodX clicks are active again."
 MISSING_TEXT = "The Accessibility Keyboard is not running. " + SETUP_TEXT
 
 
