@@ -100,6 +100,13 @@ void parserChecks() {
     expect(refused(send("handsfree commit now")), "commit with trailing text refused");
     expect(refused(send("handsfree bogus")), "unknown handsfree verb refused");
     expect(refused(send("handsfree switchless maybe")), "switchless needs on/off");
+    expect(refused(send("handsfree demo")), "demo needs a value");
+    expect(refused(send("handsfree demo maybe")), "demo value must be on/off");
+    expect(refused(send("handsfree demo on extra")), "demo trailing text refused");
+    ack = send("handsfree demo on");
+    expect(ok(ack) && has(ack, "\"demoMovementOnly\":true"), "demo on is reported");
+    ack = send("handsfree demo off");
+    expect(ok(ack) && has(ack, "\"demoMovementOnly\":false"), "demo off is reported");
     expect(refused(send("handsfree enable")), "enable kind needs a value");
     expect(refused(send("handsfree enable bogus")), "unknown enable kind refused");
     expect(refused(send("handsfree enable momentary extra")), "enable kind trailing text refused");
@@ -187,7 +194,7 @@ void reboot() {
     pump(300);
 }
 void playGesture(const char* pattern) {
-    const std::string ack = send(std::string("gesture ") + pattern, 80);
+    const std::string ack = send(std::string("gesture ") + pattern, 250);
     expect(ok(ack), "gesture accepted for playback");
     pump(1500); // 400 ms neutral + strokes + 400 ms neutral, then recognition
 }
@@ -252,8 +259,8 @@ void simulatedChecks() {
           "gesture nod2 4", "gesture nod2 nan", "gesture nod2 2 extra"}) {
         expect(refused(send(bad)), bad);
     }
-    expect(ok(send("gesture nod2", 80)), "gesture playback queued");
-    expect(refused(send("gesture nod2", 80)), "second gesture refused while one is playing");
+    expect(ok(send("gesture nod2", 250)), "gesture playback queued");
+    expect(refused(send("gesture nod2", 250)), "second gesture refused while one is playing");
     pump(1500);
     expect(ok(send("gesture tilt1 1.5")), "scaled gesture accepted");
     pump(1500);
@@ -270,6 +277,11 @@ void endToEndChecks() {
     reboot();
     pump(1500);
     expect(refused(send("resume")), "resume refused before calibration");
+    expect(refused(send("calibrate sideways")), "unknown calibrate argument refused");
+    expect(ok(send("calibrate guided")), "guided calibration started");
+    expect(has(status(), "\"calibrationCueMs\":2"),
+           "guided calibration reports its countdown cue");
+    expect(ok(send("cancel")), "guided calibration cancelled");
     expect(ok(send("calibrate")), "calibration started");
     runCalibration(12000);
     std::string ack = status();
@@ -311,14 +323,14 @@ void endToEndChecks() {
     playGesture("nod2");
     expect(!has(status(), "\"state\":\"ACTIVE\""), "resume gesture ignored while disabled");
     expect(refused(send("resume")), "helper resume refused while disabled");
-    ack = send("enable 1", 80); // press
+    ack = send("enable 1", 250); // press
     pump(100);
     ack = status();
     expect(has(ack, "\"pressed\":true") && has(ack, "\"latched\":true") &&
                has(ack, "\"permitted\":true"),
            "one press latches permission");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "enabling never resumes control");
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
     ack = status();
     expect(has(ack, "\"pressed\":false") && has(ack, "\"latched\":true"),
@@ -327,17 +339,17 @@ void endToEndChecks() {
     expect(has(status(), "\"state\":\"ACTIVE\""), "explicit gesture resumes after enabling");
     playGesture("tilt2");
     expect(has(status(), "\"drag\":true"), "drag gesture starts a drag");
-    ack = send("enable 1", 80); // the disabling press: effect visible in its own acknowledgement
+    ack = send("enable 1", 250); // the disabling press: effect visible in its own acknowledgement
     expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"drag\":false") &&
                has(ack, "\"latched\":false"),
            "the disabling press pauses, releases the drag and clears the latch at once");
     pump(1000);
     expect(has(status(), "\"latched\":false"), "holding the button toggled again");
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
 
     // Reboot with the button HELD: permission is never persisted and a held press enables nothing.
-    expect(ok(send("enable 1", 80)), "button held for the reboot");
+    expect(ok(send("enable 1", 250)), "button held for the reboot");
     reboot();
     pump(3000);
     ack = status();
@@ -347,12 +359,12 @@ void endToEndChecks() {
     expect(has(ack, "\"permitted\":false") && has(ack, "\"pressed\":true"),
            "a button held at boot enabled control");
     expect(!has(ack, "\"state\":\"ACTIVE\""), "reboot never resumes control");
-    expect(ok(send("enable 0", 80)), "button released after boot");
+    expect(ok(send("enable 0", 250)), "button released after boot");
     pump(100);
     expect(has(status(), "\"permitted\":false"), "release alone enabled control");
-    expect(ok(send("enable 1", 80)), "new press after boot");
+    expect(ok(send("enable 1", 250)), "new press after boot");
     pump(100);
-    expect(ok(send("enable 0", 80)), "button released");
+    expect(ok(send("enable 0", 250)), "button released");
     pump(100);
     expect(has(status(), "\"permitted\":true") && !has(status(), "\"state\":\"ACTIVE\""),
            "a new press after release enables, without resuming");
@@ -364,9 +376,9 @@ void endToEndChecks() {
     ack = status();
     expect(has(ack, "\"state\":\"SAFE_STATE\"") && has(ack, "\"latched\":false"),
            "sensor fault stops control and drops the button permission");
-    expect(ok(send("enable 1", 80)), "press during the fault");
+    expect(ok(send("enable 1", 250)), "press during the fault");
     pump(100);
-    expect(ok(send("enable 0", 80)), "release during the fault");
+    expect(ok(send("enable 0", 250)), "release during the fault");
     pump(100);
     expect(has(status(), "\"state\":\"SAFE_STATE\"") && refused(send("resume")),
            "a button press bypassed the fault");
@@ -380,7 +392,7 @@ void endToEndChecks() {
     ack = send("handsfree commit");
     expect(ok(ack) && has(ack, "\"kind\":\"MAINTAINED\"") && has(ack, "\"permitted\":false"),
            "maintained kind committed; its switch is released so control is inhibited");
-    expect(ok(send("enable 1", 80)), "maintained switch ON");
+    expect(ok(send("enable 1", 250)), "maintained switch ON");
     pump(200);
     ack = status();
     expect(has(ack, "\"permitted\":true") && has(ack, "\"latched\":false") &&
@@ -388,7 +400,7 @@ void endToEndChecks() {
            "maintained ON permits without a latch and without resuming");
     playGesture("nod2");
     expect(has(status(), "\"state\":\"ACTIVE\""), "gesture resumes under the maintained switch");
-    ack = send("enable 0", 80);
+    ack = send("enable 0", 250);
     expect(has(ack, "\"state\":\"PAUSED\"") && has(ack, "\"permitted\":false"),
            "maintained OFF pauses at once");
     reboot();
@@ -415,8 +427,133 @@ void hardwareChecks() {
     std::string ack = status();
     expect(has(ack, "\"source\":\"HARDWARE\""), "hardware build is not labelled simulated");
     expect(!has(ack, "FIRMWARE_SIMULATED"), "no simulated label");
+    // Hardware frames carry the raw sensor view; the whole frame must stay well inside the
+    // 5120-byte telemetry buffer, otherwise the firmware silently drops it.
+    expect(has(ack, "\"sensor\":{\"variant\":\"UNKNOWN\",\"seen\":false"),
+           "hardware telemetry has the raw sensor block");
+    expect(ack.size() < 4400, "hardware telemetry frame leaves headroom in the 5120-byte buffer");
+    std::printf("INFO hardware status frame is %zu bytes\n", ack.size());
     expect(has(ack, "\"present\":false") && has(ack, "\"permitted\":false"),
            "no enable pin configured: control stays inhibited");
+    expect(has(ack, "\"axes\":{\"valid\":"), "hardware telemetry reports the active axis mapping");
+    expect(has(ack, "\"uncalDemo\":{\"active\":false"), "uncalibrated demo is off at boot");
+    expect(has(ack, "\"reset\":\""), "hardware telemetry reports the last reset reason");
+    expect(refused(send("handsfree uncal start")), "uncalibrated demo refused without a button");
+    expect(refused(send("handsfree uncal sideways")), "bad uncalibrated demo argument refused");
+    expect(refused(send("handsfree uncal start extra")), "trailing text refused");
+    expect(refused(send("handsfree uncal dwell on")), "dwell needs a running demo");
+    expect(refused(send("handsfree uncal dwell sideways")), "bad dwell action refused");
+    expect(refused(send("handsfree uncal dwell set 400 8")), "dwell below 500 ms refused");
+    expect(refused(send("handsfree uncal dwell set 1200 1")), "tolerance below 2 refused");
+    expect(refused(send("handsfree uncal dwell set 1200")), "missing tolerance refused");
+    expect(refused(send("handsfree uncal dwell set 1200 8 9")), "trailing value refused");
+    expect(ok(send("handsfree uncal dwell set 1500 10")), "valid dwell settings accepted");
+    expect(has(status(), "\"ms\":1500,\"tolerance\":10.0"), "settings reported");
+    expect(ok(send("handsfree uncal reverse 1 0")), "reversal accepted");
+    expect(has(status(), "\"reverseX\":true,\"reverseY\":false"), "reversal reported");
+    expect(refused(send("handsfree uncal reverse 2 0")), "bad reversal value refused");
+    expect(refused(send("handsfree uncal reverse 1")), "missing reversal value refused");
+    expect(ok(send("handsfree uncal reverse 0 0")), "reversal cleared");
+    expect(refused(send("map start")), "teaching refused before the sensor is healthy");
+    expect(refused(send("map accept")), "accept needs a preview");
+    expect(refused(send("map save")), "nothing to save");
+    expect(refused(send("map sideways")), "bad map verb refused");
+    expect(refused(send("map start now")), "trailing text refused");
+    expect(ok(send("map cancel")) && ok(send("map clear")), "cancel and clear are always accepted");
+    expect(refused(send("control start")), "configured control needs a learned mapping");
+    expect(refused(send("control sideways")), "bad control verb refused");
+    expect(ok(send("control stop")), "stop is always accepted");
+    expect(has(status(), "\"mapping\":{\"phase\":\"IDLE\""), "mapping status reported");
+    expect(has(status(), "\"stored\":\"MISSING\""), "no stored mapping");
+    expect(refused(send("click train fallback")), "click training refused before the sensor is healthy");
+    expect(refused(send("click train configured")), "configured gesture needs a learned mapping");
+    expect(refused(send("click train sideways")), "bad click frame refused");
+    expect(refused(send("click enable on")), "click enable needs a taught gesture and a session");
+    expect(refused(send("click enable sideways")), "bad click enable value refused");
+    expect(refused(send("click accept")), "nothing to accept");
+    expect(refused(send("click sideways")), "bad click verb refused");
+    expect(ok(send("click cancel")) && ok(send("click clear")) && ok(send("click enable off")),
+           "cancel, clear and disable are always accepted");
+    expect(has(status(), "\"click\":{\"phase\":\"IDLE\""), "click status reported");
+    expect(refused(send("quick practice fallback")), "quick practice refused before the sensor is healthy");
+    expect(refused(send("quick practice configured")), "configured quick practice needs a learned mapping");
+    expect(refused(send("quick practice sideways")), "bad quick frame refused");
+    expect(refused(send("quick enable on")), "quick enable needs a practice and a session");
+    expect(refused(send("quick enable sideways")), "bad quick enable value refused");
+    expect(refused(send("quick accept")), "nothing to accept");
+    expect(refused(send("quick set 0.4 0.3")) && refused(send("quick set 1 0.7")) &&
+               refused(send("quick set 1")) && refused(send("quick set 1 0.3 1")),
+           "invalid quick settings refused");
+    expect(ok(send("quick set 1.5 0.25")) && has(status(), "\"sensitivity\":1.50,\"returnTolerance\":0.25"),
+           "valid quick settings accepted and reported");
+    expect(ok(send("quick set 1.2 0.3 40")) && has(status(), "\"directionTolerance\":40"),
+           "the direction tolerance is a validated setting");
+    expect(refused(send("quick set 1 0.3 5")) && refused(send("quick set 1 0.3 75")) &&
+               refused(send("quick set 1 0.3 40 1")),
+           "an out-of-range direction tolerance is refused");
+    expect(ok(send("quick set 1 0.35 30")), "defaults restored");
+    expect(ok(send("quick cancel")) && ok(send("quick clear")) && ok(send("quick retry")) &&
+               ok(send("quick enable off")),
+           "cancel, clear, retry and disable are always accepted");
+    expect(has(status(), "\"quick\":{\"phase\":\"IDLE\""), "quick status reported");
+    // Dwell action palette: validated commands, refused without a running session, status reported.
+    expect(refused(send("actions enable on")), "the action palette needs a running session");
+    expect(refused(send("actions enable maybe")) && refused(send("actions enable")) &&
+               refused(send("actions enable on now")) && refused(send("actions")) &&
+               refused(send("actions bogus on")),
+           "malformed action palette commands refused");
+    expect(refused(send("actions hover left")), "hover is ignored (refused) while the palette is off");
+    expect(refused(send("actions hover middle")) && refused(send("actions hover")) &&
+               refused(send("actions hover left extra")),
+           "bad hover targets refused");
+    expect(refused(send("actions hover drop")) && refused(send("actions hover cancel")) &&
+               refused(send("actions hover frame")),
+           "new hover targets are parsed but refused while the palette is off");
+    expect(refused(send("actions keep on")) && refused(send("actions keep off")) &&
+               refused(send("actions keep maybe")) && refused(send("actions keep")),
+           "keep selected action needs the palette");
+    for (const char* bad : {"handsfree uncal speed", "handsfree uncal speed 0.2", "handsfree uncal speed 2.1",
+                            "handsfree uncal speed x", "handsfree uncal speed nan", "handsfree uncal speed 1 1"}) {
+        expect(refused(send(bad)), bad);
+    }
+    expect(ok(send("handsfree uncal speed 0.5")) && has(status(), "\"speed\":0.50"),
+           "a valid pointer speed is accepted and reported");
+    expect(ok(send("handsfree uncal speed 1")) && has(status(), "\"speed\":1.00"), "speed reset");
+    // Desktop overlay controller: validated, refused without a session or the claim; every command needs its token.
+    expect(refused(send("actions overlay on 1 1000")), "the overlay needs a running session");
+    for (const char* bad :
+         {"actions overlay", "actions overlay maybe", "actions overlay on", "actions overlay on 1",
+          "actions overlay on 1 0", "actions overlay on 1 1000 now", "actions overlay on -1 1000",
+          "actions overlay on 1 4294967296", "actions overlay on x 1000", "actions overlay off",
+          "actions menu", "actions menu maybe 5", "actions menu open", "actions menu open 5 now",
+          "actions select", "actions select middle 5", "actions select left", "actions select left 5 now",
+          "actions select frame 5", "actions select none 5", "actions keyboard", "actions keyboard on",
+          "actions keyboard maybe 5"}) {
+        expect(refused(send(bad)), bad);
+    }
+    expect(refused(send("actions menu open 5")) && refused(send("actions menu close 5")) &&
+               refused(send("actions select left 5")) && refused(send("actions select stop 5")) &&
+               refused(send("actions keyboard on 5")),
+           "overlay commands refused without the overlay claim");
+    expect(ok(send("actions overlay off 5")), "releasing an unclaimed overlay is accepted");
+    expect(has(status(), "\"controller\":\"NONE\"") && has(status(), "\"menu\":false") &&
+               has(status(), "\"keyboard\":false"),
+           "controller fields reported");
+    expect(ok(send("actions enable off")), "turning the palette off is always accepted");
+    expect(has(status(), "\"actions\":{\"enabled\":false,\"mode\":\"LEFT\""),
+           "action palette status reported");
+    expect(refused(send("capture start 0")) && refused(send("capture start 21")) &&
+               refused(send("capture start")) && refused(send("capture start 5 now")),
+           "capture length is bounded to 1-20 seconds");
+    expect(refused(send("capture get 0")), "nothing to read before a capture");
+    expect(refused(send("capture sideways")), "bad capture verb refused");
+    expect(ok(send("capture start 5")) && has(status(), "\"capture\":{\"active\":true"),
+           "capture starts and is reported");
+    expect(ok(send("capture stop")) && has(status(), "\"capture\":{\"active\":false,\"count\":0"),
+           "capture stops");
+    expect(has(status(), "\"capacity\":2000"), "capture capacity reported");
+    expect(ok(send("handsfree uncal stop")), "stop is always accepted");
+    expect(has(status(), "\"uncalDemo\":{\"active\":false"), "still off after stop");
     // Simulation-only commands do not exist on hardware.
     for (const char* command :
          {"enable 1", "enable 0", "gesture nod2", "motion 0 0 0", "fault 0"}) {

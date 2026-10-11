@@ -210,6 +210,25 @@ int main() {
         c.tick({1500, {}, {0, 0, 1}, true}, 1500);
         require(c.phase == CalPhase::Failed, "sparse");
     });
+    test("guided calibration ignores samples during each countdown cue", [] {
+        CalibrationEngine c;
+        c.start(0, 3000);
+        require(c.cueRemainingMs(0) == 3000 && c.cueRemainingMs(2000) == 1000, "cue length");
+        // Motion during the cue must not reach the rest statistics (would fail 'rest too unstable').
+        for (uint32_t t = 10; t < 3000; t += 10) {
+            c.tick({t, {40, -40, 40}, {0, 0, 1}, true}, t);
+        }
+        require(c.phase == CalPhase::Rest && c.cueRemainingMs(2990) == 10, "still cueing");
+        uint32_t t = 3000;
+        for (; c.phase == CalPhase::Rest; t += 10) {
+            c.tick({t, {0.1f, 0, 0}, {0, 0, 1}, true}, t);
+        }
+        require(c.phase == CalPhase::Left && c.cueRemainingMs(t) > 2900, "next cue starts");
+        require(c.progress(t) >= 1.f / 6 - .01f && c.progress(t) < .2f, "progress stays sane");
+        CalibrationEngine plain;
+        plain.start(0);
+        require(plain.cueRemainingMs(0) == 0, "unguided has no cue");
+    });
     test("failed calibration storage preserves last profile", [] {
         Rig r;
         r.active();
@@ -474,14 +493,17 @@ int main() {
         require(!a.valid() && !a.apply(s).valid, "bad mapping");
     });
     test("MPU register conversion handles signed raw readings", [] {
+        // The register file remembers writes: begin() now reads every configuration register back.
         class Bus : public RegisterBus {
         public:
-            bool write(uint8_t, uint8_t) override {
+            uint8_t written[256] = {};
+            bool write(uint8_t reg, uint8_t value) override {
+                written[reg] = value;
                 return true;
             }
             bool read(uint8_t r, uint8_t* b, size_t n) override {
                 for (size_t i = 0; i < n; ++i) {
-                    b[i] = 0;
+                    b[i] = written[(r + i) & 0xff];
                 }
                 if (r == 0x75) {
                     b[0] = 0x68;
@@ -595,15 +617,17 @@ int main() {
     test("recovery resets when a second fault interrupts qualification", [] {
         Rig rig;
         rig.active();
-        rig.transport.fail = true;
+        // Link faults are seen on every pass (an idle link carries no repeated zero reports, so a
+        // failed delivery needs movement to send); use disconnects for both interrupting faults.
+        rig.transport.online = false;
         rig.tick();
-        rig.transport.fail = false;
+        rig.transport.online = true;
         for (int i = 0; i < 19; ++i) {
             rig.tick();
         }
-        rig.transport.fail = true;
+        rig.transport.online = false;
         rig.tick();
-        rig.transport.fail = false;
+        rig.transport.online = true;
         rig.tick();
         require(rig.system.state == SystemState::SafeState, "partial recovery retained");
         for (int i = 0; i < 19; ++i) {

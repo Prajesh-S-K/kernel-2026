@@ -16,9 +16,15 @@
         <div class="header-right">
           <span class="tag" id="deviceSource">SIMULATED DEVICE</span
           ><span id="connection" class="status"><i></i>ENGINE CONNECTED</span
+          ><button id="reconnect" class="quiet" title="Reopen the USB link; the board reboots into its safe state">↻ Reconnect device</button
           ><button id="pause" class="quiet">Ⅱ Pause</button>
         </div>
       </header>
+      <div id="uncalBanner" class="uncal-banner" role="alert" hidden>
+        <strong id="uncalBannerText">UNCALIBRATED DEMO — LIVE SENSOR</strong>
+        <span id="uncalPermissionNote">Movement only. Not a calibration. Nothing is saved.</span>
+        <button id="uncalStopBanner" class="uncal-stop">Stop demo</button>
+      </div>
       <div class="layout">
         <aside>
           <div class="aside-label">YOUR CONTROL SPACE</div>
@@ -88,6 +94,212 @@
               ><span id="stepCal">03 Calibrate</span><span id="stepProfile">04 Profile</span
               ><span>05 Control test</span><span>06 Performance</span>
             </div>
+            <article class="panel uncal" id="mapPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">GUIDED SETUP</span>
+                  <h2>Teach the movements</h2>
+                </div>
+                <span class="tag" id="mapTag">OFF</span>
+              </div>
+              <p>
+                Teach right, left, up and down (three examples each, then one check each). The
+                firmware learns which rotation means horizontal and vertical for however the board is
+                mounted. Changing the mounting needs a new teaching. Nothing here moves the pointer
+                until you start configured control.
+              </p>
+              <h3 id="mapTitle"></h3>
+              <div class="map-big" id="mapBig"></div>
+              <div class="uncal-bar"><i id="mapBar"></i></div>
+              <p id="mapInstruction" class="uncal-status"></p>
+              <div class="map-preview" id="mapPreview" hidden><i id="mapDot"></i></div>
+              <div class="uncal-actions">
+                <button id="mapStart" class="primary">Start guided setup</button>
+                <button id="mapAccept" class="primary">Accept preview</button>
+                <button id="mapCancel" class="quiet">Cancel</button>
+                <button id="mapSave" class="quiet">Save settings</button>
+                <button id="mapClear" class="quiet">Forget</button>
+              </div>
+              <p id="mapSettings" class="uncal-note"></p>
+              <p id="mapStored" class="uncal-note"></p>
+              <div class="uncal-actions">
+                <button id="mapControl" class="primary">Start configured control</button>
+                <button id="mapControlStop" class="uncal-stop">Stop control</button>
+              </div>
+              <p id="mapBlocked" class="uncal-note"></p>
+            </article>
+            <article class="panel uncal" id="actionsPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">EXPERIMENTAL · OFF BY DEFAULT · MEMORY ONLY</span>
+                  <h2>Dwell action palette</h2>
+                </div>
+                <span class="tag" id="actionsTag">OFF</span>
+              </div>
+              <p>
+                One dwell does everything: hold the pointer still on a target to act on it, or on a palette
+                control to choose Left-click, Right-click, Double-click, Drag, Scroll or Stop. No physical
+                click is needed. Settings are temporary; nothing is saved and the palette is off at every
+                start and after every stop. While it is on, dwell clicking and the gesture clicks are off.
+              </p>
+              <h3 id="actionsBanner"></h3>
+              <p id="actionsDetail" class="uncal-status"></p>
+              <div class="uncal-actions">
+                <button id="actionsOpen" class="primary">Open the palette window</button>
+                <button id="actionsStop" class="uncal-stop">Stop control</button>
+              </div>
+              <label><input type="checkbox" id="actionsEnable" disabled /> Enable dwell action palette (EXPERIMENTAL)</label>
+              <label><input type="checkbox" id="actionsKeep" disabled /> Keep selected action (Right-click and Double-click only; off by default)</label>
+              <div class="uncal-actions">
+                <label>Dwell duration (500–5000 ms) <input type="number" id="actionsMs" min="500" max="5000" step="100" value="1200" /></label>
+                <label>Movement tolerance (2–50) <input type="number" id="actionsTol" min="2" max="50" step="1" value="8" /></label>
+                <button id="actionsApply" class="quiet">Apply</button>
+              </div>
+              <div class="uncal-bar"><i id="actionsBar"></i></div>
+              <p id="actionsNote" class="uncal-note"></p>
+              <p id="actionsStats" class="uncal-note"></p>
+              <p id="actionsBlocked" class="uncal-note"></p>
+            </article>
+            <article class="panel uncal" id="quickPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">EXPERIMENTAL · OFF BY DEFAULT · MEMORY ONLY</span>
+                  <h2>Quick gesture click</h2>
+                </div>
+                <span class="tag" id="quickTag">OFF</span>
+              </div>
+              <p>
+                One quick movement in a direction you choose, and straight back, clicks once. Practise it
+                once (any comfortable movement; its direction is learned in 3-D and checked against your
+                own measured pointing). While a possible gesture is being recognised the
+                pointer pauses and that movement is thrown away, never replayed. Movement that
+                happened before the gesture was detected cannot be undone. It is exclusive with dwell
+                and with the trained gesture, and drag, scrolling, right-click and double-click stay
+                off.
+              </p>
+              <h3 id="quickTitle"></h3>
+              <div class="map-big" id="quickBig"></div>
+              <div class="uncal-bar"><i id="quickBar"></i></div>
+              <p id="quickInstruction" class="uncal-status"></p>
+              <p id="quickPracticeLine" class="uncal-note"></p>
+              <p id="quickDirection" class="uncal-status"></p>
+              <div class="uncal-actions">
+                <button id="quickPracticeFallback" class="primary">Practise for the fallback</button>
+                <button id="quickPracticeConfigured" class="quiet">Practise for configured control</button>
+                <button id="quickAccept" class="primary">Accept</button>
+                <button id="quickRetry" class="quiet">Retry tilt</button>
+                <button id="quickCancel" class="quiet">Cancel</button>
+                <button id="quickClear" class="quiet">Forget</button>
+              </div>
+              <label><input type="checkbox" id="quickEnable" disabled /> Enable quick gesture click (EXPERIMENTAL)</label>
+              <div class="uncal-actions">
+                <label>Sensitivity (0.5–2.0) <input type="number" id="quickSens" min="0.5" max="2" step="0.05" value="1" /></label>
+                <label>Return tolerance (0.15–0.6) <input type="number" id="quickTol" min="0.15" max="0.6" step="0.05" value="0.35" /></label>
+                <label>Direction tolerance (10–60°) <input type="number" id="quickAngle" min="10" max="60" step="5" value="30" /></label>
+                <button id="quickApply" class="quiet">Apply</button>
+              </div>
+              <p id="quickStats" class="uncal-note"></p>
+              <p id="quickBlocked" class="uncal-note"></p>
+            </article>
+            <details class="panel older-recognizer" id="olderClick" hidden>
+              <summary>
+                Older trained-gesture recognizer (collapsed): a different recogniser, NOT the quick
+                gesture. Leave it closed while testing the quick gesture.
+              </summary>
+            <article class="panel uncal" id="clickPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">OPTIONAL · OFF BY DEFAULT</span>
+                  <h2>Gesture click</h2>
+                </div>
+                <span class="tag" id="clickTag">OFF</span>
+              </div>
+              <p>
+                Teach one deliberate gesture (a quick side tilt and return, or your own) with five
+                examples and two checks. It is then checked against ordinary pointing. It lives in memory
+                only, never saves, and clicks nothing until you enable it while control is running. While
+                a possible gesture is being recognised the pointer pauses; that movement is discarded.
+              </p>
+              <h3 id="clickTitle"></h3>
+              <div class="map-big" id="clickBig"></div>
+              <div class="uncal-bar"><i id="clickBar"></i></div>
+              <p id="clickInstruction" class="uncal-status"></p>
+              <div class="uncal-actions">
+                <button id="clickTrainFallback" class="primary">Teach for the fallback</button>
+                <button id="clickTrainConfigured" class="quiet">Teach for configured control</button>
+                <button id="clickAccept" class="primary">Accept gesture</button>
+                <button id="clickCancel" class="quiet">Cancel</button>
+                <button id="clickClear" class="quiet">Forget gesture</button>
+              </div>
+              <label><input type="checkbox" id="clickEnable" disabled /> Enable gesture click (temporary)</label>
+              <p id="clickStats" class="uncal-note"></p>
+              <p id="clickBlocked" class="uncal-note"></p>
+            </article>
+            </details>
+            <article class="panel uncal" id="uncalPanel" hidden>
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">TEMPORARY BENCH DEMO</span>
+                  <h2>Start without calibration</h2>
+                </div>
+                <span class="tag" id="uncalTag">OFF</span>
+              </div>
+              <p>
+                The real sensor moves the Mac pointer with conservative fixed settings, even
+                without a calibration. Pointer movement only: no clicks, dwell, drag or scrolling.
+                Clicking Start authorises movement from this page: the physical enable button is not
+                needed to start this temporary demo. A press of that button stops it at once, and so do
+                Stop demo, any fault, a disconnect or a calibration; each needs another Start. It also
+                works when calibration is missing or failed, or the saved profile is corrupt (reported
+                separately, never used or overwritten).
+              </p>
+              <p id="uncalStatus" class="uncal-status"></p>
+              <p id="uncalCalibration" class="uncal-note"></p>
+              <div class="uncal-actions">
+                <button id="uncalStart" class="primary">Start without calibration</button>
+                <button id="uncalStop" class="uncal-stop">Stop demo</button>
+              </div>
+              <div class="uncal-dwell">
+                <span class="eyebrow">POINTER DIRECTION (TEMPORARY)</span>
+                <label><input type="checkbox" id="uncalRevX" /> Reverse horizontal</label>
+                <label><input type="checkbox" id="uncalRevY" /> Reverse vertical</label>
+              </div>
+              <div class="uncal-dwell">
+                <span class="eyebrow">POINTER SPEED (TEMPORARY, FALLBACK ONLY)</span>
+                <div class="uncal-actions">
+                  <input type="range" id="uncalSpeed" min="0.25" max="2" step="0.05" value="1" aria-label="Pointer speed" />
+                  <output id="uncalSpeedValue">1.00×</output>
+                  <button id="uncalSpeedReset" class="quiet">Reset to 1×</button>
+                </div>
+                <small id="uncalSpeedNote"></small>
+              </div>
+              <div class="uncal-dwell">
+                <label
+                  ><input type="checkbox" id="uncalDwell" disabled /> Enable dwell clicking
+                  (temporary, off by default)</label
+                >
+                <div class="uncal-bar"><i id="uncalDwellBar"></i></div>
+                <p id="uncalDwellStatus" class="uncal-note"></p>
+                <div class="uncal-actions">
+                  <label>Dwell (ms) <input type="number" id="uncalDwellMs" min="500" max="5000" step="100" value="1200" /></label>
+                  <label>Tolerance <input type="number" id="uncalDwellTol" min="2" max="50" step="1" value="8" /></label>
+                  <button id="uncalDwellApply" class="quiet">Apply</button>
+                  <span id="uncalClicks" class="uncal-note"></span>
+                </div>
+                <small id="uncalDwellNote"></small>
+              </div>
+              <div class="uncal-grid">
+                <div>
+                  <span class="eyebrow">WHICH ROTATION MOVES THE POINTER</span>
+                  <ul id="uncalRotations"></ul>
+                </div>
+                <div>
+                  <span class="eyebrow">ACTIVE AXIS MAPPING (MEASURED ON THE BENCH)</span>
+                  <ul id="uncalMapping"></ul>
+                  <small id="uncalParams"></small>
+                </div>
+              </div>
+            </article>
             <div class="setup-grid">
               <article class="panel calibration">
                 <div class="panel-head">
@@ -381,6 +593,15 @@
                 <p class="caption">
                   Only qualify this if no switch or button can be used; control then cannot be
                   disabled by an input.
+                </p>
+                <label class="toggle"
+                  ><input type="checkbox" id="hfDemo" /> Movement-only demo (temporary, never
+                  saved)</label
+                >
+                <p class="caption">
+                  Switches off dwell clicks, drag and scrolling and bounds the pointer step, for a
+                  safe first look on real hardware. Turning it on or off pauses control; resume
+                  afterwards. It is off after every restart.
                 </p>
                 <div class="actions">
                   <button id="hfCommit" class="primary">Convert and save setup</button

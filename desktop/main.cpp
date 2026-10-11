@@ -44,6 +44,36 @@ bool durableWrite(const std::string& root, const std::string& target,
     ::close(directory);
     return synced;
 }
+// Learned-control slots ctl0.bin / ctl1.bin; wrong-sized files are reported as corrupt, not missing.
+class FileControlStorage : public ProfileStorage {
+public:
+    explicit FileControlStorage(std::string root) : root_(std::move(root)) {
+        std::filesystem::create_directories(root_);
+    }
+    std::vector<uint8_t> read(unsigned slot) override {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path(slot), error);
+        if (error || size == 0) {
+            return {};
+        }
+        if (size > 256) {
+            return {0xff};
+        }
+        std::ifstream file(path(slot), std::ios::binary);
+        std::vector<uint8_t> bytes(size);
+        file.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+        return file ? bytes : std::vector<uint8_t>{0xff};
+    }
+    bool write(unsigned slot, const std::vector<uint8_t>& bytes) override {
+        return bytes.size() <= 256 && durableWrite(root_, path(slot), bytes);
+    }
+
+private:
+    std::string root_;
+    std::string path(unsigned slot) {
+        return root_ + "/ctl" + std::to_string(slot) + ".bin";
+    }
+};
 class FileStorage : public ProfileStorage {
 public:
     explicit FileStorage(std::string root) : root_(std::move(root)) {
@@ -137,23 +167,39 @@ void print(System& s, SimHID& hid, uint32_t now, bool ok = true) {
               << "\",\"timeMs\":" << now << ",\"state\":\"" << name(s.state) << "\",\"reason\":\""
               << d.reason << "\",\"cursor\":\"" << d.cursor << "\",\"calibration\":\""
               << name(s.calibration.phase) << "\",\"calibrationReason\":\"" << s.calibration.reason
-              << "\",\"calibrationProgress\":" << s.calibration.progress(now) << ",\"dwell\":\""
+              << "\",\"calibrationProgress\":" << s.calibration.progress(now) << ",\"calibrationCueMs\":" << s.calibration.cueRemainingMs(now) << ",\"dwell\":\""
               << name(s.selection.dwell)
-              << "\",\"dwellProgress\":" << s.selection.progress(now, s.profile)
+              << "\",\"dwellProgress\":" << s.dwellProgress(now)
               << ",\"cancellations\":" << s.selection.cancellations << ",\"faults\":" << d.faults
               << ",\"stability\":" << d.motion.stability << ",\"motion\":[" << d.motion.x << ','
               << d.motion.y << ',' << d.motion.roll
               << "],\"connected\":" << (hid.online ? "true" : "false")
               << ",\"hasProfile\":" << (s.hasProfile ? "true" : "false") << ",\"profile\":";
     profileJson(s.profile);
-    char hands[1024];
+    char hands[handsFreeJsonCapacity];
     const size_t handsLength = handsFreeJson(hands, sizeof hands, s.handsFreeStatus());
     std::cout << ",\"handsFree\":" << (handsLength ? hands : "{}");
+    char mapping[mappingJsonCapacity];
+    const size_t mappingLength = mappingJson(mapping, sizeof mapping, s.mappingStatus(now));
+    std::cout << ",\"mapping\":" << (mappingLength ? mapping : "{}");
+    char click[clickJsonCapacity];
+    const size_t clickLength = clickJson(click, sizeof click, s.clickStatus(now));
+    std::cout << ",\"click\":" << (clickLength ? click : "{}");
+    char actions[actionsJsonCapacity];
+    const size_t actionsLength = actionsJson(actions, sizeof actions, s.actionsStatus(now));
+    std::cout << ",\"actions\":" << (actionsLength ? actions : "{}");
+    char quick[quickJsonCapacity];
+    const size_t quickLength = quickJson(quick, sizeof quick, s.quickStatus(now));
+    std::cout << ",\"quick\":" << (quickLength ? quick : "{}");
     std::cout << ",\"reports\":[";
     for (size_t j = 0; j < hid.reports.size(); ++j) {
         const auto& r = hid.reports[j];
         std::cout << (j ? "," : "") << "[" << int(r.dx) << ',' << int(r.dy) << ',' << int(r.wheel)
-                  << ',' << (r.down ? 1 : 0) << ']';
+                  << ',' << (r.down ? 1 : 0);
+        if (r.right) {
+            std::cout << ",1"; // optional fifth element: the secondary button, present only when pressed
+        }
+        std::cout << ']';
     }
     std::cout << "]}" << std::endl;
     hid.reports.clear();
@@ -233,7 +279,10 @@ int main(int argc, char** argv) {
         FileConfigStorage configStorage(argc > 1 ? argv[1] : "runtime");
         HandsFreeRepository configRepo(configStorage);
         SimHID transport;
+        FileControlStorage controlStorage(argc > 1 ? argv[1] : "runtime");
+        ControlRepository controlRepo(controlStorage);
         System sys(transport, repo, configRepo);
+        sys.setControlRepository(controlRepo);
         sys.configureEnableInput(true); // the simulator has a simulated enable input
         bool simEnable = false;         // raw input: switch ON / button pressed; released at start
         sys.axes.axes = {0, 1, 2};      // desktop inputs already yaw/pitch/roll
@@ -432,6 +481,136 @@ int main(int argc, char** argv) {
                 } else {
                     ok = false;
                 }
+            } else if (op == "map") {
+                std::string verb;
+                cmd >> verb;
+                ok = (cmd >> std::ws).eof();
+                if (ok && verb == "start") {
+                    ok = sys.teachStart(now);
+                } else if (ok && verb == "cancel") {
+                    sys.teachCancel();
+                } else if (ok && verb == "accept") {
+                    ok = sys.teachAccept();
+                } else if (ok && verb == "save") {
+                    ok = sys.teachSave();
+                } else if (ok && verb == "clear") {
+                    sys.clearLearned();
+                } else {
+                    ok = false;
+                }
+            } else if (op == "quick") {
+                std::string verb, value;
+                cmd >> verb;
+                if (verb == "practice") {
+                    cmd >> value;
+                    ok = (value == "fallback" || value == "configured") && (cmd >> std::ws).eof() &&
+                         sys.quickPracticeStart(now, value == "configured");
+                } else if (verb == "enable") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setQuickGesture(value == "on", now);
+                } else if (verb == "set") {
+                    float sensitivity = 0, tolerance = 0, angle = 0;
+                    ok = bool(cmd >> sensitivity >> tolerance);
+                    if (ok && !(cmd >> std::ws).eof()) {
+                        ok = bool(cmd >> angle) && (cmd >> std::ws).eof() &&
+                             sys.setQuickSettings(sensitivity, tolerance, angle);
+                    } else if (ok) {
+                        ok = sys.setQuickSettings(sensitivity, tolerance);
+                    }
+                } else if (verb == "retry" || verb == "cancel" || verb == "accept" ||
+                           verb == "clear") {
+                    ok = (cmd >> std::ws).eof();
+                    if (ok && verb == "retry") {
+                        sys.quickPracticeRetry(now);
+                    } else if (ok && verb == "cancel") {
+                        sys.quickPracticeCancel();
+                    } else if (ok && verb == "accept") {
+                        ok = sys.quickPracticeAccept();
+                    } else if (ok) {
+                        sys.quickClear();
+                    }
+                } else {
+                    ok = false;
+                }
+            } else if (op == "actions") {
+                std::string verb, value;
+                cmd >> verb >> value;
+                if (verb == "enable") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setActionPalette(value == "on", now);
+                } else if (verb == "overlay") {
+                    unsigned long session = 0, epoch = 0;
+                    if (value == "on") {
+                        ok = bool(cmd >> session >> epoch) && (cmd >> std::ws).eof() &&
+                             session <= 0xFFFFFFFFul && epoch <= 0xFFFFFFFFul &&
+                             sys.setActionOverlay(true, now, uint32_t(session), uint32_t(epoch));
+                    } else if (value == "off") {
+                        ok = bool(cmd >> epoch) && (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                             sys.setActionOverlay(false, now, 0, uint32_t(epoch));
+                    } else {
+                        ok = false;
+                    }
+                } else if (verb == "menu") {
+                    unsigned long epoch = 0;
+                    ok = (value == "open" || value == "close") && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.setOverlayMenu(value == "open", now, uint32_t(epoch));
+                } else if (verb == "select") {
+                    PaletteTarget target;
+                    unsigned long epoch = 0;
+                    ok = parsePaletteTarget(value.c_str(), target) && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.overlaySelect(target, now, uint32_t(epoch));
+                } else if (verb == "keyboard") {
+                    unsigned long epoch = 0;
+                    ok = (value == "on" || value == "off") && bool(cmd >> epoch) &&
+                         (cmd >> std::ws).eof() && epoch <= 0xFFFFFFFFul &&
+                         sys.setOverlayKeyboard(value == "on", uint32_t(epoch));
+                } else if (verb == "keep") {
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setActionKeep(value == "on");
+                } else if (verb == "hover") {
+                    PaletteTarget target;
+                    ok = parsePaletteTarget(value.c_str(), target) && (cmd >> std::ws).eof() &&
+                         sys.setActionHover(target, now);
+                } else {
+                    ok = false;
+                }
+            } else if (op == "click") {
+                std::string verb, value;
+                cmd >> verb;
+                if (verb == "train") {
+                    cmd >> value;
+                    ok = (value == "fallback" || value == "configured") && (cmd >> std::ws).eof() &&
+                         sys.clickTrainStart(now, value == "configured");
+                } else if (verb == "enable") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setClickGesture(value == "on", now);
+                } else if (verb == "cancel" || verb == "accept" || verb == "clear") {
+                    ok = (cmd >> std::ws).eof();
+                    if (ok && verb == "cancel") {
+                        sys.clickTrainCancel();
+                    } else if (ok && verb == "accept") {
+                        ok = sys.clickTrainAccept();
+                    } else if (ok) {
+                        sys.clickClear();
+                    }
+                } else {
+                    ok = false;
+                }
+            } else if (op == "control") {
+                std::string verb;
+                cmd >> verb;
+                ok = (cmd >> std::ws).eof();
+                if (ok && verb == "start") {
+                    ok = sys.startConfiguredControl(now);
+                } else if (ok && verb == "stop") {
+                    sys.stopUncalibratedDemo("control stopped by the user; explicit restart required");
+                } else {
+                    ok = false;
+                }
             } else if (op == "handsfree") {
                 std::string verb, value;
                 cmd >> verb;
@@ -444,6 +623,48 @@ int main(int argc, char** argv) {
                     if (ok) {
                         sys.stageSwitchless(value == "on");
                     }
+                } else if (verb == "demo") {
+                    cmd >> value;
+                    ok = (value == "on" || value == "off") && (cmd >> std::ws).eof() &&
+                         sys.setDemoMovementOnly(value == "on");
+                } else if (verb == "uncal") {
+                    cmd >> value;
+                    if (value == "reverse") {
+                        int horizontal = -1, vertical = -1;
+                        ok = bool(cmd >> horizontal >> vertical) && (cmd >> std::ws).eof() &&
+                             (horizontal == 0 || horizontal == 1) &&
+                             (vertical == 0 || vertical == 1);
+                        if (ok) {
+                            sys.setUncalibratedReversal(horizontal == 1, vertical == 1);
+                        }
+                    } else if (value == "speed") {
+                        // speed <factor 0.25-2>   (RAM only; works whether or not a session is running)
+                        float factor = 0;
+                        ok = bool(cmd >> factor) && (cmd >> std::ws).eof() &&
+                             sys.setUncalibratedSpeed(factor, now);
+                    } else if (value == "dwell") {
+                        std::string action;
+                        cmd >> action;
+                        if (action == "on" || action == "off") {
+                            ok = (cmd >> std::ws).eof() &&
+                                 sys.setUncalibratedDwell(action == "on", now);
+                        } else if (action == "set") {
+                            unsigned long dwellMs = 0;
+                            float tolerance = 0;
+                            ok = bool(cmd >> dwellMs >> tolerance) && (cmd >> std::ws).eof() &&
+                                 sys.setUncalibratedDwellSettings(uint32_t(dwellMs), tolerance);
+                        } else {
+                            ok = false;
+                        }
+                    } else {
+                        ok = (value == "start" || value == "stop") && (cmd >> std::ws).eof();
+                        if (ok && value == "start") {
+                            ok = sys.startUncalibratedDemo(now);
+                        } else if (ok) {
+                            sys.stopUncalibratedDemo(
+                                "demo stopped by the user; explicit restart required");
+                        }
+                    }
                 } else if (verb == "enable") {
                     cmd >> value;
                     ok = (value == "maintained" || value == "momentary") && (cmd >> std::ws).eof();
@@ -453,6 +674,14 @@ int main(int argc, char** argv) {
                     }
                 } else {
                     ok = false;
+                }
+            } else if (op == "calibrate" && !(cmd >> std::ws).eof()) {
+                std::string mode;
+                cmd >> mode;
+                ok = mode == "guided" && (cmd >> std::ws).eof();
+                if (ok) {
+                    sys.calibrate(now, start::calibrationCueMs);
+                    ok = sys.state == SystemState::Calibrating;
                 }
             } else if (!(cmd >> std::ws).eof()) {
                 ok = false;

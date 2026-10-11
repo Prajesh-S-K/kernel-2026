@@ -5,7 +5,7 @@
 #include <cstring>
 
 namespace {
-constexpr size_t telemetryBytes = 2048;
+constexpr size_t telemetryBytes = 5120; // an oversize frame is dropped, so keep real headroom
 constexpr size_t transmitBudgetBytes = 64;
 struct Frame {
     char data[telemetryBytes]{};
@@ -71,7 +71,7 @@ void transmitTelemetry() {
     }
 }
 void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
-    char buffer[2048];
+    static char buffer[telemetryBytes]; // static: keeps the loop task stack small
     size_t used = 0;
     auto& s = *systemEngine;
 #ifdef NODX_SIMULATED
@@ -91,10 +91,11 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            ble.connected() ? "true" : "false");
     append(buffer, sizeof(buffer), used,
            "\"faultCode\":\"%s\",\"cursor\":\"%s\",\"calibrationReason\":\"%s\","
-           "\"calibrationProgress\":%.5f,\"dwellProgress\":%.5f,\"stability\":%.5f,\"motion\":[%."
+           "\"calibrationProgress\":%.5f,\"calibrationCueMs\":%lu,\"dwellProgress\":%.5f,\"stability\":%.5f,\"motion\":[%."
            "5f,%.5f,%.5f],\"reports\":[],\"profile\":{\"schema\":1,",
            name(s.diagnostics.faultCode), s.diagnostics.cursor, s.calibration.reason,
-           s.calibration.progress(now), s.selection.progress(now, s.profile),
+           s.calibration.progress(now), (unsigned long)s.calibration.cueRemainingMs(now),
+           s.dwellProgress(now),
            s.diagnostics.motion.stability, s.diagnostics.motion.x, s.diagnostics.motion.y,
            s.diagnostics.motion.roll);
     auto& p = s.profile;
@@ -107,9 +108,60 @@ void diagnostic(uint32_t now, bool ok, uint32_t requestId) {
            p.gain[2], p.gain[3], p.alpha, p.precisionThreshold, p.fastThreshold, p.dwellTolerance,
            (unsigned long)p.dwellMs, p.scrollThreshold, p.scrollGain,
            p.dwellEnabled ? "true" : "false", p.scrollEnabled ? "true" : "false");
-    static char hands[1024]; // static: keeps the loop task stack small
+    static char hands[handsFreeJsonCapacity]; // static: keeps the loop task stack small
     const size_t handsLength = handsFreeJson(hands, sizeof(hands), s.handsFreeStatus());
-    append(buffer, sizeof(buffer), used, ",\"handsFree\":%s}\n", handsLength ? hands : "{}");
+    append(buffer, sizeof(buffer), used, ",\"handsFree\":%s", handsLength ? hands : "{}");
+    static char mapping[mappingJsonCapacity];
+    const size_t mappingLength = mappingJson(mapping, sizeof(mapping), s.mappingStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"mapping\":%s", mappingLength ? mapping : "{}");
+    static char click[clickJsonCapacity];
+    const size_t clickLength = clickJson(click, sizeof(click), s.clickStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"click\":%s", clickLength ? click : "{}");
+    static char actions[actionsJsonCapacity];
+    const size_t actionsLength = actionsJson(actions, sizeof(actions), s.actionsStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"actions\":%s", actionsLength ? actions : "{}");
+    static char quick[quickJsonCapacity];
+    const size_t quickLength = quickJson(quick, sizeof(quick), s.quickStatus(now));
+    append(buffer, sizeof(buffer), used, ",\"quick\":%s", quickLength ? quick : "{}");
+#ifndef NODX_SIMULATED
+    append(buffer, sizeof(buffer), used, ",\"capture\":{\"active\":%s,\"count\":%lu,\"capacity\":%lu",
+           captureState.active ? "true" : "false", (unsigned long)captureState.count,
+           (unsigned long)captureCapacity);
+    if (captureState.pageOffset != size_t(-1) && requestId != 0) {
+        append(buffer, sizeof(buffer), used, ",\"offset\":%lu,\"rows\":[",
+               (unsigned long)captureState.pageOffset);
+        const size_t end = std::min(captureState.count, captureState.pageOffset + capturePage);
+        for (size_t i = captureState.pageOffset; i < end; ++i) {
+            const CaptureRow& r = captureRows[i];
+            append(buffer, sizeof(buffer), used, "%s[%lu,%d,%d,%d,%d,%d,%d]", i == captureState.pageOffset ? "" : ",",
+                   (unsigned long)r.t, r.g[0], r.g[1], r.g[2], r.a[0], r.a[1], r.a[2]);
+        }
+        append(buffer, sizeof(buffer), used, "]");
+        captureState.pageOffset = size_t(-1);
+    }
+    append(buffer, sizeof(buffer), used, "}");
+#endif
+#ifndef NODX_SIMULATED
+    // Raw sensor view for bench sessions (sensor coordinates, before the axis mapping).
+    const auto& snap = sensorSnapshot;
+    append(buffer, sizeof(buffer), used,
+           ",\"sensor\":{\"variant\":\"%s\",\"seen\":%s,\"frames\":%lu,\"ageMs\":%lu,"
+           "\"gyro\":[%.2f,%.2f,%.2f],\"accel\":[%.4f,%.4f,%.4f],"
+           "\"angle\":[%.3f,%.3f,%.3f]}",
+           name(mpu.variant()), snap.seen ? "true" : "false", (unsigned long)snap.frames,
+           (unsigned long)(snap.seen ? uint32_t(now - snap.lastAtMs) : 0), snap.last.gyro[0],
+           snap.last.gyro[1], snap.last.gyro[2], snap.last.accel[0], snap.last.accel[1],
+           snap.last.accel[2], snap.angle[0], snap.angle[1], snap.angle[2]);
+    const auto& map = s.axes;
+    append(buffer, sizeof(buffer), used,
+           ",\"axes\":{\"valid\":%s,\"gyro\":[%u,%u,%u],\"gyroSigns\":[%.0f,%.0f,%.0f],"
+           "\"accel\":[%u,%u,%u],\"accelSigns\":[%.0f,%.0f,%.0f]}",
+           map.valid() ? "true" : "false", map.axes[0], map.axes[1], map.axes[2], map.signs[0],
+           map.signs[1], map.signs[2], map.accelAxes[0], map.accelAxes[1], map.accelAxes[2],
+           map.accelSigns[0], map.accelSigns[1], map.accelSigns[2]);
+    append(buffer, sizeof(buffer), used, ",\"reset\":\"%s\"", bootResetReason);
+#endif
+    append(buffer, sizeof(buffer), used, "}\n");
     if (used >= sizeof(buffer)) {
         return;
     }

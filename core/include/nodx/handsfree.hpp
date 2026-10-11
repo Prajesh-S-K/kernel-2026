@@ -122,7 +122,7 @@ struct HandsFreeStatus {
     const char* lastGesture = "NONE";
     const char* lastReject = "NONE";
     uint32_t candidates = 0, rejected = 0, executed = 0, refused = 0;
-    bool suppressing = false, dragging = false;
+    bool suppressing = false, dragging = false, demoMovementOnly = false;
     const char* trainPhase = "IDLE";
     const char* trainGesture = "NONE";
     const char* trainReason = "idle";
@@ -130,7 +130,20 @@ struct HandsFreeStatus {
     bool trainValidated = false;
     std::array<bool, gestureCount> staged{}, stored{};
     const char* blocked = "";
+    // Temporary uncalibrated pointer demo (RAM only; never a calibration, never saved).
+    bool uncalActive = false, uncalNeedsEnable = true, uncalPresent = false, uncalPermitted = false;
+    bool uncalReverseX = false, uncalReverseY = false;
+    const char* uncalPermission = "NONE"; // WEBSITE_START (fallback), ENABLE_BUTTON (configured)
+    const char* uncalBlocked = "";
+    const char* profileState = "MISSING";
+    float uncalGain = 0, uncalDeadzone = 0, uncalMaxStep = 0, uncalSpeed = 1.f;
+    bool uncalDwellEnabled = false;
+    uint32_t uncalDwellMs = 0, uncalClicks = 0;
+    float uncalDwellTolerance = 0, uncalDwellProgress = 0;
+    const char* uncalDwellState = "IDLE";
 };
+// Buffer size every adapter uses for handsFreeJson(); an overflow returns 0, so keep real headroom.
+constexpr size_t handsFreeJsonCapacity = 2048;
 // Writes one JSON object (no trailing newline). Returns the length, or 0 if it does not fit.
 size_t handsFreeJson(char* out, size_t capacity, const HandsFreeStatus& status);
 } // namespace nodx

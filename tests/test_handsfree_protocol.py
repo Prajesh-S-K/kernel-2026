@@ -170,8 +170,8 @@ class SetupAndDailyWorkflow(HandsFreeCase):
         for state in states:
             encoded = json.dumps(state, allow_nan=False, separators=(",", ":"))
             self.assertIn("handsFree", state)
-            # Firmware frames are bounded at 2048 bytes; keep real headroom for longer reasons.
-            self.assertLess(len(encoded), 1900)
+            # Firmware frames are bounded at 5120 bytes; keep real headroom for longer reasons.
+            self.assertLess(len(encoded), 4200)  # firmware frame buffer is 5120 bytes
 
 
 class CommandValidation(HandsFreeCase):
@@ -228,6 +228,294 @@ class CommandValidation(HandsFreeCase):
             with self.assertRaises(ValueError, msg=str(data)):
                 SERVER.command_for(data)
         self.assertEqual(SERVER.command_for({"action": "enable", "enabled": False}), "enable 0")
+        self.assertEqual(
+            SERVER.command_for({"action": "calibrate", "guided": True}), "calibrate guided"
+        )
+        self.assertEqual(SERVER.command_for({"action": "calibrate"}), "calibrate")
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncal", "enabled": True}),
+            "handsfree uncal start",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncal", "enabled": False}),
+            "handsfree uncal stop",
+        )
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "uncal"})
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "handsfree", "op": "uncalreverse", "horizontal": True, "vertical": False}
+            ),
+            "handsfree uncal reverse 1 0",
+        )
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "uncalreverse", "horizontal": True})
+        self.assertEqual(
+            SERVER.command_for({"action": "click", "op": "train", "frame": "fallback"}),
+            "click train fallback",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "click", "op": "train", "frame": "configured"}),
+            "click train configured",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "click", "op": "enable", "enabled": True}),
+            "click enable on",
+        )
+        self.assertEqual(SERVER.command_for({"action": "click", "op": "accept"}), "click accept")
+        self.assertEqual(
+            SERVER.command_for({"action": "capture", "op": "start", "seconds": 8}),
+            "capture start 8",
+        )
+        self.assertEqual(SERVER.command_for({"action": "capture", "op": "stop"}), "capture stop")
+        self.assertEqual(
+            SERVER.command_for({"action": "capture", "op": "get", "offset": 32}), "capture get 32"
+        )
+        for bad in (
+            {"action": "capture"},
+            {"action": "capture", "op": "start"},
+            {"action": "capture", "op": "start", "seconds": 0},
+            {"action": "capture", "op": "start", "seconds": 21},
+            {"action": "capture", "op": "start", "seconds": 2.5},
+            {"action": "capture", "op": "start", "seconds": True},
+            {"action": "capture", "op": "get", "offset": -1},
+            {"action": "capture", "op": "get", "offset": 2000},
+            {"action": "capture", "op": "get"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        self.assertEqual(
+            SERVER.command_for({"action": "quick", "op": "practice", "frame": "fallback"}),
+            "quick practice fallback",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "quick", "op": "enable", "enabled": True}),
+            "quick enable on",
+        )
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "quick", "op": "set", "sensitivity": 1.5, "returnTolerance": 0.25}
+            ),
+            "quick set 1.50 0.25",
+        )
+        for operation in ("retry", "cancel", "accept", "clear"):
+            self.assertEqual(
+                SERVER.command_for({"action": "quick", "op": operation}), f"quick {operation}"
+            )
+        self.assertEqual(
+            SERVER.command_for(
+                {
+                    "action": "quick",
+                    "op": "set",
+                    "sensitivity": 1,
+                    "returnTolerance": 0.3,
+                    "directionTolerance": 45,
+                }
+            ),
+            "quick set 1.00 0.30 45",
+        )
+        for angle in (9, 61, True, "30", float("nan")):
+            with self.assertRaises(ValueError, msg=str(angle)):
+                SERVER.command_for(
+                    {
+                        "action": "quick",
+                        "op": "set",
+                        "sensitivity": 1,
+                        "returnTolerance": 0.3,
+                        "directionTolerance": angle,
+                    }
+                )
+        for bad in (
+            {"action": "quick"},
+            {"action": "quick", "op": "practice"},
+            {"action": "quick", "op": "practice", "frame": "x"},
+            {"action": "quick", "op": "enable", "enabled": 1},
+            {"action": "quick", "op": "set", "sensitivity": 0.4, "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": 1, "returnTolerance": 0.7},
+            {"action": "quick", "op": "set", "sensitivity": True, "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": "1", "returnTolerance": 0.3},
+            {"action": "quick", "op": "set", "sensitivity": 1},
+            {"action": "quick", "op": "start"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "enable", "enabled": True}),
+            "actions enable on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "enable", "enabled": False}),
+            "actions enable off",
+        )
+        for target in (
+            "none",
+            "left",
+            "right",
+            "double",
+            "drag",
+            "scroll",
+            "drop",
+            "cancel",
+            "stop",
+            "frame",
+        ):
+            self.assertEqual(
+                SERVER.command_for({"action": "actions", "op": "hover", "target": target}),
+                f"actions hover {target}",
+            )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "keep", "enabled": True}),
+            "actions keep on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "keep", "enabled": False}),
+            "actions keep off",
+        )
+        for factor, text in (
+            (0.25, "0.25"),
+            (1, "1.00"),
+            (0.5, "0.50"),
+            (2, "2.00"),
+            (1.25, "1.25"),
+        ):
+            self.assertEqual(
+                SERVER.command_for({"action": "handsfree", "op": "uncalspeed", "factor": factor}),
+                f"handsfree uncal speed {text}",
+            )
+        for bad in (
+            {"action": "handsfree", "op": "uncalspeed"},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 0.24},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 2.01},
+            {"action": "handsfree", "op": "uncalspeed", "factor": 0},
+            {"action": "handsfree", "op": "uncalspeed", "factor": "1"},
+            {"action": "handsfree", "op": "uncalspeed", "factor": True},
+            {"action": "handsfree", "op": "uncalspeed", "factor": None},
+            {"action": "actions", "op": "keep"},
+            {"action": "actions", "op": "keep", "enabled": 1},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        claim = {"action": "actions", "op": "overlay", "enabled": True, "session": 3, "epoch": 99}
+        self.assertEqual(SERVER.command_for(claim), "actions overlay on 3 99")
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "actions", "op": "overlay", "enabled": False, "epoch": 99}
+            ),
+            "actions overlay off 99",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "menu", "open": True, "epoch": 99}),
+            "actions menu open 99",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "actions", "op": "menu", "open": False, "epoch": 99}),
+            "actions menu close 99",
+        )
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "actions", "op": "keyboard", "enabled": True, "epoch": 99}
+            ),
+            "actions keyboard on 99",
+        )
+        for target in ("left", "right", "double", "drag", "drop", "cancel", "scroll", "stop"):
+            self.assertEqual(
+                SERVER.command_for(
+                    {"action": "actions", "op": "select", "target": target, "epoch": 99}
+                ),
+                f"actions select {target} 99",
+            )
+        for bad in (
+            {"action": "actions", "op": "overlay", "enabled": True, "epoch": 99},  # no session
+            {"action": "actions", "op": "overlay", "enabled": True, "session": 3},  # no epoch
+            {"action": "actions", "op": "overlay", "enabled": True, "session": 3, "epoch": 0},
+            {"action": "actions", "op": "overlay", "enabled": True, "session": -1, "epoch": 5},
+            {
+                "action": "actions",
+                "op": "overlay",
+                "enabled": True,
+                "session": 3,
+                "epoch": 4294967296,
+            },
+            {"action": "actions", "op": "overlay", "enabled": True, "session": "3", "epoch": 5},
+            {"action": "actions", "op": "overlay", "enabled": False},
+            {"action": "actions", "op": "menu", "open": True},
+            {"action": "actions", "op": "menu", "open": "yes", "epoch": 5},
+            {"action": "actions", "op": "keyboard", "enabled": True},
+            {"action": "actions", "op": "select", "target": "left"},
+            {"action": "actions", "op": "select", "target": "frame", "epoch": 5},
+            {"action": "actions", "op": "select", "target": "none", "epoch": 5},
+            {"action": "actions", "op": "select", "target": "left; stop", "epoch": 5},
+            {"action": "actions", "op": "select", "target": 1, "epoch": 5},
+            {"action": "actions", "op": "select", "target": "left", "epoch": True},
+            {"action": "actions", "op": "select", "target": "left", "epoch": 1.5},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        for bad in (
+            {"action": "actions"},
+            {"action": "actions", "op": "enable"},
+            {"action": "actions", "op": "enable", "enabled": 1},
+            {"action": "actions", "op": "hover"},
+            {"action": "actions", "op": "hover", "target": "middle"},
+            {"action": "actions", "op": "hover", "target": "LEFT; stop"},
+            {"action": "actions", "op": "hover", "target": 3},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        for bad in (
+            {"action": "click"},
+            {"action": "click", "op": "train"},
+            {"action": "click", "op": "train", "frame": "x"},
+            {"action": "click", "op": "enable"},
+            {"action": "click", "op": "enable", "enabled": "yes"},
+            {"action": "click", "op": "start"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        for operation in ("start", "cancel", "accept", "save", "clear"):
+            self.assertEqual(
+                SERVER.command_for({"action": "map", "op": operation}), f"map {operation}"
+            )
+        for operation in ("start", "stop"):
+            self.assertEqual(
+                SERVER.command_for({"action": "control", "op": operation}), f"control {operation}"
+            )
+        for bad in (
+            {"action": "map", "op": "stop"},
+            {"action": "map"},
+            {"action": "control", "op": "accept"},
+            {"action": "control", "op": "start; rm"},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for(bad)
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": True}),
+            "handsfree uncal dwell on",
+        )
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell", "enabled": False}),
+            "handsfree uncal dwell off",
+        )
+        self.assertEqual(
+            SERVER.command_for(
+                {"action": "handsfree", "op": "uncaldwellset", "ms": 1200, "tolerance": 8}
+            ),
+            "handsfree uncal dwell set 1200 8.0",
+        )
+        for bad in (
+            {"ms": 400, "tolerance": 8},
+            {"ms": 6000, "tolerance": 8},
+            {"ms": 1200.5, "tolerance": 8},
+            {"ms": 1200, "tolerance": 1},
+            {"ms": 1200, "tolerance": 51},
+            {"ms": 1200, "tolerance": True},
+            {"ms": "1200", "tolerance": 8},
+            {"ms": 1200},
+        ):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                SERVER.command_for({"action": "handsfree", "op": "uncaldwellset", **bad})
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "uncaldwell"})
         self.assertEqual(
             SERVER.command_for({"action": "gesture", "name": "tilt2"}), "gesture tilt2 1"
         )
@@ -485,6 +773,70 @@ class MomentaryEnableButton(HandsFreeCase):
                 SERVER.command_for({"action": "handsfree", "op": "enable", "kind": bad})
 
 
+class MovementOnlyDemo(HandsFreeCase):
+    """Temporary movement-only demo: no dwell click, drag or wheel, bounded steps; RAM only."""
+
+    def test_the_demo_is_a_validated_temporary_mode(self):
+        self.setup_hands_free("maintained")
+        self.quiet(60)
+        self.assertFalse(self.send("status")["handsFree"]["demoMovementOnly"])
+        for bad in ("handsfree demo", "handsfree demo maybe", "handsfree demo on extra"):
+            self.assertFalse(self.send(bad)["ok"], bad)
+
+        def saved():
+            return tuple(
+                (self.runtime / name).read_bytes() if (self.runtime / name).exists() else None
+                for name in ("hf0.bin", "hf1.bin")
+            )
+
+        before = saved()
+        on = self.send("handsfree demo on")
+        self.assertTrue(on["ok"])
+        self.assertTrue(on["handsFree"]["demoMovementOnly"])
+        after = saved()
+        self.assertTrue(any(item is not None for item in before), "a configuration was saved")
+        self.assertEqual(before, after, "the demo must not touch the saved configuration")
+        self.assertTrue(self.send("handsfree demo off")["ok"])
+        self.assertFalse(self.send("status")["handsFree"]["demoMovementOnly"])
+        self.assertEqual(
+            SERVER.command_for({"action": "handsfree", "op": "demo", "enabled": True}),
+            "handsfree demo on",
+        )
+        with self.assertRaises(ValueError):
+            SERVER.command_for({"action": "handsfree", "op": "demo"})
+
+    def test_no_drag_no_click_and_bounded_steps_in_the_demo(self):
+        self.setup_hands_free("maintained")
+        self.quiet(60)
+        self.assertTrue(self.send("handsfree demo on")["ok"])
+        self.quiet(60)
+        self.assertTrue(self.send("resume")["ok"])
+        refused_before = self.send("status")["handsFree"]["gesture"]["refused"]
+        dragging = self.send("gesture tilt2")
+        self.assertFalse(dragging["handsFree"]["drag"], "a drag started in the demo")
+        self.assertEqual(dragging["handsFree"]["gesture"]["refused"], refused_before + 1)
+        self.assertEqual(dragging["state"], "ACTIVE")
+        self.send("step 30 40 0 0 0 1 0 0")  # fast yaw
+        clicks = 0
+        biggest = 0
+        for _ in range(8):
+            result = self.send("step 50 0 0 0 0 1 0 0")  # hold still: a dwell would click
+            for dx, dy, wheel, down in result["reports"]:
+                clicks += bool(down)
+                biggest = max(biggest, abs(dx), abs(dy))
+        self.assertEqual(clicks, 0, "a dwell click in the demo")
+        self.assertLessEqual(biggest, 6)
+
+    def test_the_demo_is_off_after_a_restart_and_the_profile_keeps_dwell(self):
+        self.setup_hands_free("maintained")
+        self.assertTrue(self.send("handsfree demo on")["ok"])
+        self.restart()
+        status = self.send("status")
+        self.assertFalse(status["handsFree"]["demoMovementOnly"])
+        self.assertTrue(status["profile"]["dwellEnabled"])
+        self.assertEqual(status["handsFree"]["mode"], "HANDS_FREE")
+
+
 class SwitchAndTransport(HandsFreeCase):
     def test_switch_off_releases_immediately_and_on_never_resumes(self):
         self.setup_hands_free()
@@ -523,6 +875,54 @@ class SwitchAndTransport(HandsFreeCase):
             self.assertEqual(result["state"], "SAFE_STATE")
             self.assertTrue(all(r[3] == 0 for r in result["reports"]))
         self.assertEqual(self.quiet(200)["state"], "READY")
+
+    def test_serial_link_reopens_after_repeated_timeouts_and_on_request(self):
+        class DeadSerial:
+            closed = False
+
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                pass
+
+            def readline(self):
+                return b""
+
+            def close(self):
+                self.closed = True
+
+        class Adapter(SERVER.SerialDevice):
+            reopened = 0
+
+            def _open(self):
+                Adapter.reopened += 1
+                self.serial = DeadSerial()
+
+        import sys
+
+        transport = sys.modules[SERVER.SerialDevice.__module__]
+        original_timeout = transport.REQUEST_TIMEOUT_SECONDS
+        transport.REQUEST_TIMEOUT_SECONDS = 0.01
+        try:
+            adapter = Adapter("fake-port")
+            self.assertEqual(Adapter.reopened, 1)
+            for _ in range(adapter.AUTO_REOPEN_AFTER - 1):
+                with self.assertRaises(RuntimeError):
+                    adapter.request("status")
+            self.assertEqual(Adapter.reopened, 1, "reopened too early")
+            with self.assertRaises(RuntimeError):
+                adapter.request("status")
+            self.assertEqual(Adapter.reopened, 2, "no automatic reopen after repeated timeouts")
+            for _ in range(adapter.AUTO_REOPEN_AFTER + 2):
+                with self.assertRaises(RuntimeError):
+                    adapter.request("status")
+            self.assertEqual(Adapter.reopened, 2, "cooldown ignored")
+            adapter.reopen()  # the manual button
+            self.assertEqual(Adapter.reopened, 3)
+            self.assertEqual(adapter.failures, 0)
+        finally:
+            transport.REQUEST_TIMEOUT_SECONDS = original_timeout
 
     def test_serial_adapter_passes_new_commands_and_still_refuses_native_only(self):
         class FakeSerial:
@@ -675,6 +1075,171 @@ class ReplayAndTrials(HandsFreeCase):
         self.assertEqual(post({**trial, "interactionMode": "OTHER"}), 400)
         self.assertEqual(post({**trial, "gestureInterruptions": -1}), 400)
         self.assertEqual(post({**trial, "gestureInterruptions": 1.5}), 400)
+
+
+def secondary(report):
+    # [dx, dy, wheel, primary] plus an optional fifth element, present only while the secondary
+    # (right) button is pressed.
+    return len(report) > 4 and bool(report[4])
+
+
+class ActionPaletteSimulatorTest(HandsFreeCase):
+    """The palette through the real simulator process: enable, select by hover dwell, click."""
+
+    def reports(self, response):
+        return response.get("reports", [])
+
+    def steps(self, count, vector="0 0 0 0 1 0 0", hover="none"):
+        """Run `count` samples, repeating the palette's report like the real page does (a report older
+        than 2.5 s counts as missing, and then nothing acts on a target)."""
+        seen = []
+        remaining = count
+        while remaining > 0:
+            self.send(f"actions hover {hover}")
+            chunk = min(50, remaining)
+            response = self.send(f"step {chunk} {vector}")
+            seen.extend(self.reports(response))
+            remaining -= chunk
+        return response, seen
+
+    def test_palette_selection_never_clicks_and_a_target_dwell_clicks_once(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertFalse(self.send("actions hover left")["ok"], "hover accepted while off")
+        enabled = self.send("actions enable on")
+        self.assertTrue(enabled["ok"], enabled)
+        self.assertTrue(enabled["actions"]["enabled"])
+        self.assertEqual(enabled["actions"]["mode"], "LEFT")
+        # select Right by dwelling over its palette control: no OS click of any kind
+        self.assertTrue(self.send("actions hover right")["ok"])
+        response, seen = self.steps(170, hover="right")
+        self.send("actions hover none")
+        self.assertEqual(
+            [r for r in seen if r[3] or secondary(r)], [], "a palette selection clicked"
+        )
+        self.assertEqual(response["actions"]["mode"], "RIGHT")
+        self.assertEqual(response["actions"]["selections"], 1)
+        # move on, then dwell on the target: exactly one right click, back to LEFT
+        self.steps(40, "40 0 0 0 1 0 0")
+        self.steps(30)
+        response, seen = self.steps(190)
+        presses = [r for r in seen if secondary(r)]
+        self.assertEqual(len(presses), 1, seen)
+        self.assertFalse(any(r[3] for r in seen), "a primary press for a right click")
+        self.assertEqual(response["actions"]["mode"], "LEFT")
+        # the palette is cleared by a stop; a restart needs it enabled again
+        self.assertTrue(self.send("handsfree uncal stop")["ok"])
+        self.assertFalse(self.send("status")["actions"]["enabled"])
+
+    def test_stop_control_ends_the_session_by_dwell(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        self.assertTrue(self.send("actions hover stop")["ok"])
+        response, seen = self.steps(170, hover="stop")
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [])
+        self.assertNotEqual(response["state"], "ACTIVE")
+        self.assertFalse(response["actions"]["enabled"])
+
+    def test_cancel_and_drop_are_selected_by_dwell_and_one_selection_per_hover(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        response, seen = self.steps(170, hover="right")
+        self.assertEqual(response["actions"]["mode"], "RIGHT")
+        response, seen = self.steps(170, hover="right")  # still on it: not chosen again
+        self.assertEqual(response["actions"]["selections"], 1)
+        self.assertEqual(response["actions"]["locked"], "RIGHT")
+        response, seen = self.steps(170, hover="cancel")
+        self.assertEqual(response["actions"]["mode"], "LEFT")
+        self.assertEqual(response["actions"]["counts"]["cancel"], 1)
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [], "Cancel clicked")
+        self.assertEqual(response["actions"]["locked"], "CANCEL")
+
+    def test_pointer_speed_scales_the_simulated_pointer_and_keep_needs_the_palette(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+
+        def moved(factor):
+            self.assertTrue(self.send(f"handsfree uncal speed {factor}")["ok"])
+            self.assertEqual(self.send("status")["handsFree"]["uncalDemo"]["speed"], factor)
+            total = 0
+            for _ in range(3):
+                reply = self.send("step 50 8 0 0 0 1 0 0")
+                total += sum(r[0] for r in self.reports(reply))
+            self.quiet(50)
+            return total
+
+        slow, normal, fast = moved(0.25), moved(1.0), moved(2.0)
+        self.assertGreater(normal, 20)
+        self.assertAlmostEqual(slow / normal, 0.25, delta=0.08)
+        self.assertAlmostEqual(fast / normal, 2.0, delta=0.3)
+        for bad in ("0.2", "2.5", "abc", "nan", ""):
+            self.assertFalse(self.send(f"handsfree uncal speed {bad}")["ok"], bad)
+        # keep needs the palette
+        self.assertFalse(self.send("actions keep on")["ok"])
+        self.assertTrue(self.send("actions enable on")["ok"])
+        kept = self.send("actions keep on")
+        self.assertTrue(kept["ok"] and kept["actions"]["keep"])
+        self.assertFalse(self.send("actions keep off")["actions"]["keep"])
+        self.assertFalse(self.send("actions keep maybe")["ok"])
+
+    def test_overlay_controller_end_to_end_in_the_simulator(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        status = self.send("status")["actions"]
+        session, epoch = status["session"], 5000
+        claim = self.send(f"actions overlay on {session} {epoch}")
+        self.assertTrue(claim["ok"] and claim["actions"]["controller"] == "OVERLAY")
+        self.assertEqual(claim["actions"]["epoch"], epoch)
+        # one controller at a time
+        self.assertFalse(self.send("actions enable on")["ok"])
+        self.assertFalse(self.send("actions hover left")["ok"])
+        # the menu state is acknowledged in the reply; selection needs it
+        self.assertFalse(
+            self.send(f"actions select right {epoch}")["ok"], "selected with the menu closed"
+        )
+        opened = self.send(f"actions menu open {epoch}")
+        self.assertTrue(opened["ok"] and opened["actions"]["menu"] and opened["actions"]["ready"])
+        # a stale epoch is refused, whatever it says
+        self.assertFalse(self.send(f"actions select right {epoch - 1}")["ok"])
+        chosen = self.send(f"actions select right {epoch}")
+        self.assertTrue(chosen["ok"] and chosen["actions"]["mode"] == "RIGHT")
+        self.assertTrue(self.send(f"actions keyboard on {epoch}")["actions"]["keyboard"])
+        self.assertFalse(self.send(f"actions keyboard maybe {epoch}")["ok"])
+        chosen = self.send(f"actions select left {epoch}")  # any action returns to ordinary control
+        self.assertTrue(chosen["ok"] and not chosen["actions"]["keyboard"])
+        self.assertTrue(self.send(f"actions menu close {epoch}")["ok"])
+        self.assertTrue(self.send(f"actions menu open {epoch}")["ok"])
+        stopped = self.send(f"actions select stop {epoch}")
+        self.assertTrue(stopped["ok"])
+        self.assertNotEqual(stopped["state"], "ACTIVE")
+        self.assertEqual(stopped["actions"]["controller"], "NONE")
+        # a delayed claim from that old session is refused, even after an explicit new start
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        late = self.send(f"actions overlay on {session} {epoch + 1}")
+        self.assertFalse(late["ok"], "a stale claim reclaimed the controls in a new session")
+        self.assertEqual(late["actions"]["controller"], "NONE")
+
+    def test_without_palette_reports_nothing_clicks(self):
+        self.quiet(50)
+        self.assertTrue(self.send("handsfree uncal start")["ok"])
+        self.quiet(50)
+        self.assertTrue(self.send("actions enable on")["ok"])
+        seen = []
+        for _ in range(16):  # 8 s of stillness and no report from any palette window
+            seen.extend(self.reports(self.send("step 50 0 0 0 0 1 0 0")))
+        self.assertEqual([r for r in seen if r[3] or secondary(r)], [], "a click without a report")
+        status = self.send("status")
+        self.assertFalse(status["actions"]["link"]["reporting"])
+        self.assertGreaterEqual(status["actions"]["link"]["inhibited"], 1)
 
 
 if __name__ == "__main__":

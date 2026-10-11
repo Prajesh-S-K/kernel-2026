@@ -51,6 +51,7 @@ export function createHandsFreeView({ $, action, toast }) {
         ? [chip('Button ', buttonLabel(hf), hf.switch.pressed ? 'warn' : 'good')]
         : []),
       chip('Drag ', hf.drag ? 'ON' : 'off', hf.drag ? 'good' : 'warn'),
+      ...(hf.demoMovementOnly ? [chip('Demo ', 'MOVEMENT ONLY (not saved)', 'warn')] : []),
       chip(
         'Recognition ',
         hf.gesture.suppressing ? 'RECOGNISING' : hf.gesture.state.replaceAll('_', ' '),
@@ -98,7 +99,7 @@ export function createHandsFreeView({ $, action, toast }) {
         ? `${view.accepted} of ${view.required} examples accepted`
         : `${view.required} examples are needed per gesture`;
     const driven = canDrive(device);
-    const setupBlocked = !device.hasProfile || ['CALIBRATING', 'SAFE_STATE'].includes(device.state);
+    const setupBlocked = !device.hasProfile || ['CALIBRATING', 'SAFE_STATE', 'TEACHING'].includes(device.state);
     const busy = device.state === 'TRAINING' && !view.failed;
     $('trainPause').disabled = setupBlocked || busy;
     $('trainDrag').disabled = setupBlocked || busy;
@@ -177,6 +178,7 @@ export function createHandsFreeView({ $, action, toast }) {
         ? 'Press again to confirm legacy mode'
         : 'Return to legacy compatibility mode';
     $('hfSwitchless').checked = hf.switch.switchlessStaged;
+    $('hfDemo').checked = !!hf.demoMovementOnly;
     if (document.activeElement !== $('hfEnableKind'))
       $('hfEnableKind').value = hf.switch.kindStaged === 'MAINTAINED' ? 'maintained' : 'momentary';
     $('hfHelperResume').disabled = device.state === 'ACTIVE';
@@ -212,6 +214,8 @@ export function createHandsFreeView({ $, action, toast }) {
       const result = await run(action('handsfree', { op: 'legacy' }));
       if (result?.ok) toast('Legacy compatibility mode saved.');
     };
+    $('hfDemo').onchange = () =>
+      run(action('handsfree', { op: 'demo', enabled: $('hfDemo').checked }));
     $('hfEnableKind').onchange = () =>
       run(action('handsfree', { op: 'enable', kind: $('hfEnableKind').value }));
     $('enableSwitch').onchange = () =>
