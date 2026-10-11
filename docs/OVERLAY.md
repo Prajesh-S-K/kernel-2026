@@ -38,6 +38,25 @@ scripts/run_overlay.sh              # first run creates ./.venv-overlay
 The tile appears near the right edge: **NodX ▾ · Dwell to start**. Rest on it until its ring fills to open the
 menu. Quit with Ctrl-C; closing the overlay switches its controls off on the device within 5 s.
 
+### Starting again (checklist)
+
+1. Plug the board in with a USB data cable and find its port **fresh each time**: the name can change between
+   sessions and after a replug (`ls /dev/cu.usbmodem*`, or `python3 scripts/bench_port.py`). Never reuse an old name.
+2. Start the companion with that port (`python desktop/server.py --serial <port>`) and open the printed address.
+   Only one program may hold the port: close any serial monitor first.
+3. Check the page shows the board connected, then click **Start without calibration**.
+4. Start the overlay: `scripts/run_overlay.sh`. It stays hidden until a session is active.
+5. After stopping a session the overlay hides itself; start a new session and dwell on the tile again.
+6. Stop in this order: Ctrl-C the overlay, then the companion.
+
+Things that stop a clean restart (and the fix):
+- The overlay quit or is missing after you granted **Python** the Accessibility permission: start it again.
+- `scripts/run_overlay.sh` fails after a Python upgrade (the old environment points at a removed Python): delete
+  the `.venv-overlay` folder; the script recreates it (needs network once).
+- "Address already in use" on the companion: an old companion is still running; stop it, or pass `--port`.
+- No tile: no session is active, or the board is not connected (the companion would show it).
+- Only run one overlay at a time; two would fight for the controls.
+
 Options (all optional):
 
 | Option | Default | Meaning |
